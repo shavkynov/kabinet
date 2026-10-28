@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кабинет</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="drag"></div>
+
+  <!-- Стартовый экран -->
+  <section id="start" class="screen">
+    <div class="start-inner">
+      <h1>Кабинет</h1>
+      <p class="author">Редактор Александра Шавкунова</p>
+      <p class="sub">Начать новый проект</p>
+      <div class="mode-pick">
+        <button id="btnNewNovel" type="button" class="mode-card">
+          <span class="mode-ic" aria-hidden="true">📖</span>
+          <span class="mode-name">Роман</span>
+          <span class="mode-desc">Главы, персонажи и места, длинный текст</span>
+        </button>
+        <button id="btnNewStories" type="button" class="mode-card">
+          <span class="mode-ic" aria-hidden="true">✒️</span>
+          <span class="mode-name">Рассказы</span>
+          <span class="mode-desc">Один рассказ или сборник: знаки, листы, лимит</span>
+        </button>
+      </div>
+      <p class="sub">Недавние проекты</p>
+      <ul id="recentList"></ul>
+      <p id="noRecent" class="muted" hidden>Пока нет проектов. Создайте первый или откройте существующую папку.</p>
+      <div class="start-actions">
+        <button id="btnOpen" type="button" class="secondary">Открыть папку…</button>
+      </div>
+      <p class="start-legal">Некоммерческий проект. Программа распространяется бесплатно и создана без использования чужого исходного кода и чужих материалов; открытые библиотеки (Electron, TipTap, ProseMirror и др.) применяются на условиях их лицензий.</p>
+      <div class="start-lang" role="group" aria-label="Язык интерфейса">
+        <button type="button" data-lang="ru" translate="no">Русский</button>
+        <button type="button" data-lang="en" translate="no">English</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Рабочий экран -->
+  <section id="workspace" class="screen" hidden>
+    <aside id="sidebar">
+      <div class="side-head"><button id="projectName" class="proj-btn" type="button" title="Все главы стикерами"></button></div>
+      <div id="binder">
+        <section class="sec" data-sec="chapter">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">📖</span><span class="sec-name">Рукопись</span>
+            <button id="addChapter" type="button" class="side-plus" title="Новая глава (Enter в списке глав)" aria-label="Новая глава (Enter в списке глав)">+</button>
+          </div>
+          <div class="sec-body">
+            <div id="chapterList" class="list" tabindex="0" aria-label="Список глав"></div>
+          </div>
+        </section>
+        <section class="sec" data-sec="character">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">👤</span><span class="sec-name">Персонажи</span>
+            <button id="addCharacter" type="button" class="side-plus" title="Новый персонаж" aria-label="Новый персонаж">+</button>
+          </div>
+          <div class="sec-body">
+            <div id="characterList" class="list" tabindex="0" aria-label="Список персонажей"></div>
+          </div>
+        </section>
+        <section class="sec" data-sec="place">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">📍</span><span class="sec-name">Места</span>
+            <button id="addPlace" type="button" class="side-plus" title="Новое место" aria-label="Новое место">+</button>
+          </div>
+          <div class="sec-body">
+            <div id="placeList" class="list" tabindex="0" aria-label="Список мест"></div>
+          </div>
+        </section>
+        <section class="sec" data-sec="note">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">📝</span><span class="sec-name">Заметки</span>
+            <button id="addNote" type="button" class="side-plus" title="Новая заметка" aria-label="Новая заметка">+</button>
+          </div>
+          <div class="sec-body">
+            <div id="noteList" class="list" tabindex="0" aria-label="Список заметок"></div>
+          </div>
+        </section>
+        <section class="sec" data-sec="trash">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">🗑</span><span class="sec-name">Корзина</span><span id="trashCount" class="badge" hidden></span>
+            
+          </div>
+          <div class="sec-body">
+            <div id="trashList" class="list" tabindex="0" aria-label="Корзина"></div>
+            <div class="side-foot two">
+              <button id="btnRestore" type="button" class="link">Вернуть</button>
+              <button id="btnEmptyTrash" type="button" class="link">Очистить корзину</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </aside>
+    <div id="resizer" title="Потяните, чтобы изменить ширину. Потяните до края, чтобы скрыть. Двойной клик: скрыть."></div>
+
+    <main id="stage">
+      <div id="canvas">
+        <div id="paper-area">
+          <div id="paper">
+            <div id="storyHead" hidden>
+              <input id="storyTitle" type="text" maxlength="120" autocomplete="off" spellcheck="false" aria-label="Название рассказа" placeholder="Название рассказа">
+            </div>
+            <div id="editor"></div>
+          </div>
+          <div id="cardView" hidden>
+            <div id="cardPhoto">
+              <img id="cardImg" alt="" hidden>
+              <div class="photo-actions">
+                <button id="cardPhotoPick" type="button" class="secondary small">Добавить фото</button>
+                <button id="cardPhotoClear" type="button" class="secondary small" hidden>Убрать</button>
+              </div>
+            </div>
+            <input id="cardTitle" type="text" maxlength="200" autocomplete="off" spellcheck="false" aria-label="Название">
+            <label id="cardProtagRow" class="cf-check" hidden>
+              <input id="cardProtag" type="checkbox">
+              <span>Протагонист (главный герой)</span>
+            </label>
+            <label id="cardInflectRow" class="cf-check" title="Подсвечивать в главах и падежные формы: Анны, Анне, Анну, Анной. Выключите для неизменяемых имён (Ли, Мэри).">
+              <input id="cardInflect" type="checkbox" checked>
+              <span>Склонять имя автоматически</span>
+            </label>
+            <div id="cardFields"></div>
+            <button id="cardAddField" type="button" class="secondary small">+ Поле</button>
+            <div id="cardMentions" class="cf" hidden></div>
+          </div>
+          <div id="empty" class="muted" hidden>
+            Здесь пока пусто.<br>Создайте главу («+ Глава» или Enter в списке глав) или откройте карточку слева.
+          </div>
+        </div>
+        <div id="pane2" hidden>
+          <div class="p2-head">
+            <select id="p2Select" aria-label="Глава во второй панели"></select>
+            <button id="p2Close" type="button" class="link" title="Закрыть вторую панель">×</button>
+          </div>
+          <div id="p2Scroll"><div id="p2Paper"><div id="editor2"></div></div></div>
+        </div>
+        <div id="grain"></div>
+      </div>
+
+      <div id="toolbar" role="toolbar" aria-label="Информация и быстрые переключатели">
+        <div class="bar-info">
+          <span id="barStats" role="button" tabindex="0" title="Показать / скрыть трекер слов главы"></span>
+          <span id="barRead"></span>
+          <span id="barSel"></span>
+          <span id="barToday"></span>
+          <span id="barTotal"></span>
+        </div>
+        <div class="bar-btns">
+          <button type="button" data-act="typewriter" title="Печатная машинка (⌘⇧T)">Машинка</button>
+          <button type="button" data-act="sound" title="Звуки клавиш (⌘⇧M)">Звук</button>
+          <button type="button" data-act="ambient" title="Фоновый эмбиент (⌘⇧A)">Эмбиент</button>
+          <button type="button" data-act="split" title="Вторая глава рядом, например для переписывания">Рядом</button>
+          <button type="button" data-act="notes" title="Панель справа: синопсис и заметки">Справа</button>
+          <button type="button" data-act="focus" title="Только лист (⌘⇧F, выход Esc)">Только лист</button>
+        </div>
+      </div>
+      <div id="status" aria-live="polite"></div>
+
+      <!-- индикатор цели по словам -->
+      <div id="goal" hidden>
+        <button id="goalBtn" type="button" title="Нажмите, чтобы задать цель">
+          <span id="goalText"></span>
+          <span id="goalBar"><i id="goalFill"></i></span>
+        </button>
+      </div>
+      <div id="goalPop" hidden>
+        <h4 id="goalPopTitle">Цель по словам</h4>
+        <div class="row">
+          <label for="goalInput">Для этой главы</label>
+          <input id="goalInput" type="text" inputmode="numeric" autocomplete="off" placeholder="нет">
+        </div>
+        <div class="row">
+          <label for="goalDefaultInput">Для глав без своей цели</label>
+          <input id="goalDefaultInput" type="text" inputmode="numeric" autocomplete="off" placeholder="нет">
+        </div>
+        <div class="row stories-only">
+          <label for="goalUnitSelect">Цель считать в</label>
+          <select id="goalUnitSelect">
+            <option value="chars">знаках</option>
+            <option value="words">словах</option>
+          </select>
+        </div>
+        <div class="row stories-only">
+          <label for="limitInput">Лимит знаков на рассказ</label>
+          <input id="limitInput" type="text" inputmode="numeric" autocomplete="off" placeholder="нет">
+        </div>
+        <div class="stats">
+          <span>Слов <b id="stWords">0</b></span>
+          <span>Знаков с пробелами <b id="stChars">0</b></span>
+          <span>Без пробелов <b id="stCharsNo">0</b></span>
+        </div>
+        <div class="row actions">
+          <button id="goalClear" type="button" class="secondary small">Убрать цель главы</button>
+        </div>
+      </div>
+    </main>
+
+    <div id="notesResizer" title="Потяните, чтобы изменить ширину"></div>
+    <aside id="notesbar">
+      <div id="paneChapter">
+        <p id="chapHint" class="muted">Откройте главу, чтобы записать синопсис и заметки к ней.</p>
+        <section class="sec rsec" data-sec="synopsis">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-name">Синопсис</span>
+          </div>
+          <div class="sec-body"><textarea id="synopsisText" class="rtext fixed" disabled placeholder="О чём глава в двух-трёх предложениях"></textarea></div>
+        </section>
+        <section class="sec rsec grow" data-sec="chapnotes">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-name">Заметки к главе</span>
+          </div>
+          <div class="sec-body"><textarea id="chapNotesText" class="rtext" disabled placeholder="Что проверить, что переписать, идеи"></textarea></div>
+        </section>
+        <section class="sec rsec grow" data-sec="comments">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-name">Комментарии</span><span id="cmtCount" class="sec-sub" translate="no"></span>
+          </div>
+          <div class="sec-body"><div id="cmtList" class="cmt-list"></div></div>
+        </section>
+      </div>
+      <section class="sec rsec grow" data-sec="notetext">
+        <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+          <span class="chev" aria-hidden="true"></span><span class="sec-name">Заметка</span><span id="noteTitle" class="sec-sub" translate="no"></span>
+        </div>
+        <div class="sec-body"><textarea id="noteText" class="rtext" disabled placeholder="Выберите заметку слева или создайте новую"></textarea></div>
+      </section>
+    </aside>
+
+    <!-- комментарии: кнопка у выделения и маленькое поле ввода -->
+    <button id="cmtBtn" type="button" title="Комментарий к выделенному" aria-label="Комментарий к выделенному" hidden>
+      <svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M2 1.5h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 3v-3H2a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z"/></svg>
+    </button>
+    <div id="cmtPop" role="dialog" aria-label="Комментарий" hidden>
+      <div id="cmtPopQuote" class="cmt-quote" translate="no"></div>
+      <textarea id="cmtPopText" rows="3" maxlength="5000" placeholder="Комментарий"></textarea>
+      <div class="cmt-pop-acts">
+        <button id="cmtPopSave" type="button" class="small">Сохранить</button>
+        <button id="cmtPopCancel" type="button" class="secondary small">Отмена</button>
+      </div>
+    </div>
+
+    <!-- кнопки поверх окна -->
+    <button id="btnSidebar" class="chrome-btn" type="button" title="Показать / скрыть панель глав (⌘\)" aria-label="Панель глав">
+      <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <rect x="1" y="1" width="16" height="12" rx="2.5"/><line x1="6.5" y1="1" x2="6.5" y2="13"/>
+      </svg>
+    </button>
+    <div id="chromeRight">
+      <button id="btnMenu" class="chrome-btn" type="button" title="Меню программы" aria-label="Меню программы" hidden>
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+          <path d="M2 3h14M2 7h14M2 11h14"/>
+        </svg>
+      </button>
+      <button id="btnNotes" class="chrome-btn" type="button" title="Показать / скрыть панель справа" aria-label="Панель справа">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <rect x="1" y="1" width="16" height="12" rx="2.5"/><line x1="11.5" y1="1" x2="11.5" y2="13"/>
+        </svg>
+      </button>
+      <button id="btnCheck" class="chrome-btn" type="button" title="Проверка орфографии, пунктуации и грамматики (⌘⇧L)" aria-label="Проверка текста">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 7.5l3.2 3.2L11 3.5"/><path d="M12.5 11.5h4"/>
+        </svg>
+      </button>
+      <button id="btnSound" class="chrome-btn" type="button" title="Звук клавиш и фоновый эмбиент" aria-label="Звук">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 5h2.5L8 2v10L4.5 9H2z"/><path d="M11 4.6c1 .8 1 3.8 0 4.8M13.4 2.8c2 1.9 2 6.5 0 8.4"/>
+        </svg>
+      </button>
+      <button id="btnSettings" class="chrome-btn" type="button" title="Текст и оформление (⌘,)" aria-label="Текст и оформление">Aa</button>
+      <button id="btnTyping" class="chrome-btn" type="button" title="При наборе: подчёркивание ошибок, типографика, анимация букв" aria-label="При наборе">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="1" y="2.5" width="16" height="9" rx="2.2"/><path d="M4.5 5.6h.01M7.5 5.6h.01M10.5 5.6h.01M13.5 5.6h.01M5.5 8.6h7"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Aa: текст и оформление -->
+    <div id="settings" class="panel" hidden>
+      <h3>Форматирование</h3>
+      <div id="fmtGroup">
+        <button type="button" data-cmd="bold" title="Жирный (⌘B)"><b>Ж</b></button>
+        <button type="button" data-cmd="italic" title="Курсив (⌘I)"><i>К</i></button>
+        <button type="button" data-cmd="h1" title="Заголовок 1">H1</button>
+        <button type="button" data-cmd="h2" title="Заголовок 2">H2</button>
+        <button type="button" data-cmd="quote" title="Цитата">«»</button>
+        <button type="button" data-cmd="bullet" title="Маркированный список">•</button>
+        <button type="button" data-cmd="ordered" title="Нумерованный список">1.</button>
+        <button type="button" data-cmd="rule" title="Разделитель">—</button>
+      </div>
+
+      <h3>Шрифт</h3>
+      <div class="row">
+        <label for="setFont">Гарнитура</label>
+        <select id="setFont"></select>
+      </div>
+      <div class="row">
+        <button id="btnAddFont" type="button" class="secondary small">Добавить шрифт из файла…</button>
+        <button id="btnRemoveFont" type="button" class="secondary small" hidden>Убрать этот</button>
+      </div>
+      <div class="row">
+        <label for="setFontName">Имя шрифта из системы</label>
+        <input id="setFontName" class="text" type="text" placeholder="например, Baskerville" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="row">
+        <label for="setSize">Размер</label>
+        <div class="ctl">
+          <input id="setSize" type="range" min="14" max="32" step="1">
+          <input id="numSize" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Размер, число">
+        </div>
+      </div>
+      <div class="row">
+        <label for="setLine">Межстрочный</label>
+        <div class="ctl">
+          <input id="setLine" type="range" min="1.3" max="2.2" step="0.05">
+          <input id="numLine" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Межстрочный интервал, число">
+        </div>
+      </div>
+      <div class="row">
+        <label for="setWidth">Ширина листа</label>
+        <div class="ctl">
+          <input id="setWidth" type="range" min="480" max="1000" step="20">
+          <input id="numWidth" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Ширина листа, число">
+        </div>
+      </div>
+      <div class="row">
+        <label for="setPara">Абзацы</label>
+        <select id="setPara">
+          <option value="space">Отступ между абзацами</option>
+          <option value="indent">Красная строка</option>
+        </select>
+      </div>
+      <p class="hint">В режиме «Красная строка» отступ попадает и в скопированный текст, и в экспорт (текст, HTML, PDF). В самой главе знаков отступа нет.</p>
+
+      <h3>Оформление</h3>
+      <div class="row">
+        <label for="setTheme">Тема</label>
+        <select id="setTheme">
+          <option value="system">Как в системе</option>
+          <option value="light">Светлая</option>
+          <option value="dark">Тёмная</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="setPaper">Бумага</label>
+        <select id="setPaper">
+          <option value="none">Гладкая</option>
+          <option value="grain">Зернистая</option>
+          <option value="warm">Тёплая, зернистая</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="setGrain">Зернистость</label>
+        <div class="ctl">
+          <input id="setGrain" type="range" min="0" max="100" step="1">
+          <input id="numGrain" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Зернистость, число">
+        </div>
+      </div>
+      <h3>Дополнительно</h3>
+      <div class="row">
+        <label for="setLinks">Подсвечивать имена из карточек</label>
+        <input id="setLinks" type="checkbox">
+      </div>
+      <div class="row">
+        <label for="setProjectGoalOn">Счётчик цели проекта внизу</label>
+        <input id="setProjectGoalOn" type="checkbox">
+      </div>
+      <div class="row stories-only">
+        <label for="setStoryCharacters">Показывать персонажей</label>
+        <input id="setStoryCharacters" type="checkbox">
+      </div>
+      <div class="row stories-only">
+        <label for="setStoryPlaces">Показывать места</label>
+        <input id="setStoryPlaces" type="checkbox">
+      </div>
+      <p class="hint">Числа можно вписать вручную, стрелки вверх и вниз меняют их на шаг. Горячие клавиши: ⌘B, ⌘I, заголовки ⌘⌥1 и ⌘⌥2.</p>
+    </div>
+
+    <!-- звук клавиш и эмбиент -->
+    <div id="soundPanel" class="panel" hidden>
+      <h3>Звук клавиш</h3>
+      <div class="row">
+        <label for="setSoundOn">Включён</label>
+        <input id="setSoundOn" type="checkbox">
+      </div>
+      <div id="chipProfile" class="chips" role="radiogroup" aria-label="Вариант звука клавиш">
+        <button type="button" data-value="typewriter"><span>⌨️</span>Машинка</button>
+        <button type="button" data-value="soft"><span>☁️</span>Мягкие</button>
+        <button type="button" data-value="mech"><span>🔘</span>Механика</button>
+        <button type="button" data-value="pen"><span>🖋️</span>Перо</button>
+      </div>
+      <p class="subhead">Свои звуки клавиш</p>
+      <div id="chipKeySlots" class="chips" role="group" aria-label="Клавиша">
+        <button type="button" data-value="key"><span>⌨️</span>Буквы</button>
+        <button type="button" data-value="space"><span>␣</span>Пробел</button>
+        <button type="button" data-value="backspace"><span>⌫</span>Delete</button>
+        <button type="button" data-value="enter"><span>↵</span>Enter</button>
+      </div>
+      <div id="keySrc" class="srclist" hidden></div>
+      <div class="row">
+        <label for="setVolume">Громкость</label>
+        <div class="ctl">
+          <input id="setVolume" type="range" min="0" max="100" step="1">
+          <input id="numVolume" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Громкость, число">
+        </div>
+      </div>
+
+      <h3>Фоновый эмбиент</h3>
+      <div class="row">
+        <label for="setAmbientOn">Включён</label>
+        <input id="setAmbientOn" type="checkbox">
+      </div>
+      <div id="chipAmbient" class="chips" role="radiogroup" aria-label="Вариант эмбиента">
+        <button type="button" data-value="rain"><span>🌧️</span>Дождь</button>
+        <button type="button" data-value="fire"><span>🔥</span>Камин</button>
+        <button type="button" data-value="wind"><span>🍃</span>Ветер</button>
+        <button type="button" data-value="sea"><span>🌊</span>Море</button>
+        <button type="button" data-value="hum"><span>🌙</span>Тишина</button>
+      </div>
+      <div id="ambientSrc" class="srclist" hidden></div>
+      <div class="row">
+        <label for="setAmbientVol">Громкость</label>
+        <div class="ctl">
+          <input id="setAmbientVol" type="range" min="0" max="100" step="1">
+          <input id="numAmbientVol" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Громкость эмбиента, число">
+        </div>
+      </div>
+
+      <h3>Сигналы</h3>
+      <div class="row">
+        <label for="setGoalChime">Звонок при достижении цели</label>
+        <input id="setGoalChime" type="checkbox">
+      </div>
+      <div class="row">
+        <button id="btnTestSound" type="button" class="secondary small">Проверить клавиши</button>
+        <button id="btnSoundsFolder" type="button" class="secondary small">Папка со своими звуками</button>
+      </div>
+      <p class="hint">Нажмите на вариант (например, «Дождь» или «Пробел»): появится список загруженных звуков и кнопка «Загрузить…». Эмбиент играет по кругу. Файлы копируются в папку программы по подпапкам (ambient, keys).</p>
+    </div>
+
+    <!-- проверки при наборе: своё окно у кнопки на верхней панели -->
+    <div id="typingPanel" class="panel" hidden>
+      <h3>При наборе</h3>
+      <div class="row">
+        <label class="wrap" for="setSpell">Подчёркивать ошибки при наборе</label>
+        <input id="setSpell" type="checkbox">
+      </div>
+      <p class="hint">Орфографию подчёркивает сама система, без интернета.</p>
+      <div class="row">
+        <label class="wrap" for="setTypeAnim">Плавное появление набираемых букв</label>
+        <input id="setTypeAnim" type="checkbox">
+      </div>
+      <div class="row">
+        <label class="wrap" for="setTypo">Типографика: «ёлочки», тире, многоточие</label>
+        <input id="setTypo" type="checkbox">
+      </div>
+      <div class="row">
+        <label class="wrap" for="setTypoNbsp">Неразрывные пробелы после коротких слов</label>
+        <input id="setTypoNbsp" type="checkbox">
+      </div>
+      <div class="row">
+        <button id="btnFixTypo" type="button" class="secondary wide-btn">Привести типографику главы в порядок</button>
+      </div>
+      <p class="hint">Исправит кавычки, тире и многоточие во всей главе. Если неразрывные пробелы выключены, заменит обычными и те, что уже есть в тексте.</p>
+    </div>
+
+    <!-- анализ и проверка текста -->
+    <div id="checkPanel" class="panel wide" hidden>
+      <div class="seg" role="tablist">
+        <button type="button" role="tab" data-view="analysis" title="Подсветка">Подсветка</button>
+        <button type="button" role="tab" data-view="tense" title="Несогласованность времён">Времена</button>
+        <button type="button" role="tab" data-view="rhythm" title="Монотонность: ритм и одинаковые начала">Ритм</button>
+        <button type="button" role="tab" data-view="check" title="Проверка ошибок">Ошибки</button>
+      </div>
+
+      <div id="viewAnalysis">
+        <p class="hint">Выбранные виды слов выделяются цветом, текст не меняется. Разбор приблизительный: по окончаниям, без словаря.</p>
+        <div id="anRows">
+        <label class="an-row an-extra" data-extra="verb" hidden>
+          <input id="an_verb" type="checkbox" data-an="verb">
+          <span class="an-sw an-sw-verb"></span>
+          <span class="an-name">Глаголы</span>
+          <span id="anCount_verb" class="an-count"></span>
+        </label>
+        <label class="an-row an-extra" data-extra="noun" hidden>
+          <input id="an_noun" type="checkbox" data-an="noun">
+          <span class="an-sw an-sw-noun"></span>
+          <span class="an-name">Существительные</span>
+          <span id="anCount_noun" class="an-count"></span>
+        </label>
+        <label class="an-row an-extra" data-extra="adj" hidden>
+          <input id="an_adj" type="checkbox" data-an="adj">
+          <span class="an-sw an-sw-adj"></span>
+          <span class="an-name">Прилагательные</span>
+          <span id="anCount_adj" class="an-count"></span>
+        </label>
+        <label class="an-row">
+          <input id="an_adv" type="checkbox" data-an="adv">
+          <span class="an-sw an-sw-adv"></span>
+          <span class="an-name">Наречия</span>
+          <span class="an-nav"><button type="button" data-an-nav="adv" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="adv" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_adv" class="an-count"></span>
+        </label>
+        <label class="an-row an-extra" data-extra="part" hidden>
+          <input id="an_part" type="checkbox" data-an="part">
+          <span class="an-sw an-sw-part"></span>
+          <span class="an-name">Причастия и деепричастия</span>
+          <span id="anCount_part" class="an-count"></span>
+        </label>
+        <label class="an-row an-extra" data-extra="pron" hidden>
+          <input id="an_pron" type="checkbox" data-an="pron">
+          <span class="an-sw an-sw-pron"></span>
+          <span class="an-name">Местоимения</span>
+          <span id="anCount_pron" class="an-count"></span>
+        </label>
+        <label class="an-row">
+          <input id="an_passive" type="checkbox" data-an="passive">
+          <span class="an-sw an-sw-passive"></span>
+          <span class="an-name">Страдательный залог</span>
+          <span class="an-nav"><button type="button" data-an-nav="passive" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="passive" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_passive" class="an-count"></span>
+        </label>
+        <label class="an-row">
+          <input id="an_long" type="checkbox" data-an="long">
+          <span class="an-sw an-sw-long"></span>
+          <span class="an-name">Длинные предложения</span>
+          <span class="an-min">от <input id="anLongMin" class="num" type="text" inputmode="numeric" autocomplete="off" aria-label="Слов в предложении" translate="no"> слов</span>
+          <span class="an-nav"><button type="button" data-an-nav="long" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="long" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_long" class="an-count"></span>
+        </label>
+        <label class="an-row">
+          <input id="an_repeat" type="checkbox" data-an="repeat">
+          <span class="an-sw an-sw-repeat"></span>
+          <span class="an-name">Повторы слов</span>
+          <span class="an-min">ближе <input id="anRepeatWin" class="num" type="text" inputmode="numeric" autocomplete="off" aria-label="Слов между повторами" translate="no"> слов</span>
+          <span class="an-nav"><button type="button" data-an-nav="repeat" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="repeat" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_repeat" class="an-count"></span>
+        </label>
+        <label class="an-row">
+          <input id="an_filler" type="checkbox" data-an="filler">
+          <span class="an-sw an-sw-filler"></span>
+          <span class="an-name">Слова-паразиты</span>
+          <span class="an-nav"><button type="button" data-an-nav="filler" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="filler" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_filler" class="an-count"></span>
+        </label>
+        </div>
+        <p id="anTotal" class="an-total"></p>
+        <details class="more">
+          <summary><span>Список слов-паразитов</span> <span id="fillerCount" translate="no"></span></summary>
+          <p class="hint">Слова и фразы, которые подсвечиваются. Уберите лишнее крестиком, добавьте свои. Слово можно добавить и из текста: выделите, правый клик.</p>
+          <label class="row-check"><input id="anFillerSpeech" type="checkbox"> <span>Не отмечать в репликах героев</span></label>
+          <div id="fillerList" class="chip-list"></div>
+          <div class="row">
+            <input id="fillerInput" class="text" type="text" maxlength="40" placeholder="слово или фраза" autocomplete="off" translate="no">
+            <button id="btnFillerAdd" type="button" class="secondary small">Добавить</button>
+          </div>
+          <label class="row-check"><input id="fillerForms" type="checkbox"> <span>Все формы слова</span></label>
+          <p class="hint">«Все формы слова» отмечает и «почувствовала», и «почувствовать». Звёздочка в конце слова (почувств*) отмечает любое продолжение. Фразы ищутся как написаны.</p>
+          <div class="row"><button id="btnFillerReset" type="button" class="secondary small">Вернуть стандартный список</button></div>
+        </details>
+        <details id="skipBox" class="more" hidden>
+          <summary><span>Исключения подсветки</span> <span id="skipCount" translate="no"></span></summary>
+          <p class="hint">Места, которые вы убрали из подсветки пунктом «Не отмечать здесь» в меню правого клика. Крестиком исключение снимается.</p>
+          <div id="skipList" class="chip-list"></div>
+        </details>
+        <details class="more">
+          <summary><span>Другие виды подсветки</span></summary>
+          <p class="hint">Отметьте виды, которые должны появиться в списке выше. Остальные скрыты, чтобы не мешали.</p>
+          <label class="row-check"><input type="checkbox" data-anshow="verb"> <span>Глаголы</span></label>
+          <label class="row-check"><input type="checkbox" data-anshow="noun"> <span>Существительные</span></label>
+          <label class="row-check"><input type="checkbox" data-anshow="adj"> <span>Прилагательные</span></label>
+          <label class="row-check"><input type="checkbox" data-anshow="part"> <span>Причастия и деепричастия</span></label>
+          <label class="row-check"><input type="checkbox" data-anshow="pron"> <span>Местоимения</span></label>
+        </details>
+      </div>
+
+      <div id="viewRhythm" hidden>
+        <p class="hint">Ищет монотонность в повествовании: цепочки коротких предложений, ровный ритм (предложения почти одной длины подряд) и одинаковые начала. Реплики диалогов не считаются. Это подсказка: иногда ровный ритм задуман (скороговорка действия, повтор для эффекта).</p>
+        <label class="an-row">
+          <input id="an_rhythm" type="checkbox" data-an="rhythm">
+          <span class="an-sw an-sw-rhythm"></span>
+          <span class="an-name">Подсвечивать в тексте</span>
+          <span id="anCount_rhythm" class="an-count"></span>
+        </label>
+        <div id="rhythmSummary" class="tense-base"></div>
+        <div id="rhythmBar" aria-label="Ритм главы"></div>
+        <p id="rhythmLegend" class="hint"></p>
+        <div id="rhythmList"></div>
+        <p class="hint">Как ослабить монотонность: объедините две-три короткие фразы в одну, разрежьте слишком ровную длинную, начните предложение с обстоятельства, детали или ощущения вместо подлежащего, вставьте одну короткую фразу после длинных или одну длинную после коротких.</p>
+      </div>
+
+      <div id="viewTense" hidden>
+        <p class="hint">Находит глаголы не того времени, в котором идёт повествование: прошедшее среди настоящего и настоящее среди прошедшего. Прямая речь, кавычки и воспоминания (вчера, вспомнил, тогда…) не считаются. Замен не предлагается, правьте сами. Разбор приблизительный.</p>
+        <label class="an-row">
+          <input id="an_tense" type="checkbox" data-an="tense">
+          <span class="an-sw an-sw-tense"></span>
+          <span class="an-name">Подсвечивать в тексте</span>
+          <span id="anCount_tense" class="an-count"></span>
+        </label>
+        <div class="row">
+          <label class="wrap" for="tenseMode">Основное время</label>
+          <select id="tenseMode">
+            <option value="auto">Определять по тексту</option>
+            <option value="present">Всегда настоящее</option>
+            <option value="past">Всегда прошедшее</option>
+          </select>
+        </div>
+        <p id="tenseBase" class="hint tense-base"></p>
+        <div id="tenseList"></div>
+      </div>
+
+      <div id="viewCheck" hidden>
+        <div class="row">
+          <label for="setCheckLang">Язык текста</label>
+          <select id="setCheckLang">
+            <option value="ru">Русский</option>
+            <option value="en">Английский</option>
+            <option value="auto">Определять сам</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="btnRunCheck" type="button" class="secondary small">Проверить текст</button>
+          <button id="btnCancelCheck" type="button" class="secondary small" hidden>Остановить</button>
+          <button id="btnCheckClear" type="button" class="secondary small" hidden>Убрать подчёркивания</button>
+        </div>
+        <p id="checkState" class="hint"></p>
+        <div id="checkList" hidden></div>
+        <details class="chk-more">
+          <summary>Настройки проверки</summary>
+          <p class="hint">Показывать замечания:</p>
+          <div id="chkKinds" class="chk-kinds">
+            <label class="row-check"><input type="checkbox" data-chk-kind="spelling"> <span>Орфография</span></label>
+            <label class="row-check"><input type="checkbox" data-chk-kind="punctuation"> <span>Пунктуация</span></label>
+            <label class="row-check"><input type="checkbox" data-chk-kind="grammar"> <span>Грамматика</span></label>
+            <label class="row-check"><input type="checkbox" data-chk-kind="style"> <span>Стиль</span></label>
+            <label class="row-check"><input type="checkbox" data-chk-kind="typography"> <span>Типографика</span></label>
+            <label class="row-check"><input type="checkbox" data-chk-kind="other"> <span>Другое</span></label>
+          </div>
+          <p class="hint">Скрытый вид пропадает из списка сразу и при следующих проверках не появляется. Включить его обратно можно здесь, замечания вернутся при следующей проверке.</p>
+          <div class="row">
+            <label for="setCheckServer">Свой сервер</label>
+            <input id="setCheckServer" class="text" type="text" placeholder="по умолчанию languagetool.org" autocomplete="off" spellcheck="false" translate="no">
+          </div>
+          <div class="row">
+            <button id="btnCheckReset" type="button" class="secondary small">Сбросить исключения и согласие</button>
+          </div>
+          <p class="hint">Правок сама программа не вносит: каждое замечание вы принимаете или пропускаете. Пунктуацию в русском проверяют правила LanguageTool, они находят не всё и иногда ошибаются, поэтому решение всегда за вами.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="nameDialog">
+    <form method="dialog">
+      <h2>Новый проект</h2>
+      <label>Название
+        <input id="projectNameInput" autocomplete="off" required maxlength="80">
+      </label>
+      <label>Что будете писать
+        <select id="projectModeInput">
+          <option value="novel">Роман (главы)</option>
+          <option value="stories">Рассказы</option>
+        </select>
+      </label>
+      <p class="hint">Дальше нужно выбрать папку, внутри которой появится папка проекта.</p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Отмена</button>
+        <button value="ok">Продолжить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="consentDialog">
+    <form method="dialog">
+      <h2>Отправить текст на проверку?</h2>
+      <p class="hint">Для проверки пунктуации и грамматики текст главы отправляется на сервер LanguageTool (languagetool.org), это сторонняя служба. Нужен интернет. Отправляется только текст открытой главы и только по вашей кнопке.</p>
+      <p class="hint">Если рукопись не должна покидать компьютер, не разрешайте отправку: орфографию при наборе подчёркивает сама система без интернета. Можно также запустить свой сервер LanguageTool и указать его в настройках проверки.</p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Не отправлять</button>
+        <button value="ok">Разрешить и проверить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="textDialog">
+    <form method="dialog">
+      <h2 id="textDialogTitle">Название</h2>
+      <input id="textDialogInput" autocomplete="off" required maxlength="100">
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Отмена</button>
+        <button value="ok">Готово</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="tplDialog">
+    <form method="dialog" id="tplForm">
+      <h2>Шаблоны карточек</h2>
+      <div class="tpl-kind">
+        <label class="radio"><input type="radio" name="tplKind" value="character" checked> Персонаж</label>
+        <label class="radio"><input type="radio" name="tplKind" value="place"> Место</label>
+      </div>
+      <p class="hint">Эти поля появляются в каждой новой карточке. В уже созданных карточках ничего не меняется. «Краткая справка» есть всегда.</p>
+      <div id="tplList"></div>
+      <button id="tplAdd" type="button" class="secondary small">+ Поле</button>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Отмена</button>
+        <button id="tplSave" value="ok">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="board" hidden>
+    <div class="board-inner">
+      <div class="board-head">
+        <h2 id="boardTitle"></h2>
+        <span id="boardInfo" class="muted"></span>
+        <button id="boardClose" type="button" class="link">Закрыть (Esc)</button>
+      </div>
+      <div id="boardGrid"></div>
+    </div>
+  </div>
+
+  <div id="projPop" hidden>
+    <h4>Цель для всего проекта</h4>
+    <div class="row">
+      <label id="projGoalLabel" for="projGoalInput">Слов в главах</label>
+      <input id="projGoalInput" type="text" inputmode="numeric" autocomplete="off" placeholder="нет">
+    </div>
+    <div class="stats stories-only block">
+      <span>Рассказов <b id="pjStoryCount">0</b></span>
+      <span>Знаков с пробелами <b id="pjStoryChars">0</b></span>
+      <span>Авторских листов <b id="pjStorySheets">0</b></span>
+    </div>
+    <div class="row">
+      <label for="projDeadlineInput">Срок</label>
+      <input id="projDeadlineInput" type="date">
+    </div>
+    <div class="stats">
+      <span>Сейчас <b id="pjWords">0</b></span>
+      <span>Осталось <b id="pjLeft">0</b></span>
+      <span id="pjPlanRow" hidden><span id="pjPlanLabel">В день нужно</span> <b id="pjPlan">0</b></span>
+    </div>
+    <p class="hint">Считаются только главы: заметки, карточки и синопсисы не входят.</p>
+    <div class="stats" id="pjDaysBox">
+      <span>Последние 14 дней</span>
+      <div id="pjDays" class="days-chart"></div>
+      <span>Серия дней подряд <b id="pjStreak">0</b></span>
+      <span>В среднем за 7 дней <b id="pjAvg">0</b></span>
+    </div>
+    <div class="row actions">
+      <button id="projGoalClear" type="button" class="secondary small">Убрать цель</button>
+    </div>
+  </div>
+
+  <div id="search" hidden>
+    <input id="searchInput" type="text" placeholder="Поиск по главам, карточкам и заметкам" autocomplete="off" spellcheck="false">
+    <div id="replaceRow">
+      <input id="replaceInput" type="text" placeholder="Заменить на…" autocomplete="off" spellcheck="false">
+      <button id="btnReplaceAll" type="button" class="secondary small">Заменить всё…</button>
+    </div>
+    <div id="searchResults"></div>
+  </div>
+
+  <div id="linkPop" hidden>
+    <img id="linkPopImg" alt="" hidden>
+    <div class="lp-body">
+      <div id="linkPopTitle"></div>
+      <div id="linkPopText"></div>
+      <div class="lp-hint">⌘-клик: открыть карточку</div>
+    </div>
+  </div>
+
+  <script src="dist/app.js"></script>
+</body>
+</html>

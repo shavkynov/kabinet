@@ -1,0 +1,26 @@
+node_modules/
+renderer/dist/
+dist/
+.DS_Store
+*.tmp
+renderer/app.gen.js
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Local databases and backups
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+
+# macOS
+.DS_Store
+
+CLAUDE.md
