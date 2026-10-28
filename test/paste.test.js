@@ -22,3 +22,10 @@ test('вставка из Word: мягкие переносы, маркеры с
   assert.deepEqual(p(''), []);
   assert.deepEqual(p('Слово - дефис, а не реплика'), ['Слово - дефис, а не реплика']);
 });
+
+test('вставка из Word: знак из личной области вместо маркера и мягкий дефис', () => {
+  const pua = String.fromCharCode(0xf02d);
+  const shy = String.fromCharCode(0xad);
+  const text = `${pua}\tПривет!\r\n${pua} Ка${shy}к дела?\r\n`;
+  assert.deepStrictEqual(p(text), ['— Привет!', '— Как дела?']);
+});

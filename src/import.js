@@ -267,6 +267,32 @@ function renderRuns(segs) {
   return out;
 }
 
+/**
+ * Абзацы документа → Markdown (общая часть для Word и RTF).
+ * para: { segs: [{ text, b, i }], kind: { level, title, toc, quote }, outline: число или null, list: true для пункта списка }.
+ */
+function parasToMarkdown(paras) {
+  const blocks = [];
+  for (const pa of paras) {
+    if (pa.kind.toc) continue;
+    const raw = pa.segs.map((s) => s.text).join('').replace(/\t/g, ' ').replace(/\n/g, ' ').trim();
+    if (!raw) continue;
+    const level = pa.kind.level || (pa.outline !== null && pa.outline <= 5 ? pa.outline + 1 : 0);
+    if (isSeparatorText(raw)) { blocks.push({ md: '---' }); continue; }
+    if (level) { blocks.push({ level, md: `${'#'.repeat(level)} ${raw}` }); continue; }
+    if (pa.kind.title) { blocks.push({ title: raw, md: `# ${raw}` }); continue; }
+    // цитата в Word и RTF и так курсивная по стилю: курсив внутри неё отдельной разметкой не нужен
+    const text = renderRuns(pa.segs.map((x) => ({ ...x, i: pa.kind.quote ? false : x.i, text: x.text.replace(/\t/g, ' ') }))).replace(/^\s+/, '').replace(/\s+$/, '');
+    if (pa.kind.quote) { blocks.push({ md: `> ${text.replace(/\n/g, '\n> ')}` }); continue; }
+    if (pa.list) { blocks.push({ md: `- ${text}` }); continue; }
+    if (/^[•·▪●◦■]\s/.test(raw)) { blocks.push({ md: `- ${text.replace(/^[•·▪●◦■]\s*/, '')}` }); continue; } // маркер списка, записанный обычным текстом (pandoc, Блокнот)
+    blocks.push({ md: finishPara(text, raw) });
+  }
+  // название документа (стиль Title) — не глава: есть заголовки, значит, оно лишнее
+  const hasHeads = blocks.some((b) => b.level);
+  return blocks.filter((b) => !(b.title && hasHeads)).map((b) => b.md).join('\n\n');
+}
+
 /** word/document.xml (+ стили) → Markdown. */
 function docxToMarkdown(buf) {
   const files = readZip(buf);
@@ -276,31 +302,172 @@ function docxToMarkdown(buf) {
   const xml = docBuf.toString('utf8')
     .replace(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/g, '')
     .replace(/<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g, '');
-  const blocks = [];
+  const paras = [];
   for (const pm of xml.matchAll(/<w:p\b[^>]*?(?:\/>|>([\s\S]*?)<\/w:p>)/g)) {
     if (pm[1] === undefined) continue;
     const pp = /<w:pPr>([\s\S]*?)<\/w:pPr>/.exec(pm[1]);
     const ppr = pp ? pp[1] : '';
-    const inner = pm[1].replace(/<w:pPr>[\s\S]*?<\/w:pPr>/, '');
-    const kind = styleKind(styles, attr(ppr, 'w:pStyle'));
-    if (kind.toc) continue;
-    const segs = paragraphRuns(inner);
-    const raw = segs.map((s) => s.text).join('').replace(/\t/g, ' ').replace(/\n/g, ' ').trim();
-    if (!raw) continue;
     const ol = attr(ppr, 'w:outlineLvl');
-    const level = kind.level || (ol !== null && Number(ol) <= 5 ? Number(ol) + 1 : 0);
-    if (isSeparatorText(raw)) { blocks.push({ md: '---' }); continue; }
-    if (level) { blocks.push({ level, md: `${'#'.repeat(level)} ${raw}` }); continue; }
-    if (kind.title) { blocks.push({ title: raw, md: `# ${raw}` }); continue; }
-    const text = renderRuns(segs.map((s) => ({ ...s, text: s.text.replace(/\t/g, ' ') }))).replace(/^\s+/, '').replace(/\s+$/, '');
-    if (kind.quote) { blocks.push({ md: `> ${text.replace(/\n/g, '\n> ')}` }); continue; }
     const numId = attr(ppr, 'w:numId');
-    if (/<w:numPr>/.test(ppr) && numId && numId !== '0') { blocks.push({ md: `- ${text}` }); continue; }
-    blocks.push({ md: finishPara(text, raw) });
+    paras.push({
+      segs: paragraphRuns(pm[1].replace(/<w:pPr>[\s\S]*?<\/w:pPr>/, '')),
+      kind: styleKind(styles, attr(ppr, 'w:pStyle')),
+      outline: ol === null ? null : Number(ol),
+      list: /<w:numPr>/.test(ppr) && !!numId && numId !== '0',
+    });
   }
-  // название документа (стиль Title) — не глава: есть заголовки, значит, оно лишнее
-  const hasHeads = blocks.some((b) => b.level);
-  return blocks.filter((b) => !(b.title && hasHeads)).map((b) => b.md).join('\n\n');
+  return parasToMarkdown(paras);
+}
+
+// ---------- rtf ----------
+
+// Группы RTF, содержимое которых не текст документа.
+const RTF_SKIP = new Set(['fonttbl', 'colortbl', 'info', 'pict', 'header', 'headerl', 'headerr', 'headerf', 'footer', 'footerl', 'footerr', 'footerf',
+  'footnote', 'themedata', 'datastore', 'listtable', 'listoverridetable', 'rsidtbl', 'generator', 'filetbl', 'revtbl', 'latentstyles',
+  'colorschememapping', 'xmlnstbl', 'pgptbl', 'object', 'shp', 'listtext', 'pntext', 'pn', 'bkmkstart', 'bkmkend', 'fldinst']);
+const RTF_CP = { 1250: 'windows-1250', 1251: 'windows-1251', 1252: 'windows-1252', 1253: 'windows-1253', 1254: 'windows-1254', 1257: 'windows-1257', 10000: 'macintosh', 65001: 'utf-8' };
+const RTF_CHARS = { emdash: '—', endash: '–', bullet: '•', lquote: '‘', rquote: '’', ldblquote: '“', rdblquote: '”', emspace: ' ', enspace: ' ', qmspace: ' ' };
+
+/**
+ * RTF (строка, где каждый байт — один знак) → абзацы для parasToMarkdown.
+ * Понимает группы и пропускаемые «назначения», \\uN с запасными знаками (\\ucN), \\'hh в кодовой странице файла (\\ansicpgN),
+ * \\par, \\line, \\tab, жирный и курсив, стили заголовков (\\sN из таблицы стилей) и \\outlinelevelN, пункты списков (\\lsN).
+ */
+function rtfParagraphs(src) {
+  const sheet = new Map(); // номер стиля → { name, outline }
+  const paras = [];
+  const stack = [];
+  let st = { b: false, i: false, hidden: false, skip: false, sheet: false, uc: 1 };
+  let cp = 'windows-1252';
+  let cur = { segs: [], style: null, outline: null, list: false };
+  let bytes = [];
+  let skipChars = 0;
+  let first = false;
+  let sheetNum = null;
+  let sheetName = '';
+  let sheetOutline = null;
+
+  const add = (text) => {
+    if (st.sheet) {
+      const k = text.indexOf(';');
+      sheetName += k < 0 ? text : text.slice(0, k);
+      if (k >= 0) {
+        if (sheetNum !== null) sheet.set(sheetNum, { name: sheetName.trim().toLowerCase(), outline: sheetOutline });
+        sheetNum = null; sheetName = ''; sheetOutline = null;
+      }
+      return;
+    }
+    if (st.skip || st.hidden || !text) return;
+    const last = cur.segs[cur.segs.length - 1];
+    if (last && last.b === st.b && last.i === st.i) last.text += text;
+    else cur.segs.push({ text, b: st.b, i: st.i });
+  };
+  const flushBytes = () => {
+    if (!bytes.length) return;
+    let t;
+    try { t = new TextDecoder(cp).decode(Uint8Array.from(bytes)); } catch { t = Buffer.from(bytes).toString('latin1'); }
+    bytes = [];
+    add(t);
+  };
+  const endPara = () => {
+    if (st.skip || st.sheet) return;
+    paras.push(cur);
+    cur = { segs: [], style: null, outline: null, list: false };
+  };
+  const text = (t) => { if (skipChars > 0) skipChars -= 1; else add(t); };
+
+  for (let i = 0; i < src.length;) {
+    const ch = src[i];
+    const wasFirst = first;
+    if (ch === '{') {
+      flushBytes();
+      stack.push(st);
+      st = { ...st };
+      first = true;
+      i += 1;
+    } else if (ch === '}') {
+      flushBytes();
+      st = stack.pop() || st;
+      first = false;
+      i += 1;
+    } else if (ch === '\\') {
+      first = false;
+      const nx = src[i + 1];
+      if (nx === undefined) break;
+      if (/[a-zA-Z]/.test(nx)) {
+        flushBytes();
+        let j = i + 1;
+        while (j < src.length && /[a-zA-Z]/.test(src[j])) j += 1;
+        const word = src.slice(i + 1, j);
+        let param = null;
+        let k = j;
+        if (src[k] === '-' || /\d/.test(src[k] || '')) {
+          let m = k + (src[k] === '-' ? 1 : 0);
+          while (m < src.length && /\d/.test(src[m])) m += 1;
+          param = parseInt(src.slice(k, m), 10);
+          k = m;
+        }
+        if (src[k] === ' ') k += 1;
+        i = k;
+        if (wasFirst && RTF_SKIP.has(word)) st.skip = true;
+        switch (word) {
+          case 'stylesheet': st.sheet = true; break;
+          case 'ansicpg': cp = RTF_CP[param] || cp; break;
+          case 'uc': st.uc = param === null ? 1 : param; break;
+          case 'u': add(String.fromCharCode(param < 0 ? param + 65536 : param)); skipChars = st.uc; break;
+          case 'par': case 'cell': case 'row': endPara(); break;
+          case 'line': add('\n'); break;
+          case 'tab': add('\t'); break;
+          case 'pard': cur.style = null; cur.outline = null; cur.list = false; break;
+          case 'plain': st.b = false; st.i = false; break;
+          case 'b': st.b = param !== 0; break;
+          case 'i': st.i = param !== 0; break;
+          case 'v': st.hidden = param !== 0; break;
+          case 's': if (st.sheet) sheetNum = param; else cur.style = param; break;
+          case 'outlinelevel': if (st.sheet) sheetOutline = param; else cur.outline = param; break;
+          case 'ls': if (!st.sheet && param > 0) cur.list = true; break;
+          default: if (Object.hasOwn(RTF_CHARS, word)) add(RTF_CHARS[word]);
+        }
+      } else {
+        i += 2;
+        if (nx === "'") {
+          const byte = parseInt(src.substr(i, 2), 16);
+          i += 2;
+          if (skipChars > 0) skipChars -= 1;
+          else if (!Number.isNaN(byte)) bytes.push(byte);
+        } else {
+          flushBytes();
+          if (nx === '*') { if (wasFirst) st.skip = true; } else if (nx === '~') add('\u00a0');
+          else if (nx === '_') add('-');
+          else if (nx === '\n' || nx === '\r') endPara();
+          else if (nx === '{' || nx === '}' || nx === '\\') text(nx);
+        }
+      }
+    } else if (ch === '\r' || ch === '\n') {
+      i += 1; // переводы строк в самом файле RTF значения не имеют
+    } else {
+      first = false;
+      if (skipChars > 0) skipChars -= 1;
+      else if (ch.charCodeAt(0) >= 0x80) bytes.push(ch.charCodeAt(0));
+      else { flushBytes(); add(ch); }
+      i += 1;
+    }
+  }
+  flushBytes();
+  if (cur.segs.length) paras.push(cur);
+  const styles = new Map([...sheet].map(([n, v]) => [String(n), { name: v.name, outline: v.outline, basedOn: null }]));
+  return paras.map((p) => ({
+    segs: p.segs,
+    kind: p.style === null ? {} : styleKind(styles, String(p.style)),
+    outline: p.outline,
+    list: p.list,
+  }));
+}
+
+function rtfToMarkdown(buf) {
+  const src = Buffer.from(buf).toString('latin1');
+  if (!/^\s*\{\\rtf/.test(src.slice(0, 64))) throw new Error('Файл не похож на документ RTF.');
+  return parasToMarkdown(rtfParagraphs(src));
 }
 
 // ---------- вход ----------
@@ -315,14 +482,15 @@ function parseFile(name, buf) {
   const base = String(name).replace(/\.[^.\\/]+$/, '').trim() || 'Импорт';
   let md;
   if (ext === 'docx') md = docxToMarkdown(buf);
+  else if (ext === 'rtf') md = rtfToMarkdown(buf);
   else if (ext === 'md' || ext === 'markdown') md = mdPrepare(decodeText(buf));
   else if (ext === 'txt' || ext === 'text') md = txtToMarkdown(decodeText(buf));
   else if (ext === 'doc') throw new Error('Старый формат .doc не поддерживается: сохраните файл в Word как .docx.');
-  else throw new Error('Формат файла не поддерживается. Подойдут .docx, .md и .txt.');
+  else throw new Error('Формат файла не поддерживается. Подойдут .docx, .rtf, .md и .txt.');
   if (!md.trim()) throw new Error('В файле нет текста.');
   const chapters = splitMarkdown(md, base);
   if (!chapters.length) throw new Error('В файле нет текста.');
   return chapters;
 }
 
-module.exports = { parseFile, decodeText, txtToMarkdown, mdPrepare, splitMarkdown, docxToMarkdown, readZip, MAX_FILE };
+module.exports = { rtfParagraphs, rtfToMarkdown, parseFile, decodeText, txtToMarkdown, mdPrepare, splitMarkdown, docxToMarkdown, readZip, MAX_FILE };

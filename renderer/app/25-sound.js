@@ -90,6 +90,7 @@ function wireChrome() {
   bindSetting('#setSpell', 'spellOn', (el) => el.checked);
   bindSetting('#setTypo', 'typo', (el) => el.checked);
   bindSetting('#setTypoNbsp', 'typoNbsp', (el) => el.checked);
+  bindSetting('#setTypoLayout', 'typoLayout', (el) => el.checked);
   bindSetting('#setTypeAnim', 'typeAnim', (el) => el.checked);
   $('#btnFixTypo').addEventListener('click', fixChapterTypography);
   $('#btnCheck').addEventListener('click', () => togglePanel('check'));

@@ -131,3 +131,56 @@ test('импорт в новый проект: пустая первая гла�
   assert.deepEqual(res.project.chapters.map((c) => c.title), ['Пролог', 'Дорога']);
   assert.equal(project.readChapter(dir, first), 'Темно.');
 });
+
+// ---------- RTF ----------
+
+const { buildRtf } = require('../src/rtf');
+
+// Строка → байты Windows-1251, как в настоящем RTF из Word (русские буквы в файле — один байт, а не юникод).
+const cp1251 = (str) => Buffer.from([...str].map((c) => {
+  const n = c.charCodeAt(0);
+  if (n < 128) return n;
+  if (n >= 0x410 && n <= 0x44f) return n - 0x410 + 0xc0;
+  return 63;
+}));
+
+test('rtf: экспорт Кабинета читается обратно (главы, жирный, курсив, цитата, разделитель, юникод)', () => {
+  const chapters = [
+    { title: '1. Начало', text: 'Один **жирный** и *косой* текст — {скобки} \\ слэш.\n\n— Реплика.\n\n* * *\n\nПосле разделителя.' },
+    { title: '2. Конец', text: '> Цитата\n\n## Подраздел\n\nФинал.' },
+  ];
+  const rtf = buildRtf('Книга', chapters, {});
+  assert.ok(/^[\x00-\x7f]*$/.test(rtf), 'RTF целиком из ASCII');
+  const out = parseFile('Книга.rtf', Buffer.from(rtf, 'latin1'));
+  assert.deepEqual(out.map((c) => c.title), ['Начало', 'Конец']);
+  assert.equal(out[0].text, 'Один **жирный** и *косой* текст — {скобки} \\\\ слэш.\n\n— Реплика.\n\n---\n\nПосле разделителя.'.replace('\\\\', '\\\\'));
+  assert.equal(out[1].text, '> Цитата\n\n## Подраздел\n\nФинал.');
+});
+
+test('rtf: сборник рассказов — «Содержание» главой не считается', () => {
+  const rtf = buildRtf('Сборник', [{ title: 'Лиса', text: 'Раз.' }, { title: 'Нора', text: 'Два.' }], { stories: true, toc: { heading: 'Содержание', items: ['Лиса', 'Нора'] } });
+  assert.deepEqual(parseFile('с.rtf', Buffer.from(rtf, 'latin1')).map((c) => c.title), ['Лиса', 'Нора']);
+});
+
+test('rtf из Word: кодовая страница 1251 через \\\'hh, \\uN с запасным знаком, стили заголовков, таблица шрифтов и список пропускаются', () => {
+  const rtf = '{\\rtf1\\ansi\\ansicpg1251\\deff0\\uc1{\\fonttbl{\\f0 Times;}}{\\colortbl;\\red0\\green0\\blue0;}'
+    + '{\\stylesheet{\\s1 heading 1;}{\\s2 \\outlinelevel1 Заголовок 2;}}'
+    + '{\\*\\generator Word}\\pard\\s1 \\\'c3\\\'eb\\\'e0\\\'e2\\\'e0 \\\'ef\\\'e5\\\'f0\\\'e2\\\'e0\\\'ff\\par'
+    + '\\pard \\\'cf\\\'f0\\\'e8\\\'e2\\\'e5\\\'f2, {\\i \\u1084?\\u1080?\\u1088?} \\emdash  {\\b жирный}\\par'
+    + '\\pard\\ls1{\\listtext\\bullet\\tab}Пункт\\par'
+    + '\\pard\\s1 \\\'c3\\\'eb\\\'e0\\\'e2\\\'e0 \\\'e2\\\'f2\\\'ee\\\'f0\\\'e0\\\'ff\\par\\pard Конец\\par}';
+  const ch = parseFile('в.rtf', cp1251(rtf));
+  assert.deepEqual(ch.map((c) => c.title), ['Глава первая', 'Глава вторая']);
+  assert.equal(ch[0].text, 'Привет, *мир* — **жирный**\n\n- Пункт');
+  assert.equal(ch[1].text, 'Конец');
+});
+
+test('rtf: не RTF — понятное сообщение', () => {
+  assert.throws(() => parseFile('x.rtf', Buffer.from('просто текст')), /RTF/);
+});
+
+test('rtf от pandoc: маркер списка внутри абзаца, юникод через \\uN с запасным знаком', () => {
+  const rtf = '{\\rtf1\\ansi\\deff0{\\pard \\outlinelevel0 \\b \\u1043 ?\\u1083 ?\\u1072 ?\\u1074 ?\\u1072 ?\\par}'
+    + '{\\pard \\u1058 ?\\u1077 ?\\u1082 ?\\u1089 ?\\u1090 ?\\par}{\\pard \\bullet \\tab \\u1087 ?\\u1091 ?\\u1085 ?\\u1082 ?\\u1090 ?\\par}}';
+  assert.deepEqual(parseFile('p.rtf', Buffer.from(rtf, 'latin1')), [{ title: 'Глава', text: 'Текст\n\n- пункт' }]);
+});

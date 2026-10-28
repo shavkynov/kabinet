@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   typo: true,
   typeAnim: true,   // плавное появление набираемых букв
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
+  typoLayout: true, // «Привести типографику в порядок» убирает пустые строки между абзацами и включает красную строку
   spellOn: true,
   typewriter: false,
   links: true,
@@ -85,6 +86,7 @@ function loadSettings() {
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;
+    if (typeof raw.typoLayout === 'boolean') s.typoLayout = raw.typoLayout;
     if (raw.typoWeb !== true) s.typoNbsp = false; // один раз при обновлении неразрывные пробелы выключаются, дальше выбор за автором
     if (['system', 'light', 'dark'].includes(raw.theme)) s.theme = raw.theme;
     if (['none', 'grain', 'warm'].includes(raw.paper)) s.paper = raw.paper;
@@ -171,6 +173,7 @@ function applySettings() {
   applyAnalysisSettings();
   $('#setTypo').checked = settings.typo;
   $('#setTypoNbsp').checked = settings.typoNbsp;
+  $('#setTypoLayout').checked = settings.typoLayout;
   $('#setTypeAnim').checked = settings.typeAnim;
   document.documentElement.setAttribute('spellcheck', settings.spellOn ? 'true' : 'false');
   document.body.classList.toggle('links-off', !settings.links);

@@ -309,8 +309,21 @@ function fixChapterTypography() {
     showError(t('Откройте главу или заметку, чтобы привести в порядок её типографику.'));
     return;
   }
-  const n = fixDocTypography(editor, { quotes: true, dashes: true, nbsp: settings.typoNbsp });
-  setStatus('ok', n ? t('Типографика: исправлено мест — {0}. Отменить: ⌘Z', n) : t('Типографика уже в порядке'));
+  const layout = settings.typoLayout;
+  const { fixed, removed } = fixDocTypography(editor, { quotes: true, dashes: true, nbsp: settings.typoNbsp, dropEmpty: layout });
+  // красная строка: если режим «Красная строка» ещё не включён, типографика включает его (отступ ставят окно, копирование и экспорт)
+  const indentOn = layout && settings.para !== 'indent';
+  if (indentOn) {
+    settings.para = 'indent';
+    applySettings();
+    saveSettings();
+  }
+  const parts = [];
+  if (fixed) parts.push(t('исправлено мест — {0}', fixed));
+  if (removed) parts.push(t('убрано пустых строк между абзацами — {0}', removed));
+  if (indentOn) parts.push(t('включена красная строка'));
+  const undo = fixed || removed ? ' ' + t('Отменить: ⌘Z') : '';
+  setStatus('ok', parts.length ? t('Типографика: {0}.', parts.join(', ')) + undo : t('Типографика уже в порядке'));
 }
 
 // Смена языка: сохраняем текст, запоминаем, где были, и перезагружаем окно.

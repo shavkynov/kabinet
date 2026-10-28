@@ -1,9 +1,10 @@
 'use strict';
 
-// Экспорт глав проекта одним файлом: Markdown, обычный текст, HTML (из него же печатается PDF).
+// Экспорт глав проекта одним файлом: Markdown, обычный текст, RTF, HTML (из него же печатается PDF).
 
 const project = require('./project');
 const { buildDocx } = require('./docx');
+const { buildRtf } = require('./rtf');
 const { t: tr } = require('./i18n');
 const { INDENT } = require('./clip');
 
@@ -122,7 +123,7 @@ const INDENT_CSS = `
 `;
 
 /**
- * Собирает документ из всех глав. format: 'md' | 'txt' | 'html' | 'docx' (Buffer). PDF печатается из html.
+ * Собирает документ из всех глав. format: 'md' | 'txt' | 'html' | 'rtf' | 'docx' (Buffer). PDF печатается из html.
  * Заголовок главы: номер по порядку и название.
  */
 function buildExport(dir, format, lang, opts = {}) {
@@ -138,6 +139,9 @@ function buildExport(dir, format, lang, opts = {}) {
 
   if (format === 'docx') {
     return buildDocx(view.name, chapters, { stories, lang, toc: toc ? { heading: tocHeading, items: toc } : null });
+  }
+  if (format === 'rtf') {
+    return buildRtf(view.name, chapters, { stories, toc: toc ? { heading: tocHeading, items: toc } : null });
   }
   if (format === 'md') {
     const contents = toc ? `## ${tocHeading}\n\n${toc.map((x) => `- ${x}`).join('\n')}\n\n---\n\n` : '';

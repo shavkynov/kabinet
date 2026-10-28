@@ -30,24 +30,41 @@ export const Typography = Extension.create({
   },
 });
 
-/** Приводит типографику всей главы в порядок одной правкой (одна отмена на всё). Возвращает число правок. */
+/** Приводит типографику всей главы в порядок одной правкой (одна отмена на всё). Возвращает { fixed, removed }: число исправленных мест и убранных пустых абзацев. */
 export function fixDocTypography(editor, o) {
   const { state } = editor;
   const edits = [];
+  let removed = 0;
+  const blank = (node) => {
+    let only = true;
+    node.forEach((c) => { if (!c.isText || /\S/.test(c.text)) only = false; });
+    return only;
+  };
+  // Пустые абзацы между абзацами (о.dropEmpty): отступ между абзацами дают поля или красная строка, а не лишние пустые строки.
+  const empties = new Set();
+  if (o.dropEmpty) {
+    state.doc.forEach((node, offset) => { if (node.type.name === 'paragraph' && blank(node)) empties.add(offset); });
+    if (empties.size >= state.doc.childCount) empties.clear(); // пустой документ не трогаем
+  }
   state.doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
+    if (empties.has(pos)) {
+      edits.push({ from: pos, to: pos + node.nodeSize, text: '' });
+      removed += 1;
+      return false;
+    }
     if (node.type.name !== 'codeBlock') {
       const text = node.textBetween(0, node.content.size, '', '￼');
       for (const e of fixText(text, o)) edits.push({ from: pos + 1 + e.from, to: pos + 1 + e.to, text: e.text });
     }
     return false;
   });
-  if (!edits.length) return 0;
+  if (!edits.length) return { fixed: 0, removed: 0 };
   const tr = state.tr;
   for (const e of edits.reverse()) {
     if (e.text) tr.insertText(e.text, e.from, e.to);
     else tr.delete(e.from, e.to);
   }
   editor.view.dispatch(tr);
-  return edits.length;
+  return { fixed: edits.length - removed, removed };
 }

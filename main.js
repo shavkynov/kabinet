@@ -188,7 +188,7 @@ async function showSyncInfo() {
 }
 
 // «Отзывы» и «Обновления» в верхнем меню: адреса зашиты в код, наружу открываются только они.
-const FEEDBACK_EMAIL = 'shavkynovcoding@gmail.com';
+const FEEDBACK_EMAIL = 'Shavkynov@gmail.com';
 const UPDATES_URL = 'https://boosty.to/writer_room';
 
 async function showFeedback() {
@@ -334,6 +334,7 @@ handle('project:export', async (opts) => {
     filters: [
       { name: 'PDF', extensions: ['pdf'] },
       { name: 'Word (DOCX)', extensions: ['docx'] },
+      { name: 'RTF', extensions: ['rtf'] },
       { name: 'Markdown', extensions: ['md'] },
       { name: t('Обычный текст'), extensions: ['txt'] },
       { name: 'HTML', extensions: ['html'] },
@@ -343,7 +344,7 @@ handle('project:export', async (opts) => {
   if (res.canceled || !res.filePath) return null;
   let file = res.filePath;
   let ext = path.extname(file).slice(1).toLowerCase();
-  if (!['pdf', 'docx', 'md', 'txt', 'html'].includes(ext)) {
+  if (!['pdf', 'docx', 'rtf', 'md', 'txt', 'html'].includes(ext)) {
     ext = 'pdf';
     file += '.pdf';
   }
@@ -379,7 +380,7 @@ handle('project:import', async () => {
     title: t('Импорт глав'),
     message: t('Выберите файлы Word, Markdown или обычного текста'),
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: t('Документы'), extensions: ['docx', 'md', 'markdown', 'txt'] }],
+    filters: [{ name: t('Документы'), extensions: ['docx', 'rtf', 'md', 'markdown', 'txt'] }],
     buttonLabel: t('Импортировать'),
   });
   if (res.canceled || !res.filePaths.length) return null;
