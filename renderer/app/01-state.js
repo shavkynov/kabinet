@@ -2,7 +2,7 @@
 
 let project = null;   // { name, chapters: [{ id, title }] }
 let currentId = null; // открытый документ
-let currentKind = null; // 'chapter' | 'character' | 'place' | 'note'
+let currentKind = null; // 'chapter' | 'character' | 'place' | 'item' | 'note'
 let editor = null;
 let loading = false;  // true, пока мы сами подставляем текст (это не правка пользователя)
 let dirty = false;    // есть несохранённые изменения

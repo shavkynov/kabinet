@@ -40,3 +40,14 @@ function wireSections() {
     });
   });
 }
+
+// Кнопка «К началу списка» в левой панели: появляется, когда список пролистан вниз.
+function wireBinderTop() {
+  const binder = $('#binder');
+  const btn = $('#binderTop');
+  if (!binder || !btn) return;
+  const sync = () => { btn.hidden = binder.scrollTop < 240; };
+  binder.addEventListener('scroll', sync, { passive: true });
+  btn.addEventListener('click', () => binder.scrollTo({ top: 0, behavior: 'smooth' }));
+  sync();
+}

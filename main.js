@@ -22,6 +22,7 @@ const importer = require('./src/import');
 const { writeFileAtomic } = require('./src/fsutil');
 const langcheck = require('./src/langcheck');
 const i18n = require('./src/i18n');
+const themes = require('./src/themes');
 const { t, tdom } = i18n;
 
 // ---------- данные приложения: одна папка и для запуска из исходников, и для собранной программы ----------
@@ -530,8 +531,8 @@ handle('trash:empty', async () => {
 
 // Тема окна: «system» следует за macOS, «light» и «dark» принудительные.
 handle('ui:setTheme', (theme) => {
-  if (!['system', 'light', 'dark'].includes(theme)) throw new Error('Неизвестная тема.');
-  nativeTheme.themeSource = theme;
+  if (!themes.isTheme(theme)) throw new Error('Неизвестная тема.');
+  nativeTheme.themeSource = themes.themeMode(theme);
   return true;
 });
 
@@ -875,6 +876,15 @@ handle('ctx:edit', (cmd) => {
 
 handle('ctx:replaceMisspelling', (word) => {
   if (win && !win.isDestroyed()) win.webContents.replaceMisspelling(String(word));
+  return true;
+});
+
+// «Искать в интернете»: слово из контекстного меню уходит в поисковик (русский интерфейс: Яндекс, английский: Google).
+handle('ctx:webSearch', (text) => {
+  const q = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!q) return false;
+  const base = i18n.getLang() === 'en' ? 'https://www.google.com/search?q=' : 'https://yandex.ru/search/?text=';
+  shell.openExternal(base + encodeURIComponent(q));
   return true;
 });
 

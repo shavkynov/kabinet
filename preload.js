@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('kabinet', {
   onContextMenu: (cb) => onData('ui:contextMenu', cb),
   editCommand: (cmd) => call('ctx:edit', cmd),
   replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
+  webSearch: (text) => call('ctx:webSearch', text),
   // проекты
   listRecents: () => call('recents:list'),
   removeRecent: (p) => call('recents:remove', p),
@@ -67,7 +68,7 @@ contextBridge.exposeInMainWorld('kabinet', {
   writeChapter: (id, text) => call('chapter:write', id, text),
   setChapterMarker: (id, marker) => call('chapter:setMarker', id, marker),
 
-  // карточки персонажей, места и заметки (kind: 'character' | 'place' | 'note')
+  // карточки персонажей, мест и предметов, заметки (kind: 'character' | 'place' | 'item' | 'note')
   addItem: (kind, afterId) => call('item:add', kind, afterId),
   renameItem: (kind, id, title) => call('item:rename', kind, id, title),
   moveItem: (kind, id, index) => call('item:move', kind, id, index),

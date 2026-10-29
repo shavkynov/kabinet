@@ -35,6 +35,48 @@
   }
 }
 
+/* цветовые темы (список в src/themes.js; контраст текста проверяет test/themes.test.js) */
+:root[data-theme="light-snow"] {
+  color-scheme: light;
+  --bg: #f4f6f8; --paper: #fbfcfd; --side: #e8ecf0; --text: #23272b; --muted: #5a646e; --line: #d3d9df;
+  --accent: #35648f; --sel: #d5dde6; --danger: #b3382c; --sticky: #e6eef6; --sticky-text: #26323d;
+}
+:root[data-theme="light-sage"] {
+  color-scheme: light;
+  --bg: #f1f4ee; --paper: #f9fbf6; --side: #e4e9de; --text: #272b25; --muted: #5c6557; --line: #d2d9ca;
+  --accent: #4a6c3f; --sel: #d7dfcd; --danger: #b3382c; --sticky: #e8efd5; --sticky-text: #2c3322;
+}
+:root[data-theme="light-sand"] {
+  color-scheme: light;
+  --bg: #f6f1e7; --paper: #fcf8ef; --side: #ece4d4; --text: #2e2a22; --muted: #6a6150; --line: #ddd2bc;
+  --accent: #8a5d24; --sel: #e3d8c0; --danger: #b3382c; --sticky: #f3e4b8; --sticky-text: #3d3219;
+}
+:root[data-theme="light-rose"] {
+  color-scheme: light;
+  --bg: #f6f1f1; --paper: #fcf9f9; --side: #ece4e4; --text: #2b2626; --muted: #695d5d; --line: #ddd0d0;
+  --accent: #92454f; --sel: #e6d8d9; --danger: #b3382c; --sticky: #f3e1e3; --sticky-text: #3b2528;
+}
+:root[data-theme="dark-graphite"] {
+  color-scheme: dark;
+  --bg: #1c1d1f; --paper: #242527; --side: #161718; --text: #dcdde0; --muted: #9a9ca2; --line: #34363a;
+  --accent: #7fa6d6; --sel: #32353a; --danger: #e0685a; --sticky: #343a45; --sticky-text: #dfe6f0;
+}
+:root[data-theme="dark-forest"] {
+  color-scheme: dark;
+  --bg: #171c19; --paper: #1f2521; --side: #121613; --text: #d9dfd6; --muted: #949f93; --line: #2f3832;
+  --accent: #8bb37a; --sel: #2c352f; --danger: #e0685a; --sticky: #2f3a2c; --sticky-text: #dbe6d4;
+}
+:root[data-theme="dark-midnight"] {
+  color-scheme: dark;
+  --bg: #14161f; --paper: #1b1e2a; --side: #10121a; --text: #d6d9e6; --muted: #9094aa; --line: #2b2f40;
+  --accent: #9aa6e8; --sel: #2a2e42; --danger: #e0685a; --sticky: #2d3250; --sticky-text: #dde1f5;
+}
+:root[data-theme="dark-ember"] {
+  color-scheme: dark;
+  --bg: #1d1815; --paper: #262019; --side: #17120f; --text: #e0d6c9; --muted: #a29484; --line: #3a3028;
+  --accent: #d19a66; --sel: #382f27; --danger: #e0685a; --sticky: #443825; --sticky-text: #efe2c8;
+}
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
@@ -225,9 +267,9 @@ body.mode-stories .stories-only.block { display: block !important; }
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.88  0 0 0 0 0.82  0 0 0 0.9 -0.4'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
   }
 }
-:root[data-paper="warm"] { --paper: #f4ecd9; }
+:root[data-paper="warm"]:not([data-theme*="-"]) { --paper: #f4ecd9; } /* в цветных темах бумага берётся из темы */
 @media (prefers-color-scheme: dark) {
-  :root[data-paper="warm"] { --paper: #2a251d; }
+  :root[data-paper="warm"]:not([data-theme*="-"]) { --paper: #2a251d; }
 }
 
 .ProseMirror {
@@ -1009,6 +1051,22 @@ body.focus-mode #status { bottom: 12px; }
 #binder .sec-body { padding-bottom: 6px; }
 #binder .sec + .sec { border-top: 1px solid var(--line); }
 #binder .side-foot { border-top: none; }
+
+/* заголовки разделов «прилипают» к верху списка: длинный раздел можно свернуть, не листая вверх */
+#binder .sec-head { position: sticky; top: 0; z-index: 2; background: var(--side); }
+.binder-top {
+  position: sticky; bottom: 8px; display: block; width: 28px; height: 28px; margin: 6px 12px 0 auto; padding: 0;
+  border: 1px solid var(--line); border-radius: 50%; background: var(--side); color: var(--muted);
+  font-size: 15px; line-height: 1; cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+}
+.binder-top:hover { color: var(--text); }
+.binder-top[hidden] { display: none; }
+
+/* корзина закреплена внизу левой панели */
+#sideDock { flex: none; border-top: 1px solid var(--line); background: var(--side); }
+#sideDock .sec-body { max-height: 38vh; overflow-y: auto; padding-bottom: 6px; }
+#sideDock .list { flex: none; overflow: visible; min-height: 8px; }
+#sideDock .side-foot { border-top: none; }
 
 .rsec { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); flex: none; }
 .rsec .sec-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }

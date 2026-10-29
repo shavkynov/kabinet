@@ -5,20 +5,21 @@
 let storyHeadKey = '';
 let kindsSig = '';
 
-// В рассказах разделы «Персонажи» и «Места» по умолчанию скрыты, включаются в настройках (Aa).
+// В рассказах разделы «Персонажи», «Места» и «Предметы» по умолчанию скрыты, включаются в настройках (Aa).
 // В романе виден всё. Скрытые виды не подсвечиваются в тексте и не предлагаются в контекстном меню.
 function kindEnabled(kind) {
   if (!project || project.mode !== 'stories') return true;
   if (kind === 'character') return settings.storyCharacters === true;
   if (kind === 'place') return settings.storyPlaces === true;
+  if (kind === 'item') return settings.storyItems === true;
   return true;
 }
 
 function applyKinds() {
-  const sig = `${project ? project.mode : ''}|${settings.storyCharacters}|${settings.storyPlaces}`;
+  const sig = `${project ? project.mode : ''}|${settings.storyCharacters}|${settings.storyPlaces}|${settings.storyItems}`;
   if (sig === kindsSig) return;
   kindsSig = sig;
-  for (const k of ['character', 'place']) {
+  for (const k of ['character', 'place', 'item']) {
     const sec = document.querySelector(`#binder [data-sec="${k}"]`);
     if (sec) sec.hidden = !kindEnabled(k);
   }

@@ -54,6 +54,7 @@ function searchProject(dir, query) {
   for (const c of view.chapters) add('chapter', c, project.readChapter(dir, c.id, { track: false }));
   for (const c of view.characters) add('character', c, cardText(project.readItem(dir, 'character', c.id, { track: false })));
   for (const c of view.places) add('place', c, cardText(project.readItem(dir, 'place', c.id, { track: false })));
+  for (const c of view.items) add('item', c, cardText(project.readItem(dir, 'item', c.id, { track: false })));
   for (const c of view.notes) add('note', c, project.readItem(dir, 'note', c.id, { track: false }));
   return out.slice(0, MAX_DOCS);
 }

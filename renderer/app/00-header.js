@@ -6,7 +6,7 @@ import { Ambient, AMBIENTS } from './ambient.js';
 import { createList } from './lists.js';
 import { createCardView } from './cards.js';
 import { NameLinks, setNameLinks, wireLinkHover } from './links.js';
-import { showMenu, closeMenu, ICONS_CHARACTER, ICONS_PLACE } from './menu.js';
+import { showMenu, closeMenu, ICONS_CHARACTER, ICONS_PLACE, ICONS_ITEM } from './menu.js';
 import { t, tdom, LANG, LOCALE, initDomTranslation, initKeyLabels, setTermsMode, applyTermsDom } from './i18n.js';
 import { LangIssues, initTextCheck } from './textcheck.js';
 import { TypeAnim } from './typeanim.js';
@@ -17,6 +17,7 @@ import { Typography, fixDocTypography } from './typo.js';
 import { Slice, Fragment } from '@tiptap/pm/model';
 import { isOfficeHtml, officeTextToParagraphs } from '../src/paste.js';
 import { clipboardPlain } from '../src/clip.js';
+import { isTheme } from '../src/themes.js';
 import { authorSheets } from '../src/terms.js';
 import { DEFAULT_FILLERS, cleanFiller, cleanFillerList, skipKey } from '../src/editing.js';
 

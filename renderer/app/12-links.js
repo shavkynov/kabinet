@@ -35,7 +35,7 @@ async function refreshIndex() {
 }
 
 function openCardById(kind, id) {
-  if (kind !== 'character' && kind !== 'place') return;
+  if (kind !== 'character' && kind !== 'place' && kind !== 'item') return;
   expandSection(kind);
   openDoc(kind, id);
 }
@@ -134,7 +134,7 @@ function onNativeContext(p) {
     const sel = empty ? '' : editor.state.doc.textBetween(from, to, ' ').replace(/\s+/g, ' ').trim();
     if (sel && sel.length <= 80) {
       if (settings.links) {
-        for (const [kind, title] of [['character', 'Связать с персонажем'], ['place', 'Связать с местом']].filter(([k]) => kindEnabled(k))) {
+        for (const [kind, title] of [['character', 'Связать с персонажем'], ['place', 'Связать с местом'], ['item', 'Связать с предметом']].filter(([k]) => kindEnabled(k))) {
           const list = cardIdx.filter((c) => c.kind === kind).slice(0, 60);
           if (!list.length) {
             wordTail.push({ label: t(title), disabled: true });
@@ -146,9 +146,10 @@ function onNativeContext(p) {
       }
       const name = cardNameFromSelection(sel);
       if (name) {
-        if (wordTail.length && (kindEnabled('character') || kindEnabled('place'))) wordTail.push({ separator: true });
+        if (wordTail.length && (kindEnabled('character') || kindEnabled('place') || kindEnabled('item'))) wordTail.push({ separator: true });
         if (kindEnabled('character')) wordTail.push({ label: t('Создать персонажа'), onClick: () => createCardFromText('character', name) });
         if (kindEnabled('place')) wordTail.push({ label: t('Создать место'), onClick: () => createCardFromText('place', name) });
+        if (kindEnabled('item')) wordTail.push({ label: t('Создать предмет'), onClick: () => createCardFromText('item', name) });
       }
     }
     if (g.length) groups.push(g);
@@ -164,6 +165,12 @@ function onNativeContext(p) {
         setStatus('ok', t('«{0}» добавлено в слова-паразиты', w));
       } }]);
     }
+  }
+
+  const picked = String(p.selectionText || '').replace(/\s+/g, ' ').trim();
+  if (picked && picked.length <= 100) {
+    const shown = picked.length > 28 ? `${picked.slice(0, 28)}…` : picked;
+    groups.push([{ label: t('Искать в интернете: «{0}»', shown), raw: true, onClick: () => api.webSearch(picked).catch((e) => showError(e.message)) }]);
   }
 
   const f = p.editFlags || {};
@@ -205,7 +212,7 @@ async function createCardFromText(kind, name) {
     expandSection(kind);
     refreshLists();
     await refreshIndex();
-    setStatus('ok', t(kind === 'place' ? 'Создано место «{0}»' : 'Создан персонаж «{0}»', name));
+    setStatus('ok', t(kind === 'place' ? 'Создано место «{0}»' : kind === 'item' ? 'Создан предмет «{0}»' : 'Создан персонаж «{0}»', name));
   } catch (err) {
     showError(err.message);
   } finally {

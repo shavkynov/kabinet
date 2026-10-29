@@ -74,7 +74,7 @@ function cardMenu(item, x, y, kind) {
   const entries = [];
   if (kind !== 'note') {
     entries.push(
-      { icons: kind === 'place' ? ICONS_PLACE : ICONS_CHARACTER, current: item.icon, onPick: (icon) => setIcon(kind, item.id, icon) },
+      { icons: kind === 'place' ? ICONS_PLACE : kind === 'item' ? ICONS_ITEM : ICONS_CHARACTER, current: item.icon, onPick: (icon) => setIcon(kind, item.id, icon) },
       { separator: true },
     );
   }

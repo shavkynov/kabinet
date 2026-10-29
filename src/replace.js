@@ -60,7 +60,7 @@ function replaceProject(dir, find, repl, { dry = false } = {}) {
     handle('chapter', c, () => project.readChapter(dir, c.id, { track: false }), (t) => replaceInText(t, q, to),
       (t) => project.writeChapter(dir, c.id, t));
   }
-  for (const [kind, list] of [['character', view.characters], ['place', view.places]]) {
+  for (const [kind, list] of [['character', view.characters], ['place', view.places], ['item', view.items]]) {
     for (const c of list) {
       handle(kind, c, () => project.readItem(dir, kind, c.id, { track: false }), (t) => replaceInCard(t, q, to),
         (t) => project.writeItem(dir, kind, c.id, t));

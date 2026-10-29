@@ -24,12 +24,12 @@ function detectCloud(dir) {
 
 // ---------- копии-конфликты, которые создаёт облако ----------
 
-const FOLDERS = { 'Главы': '.md', 'Персонажи': '.json', 'Места': '.json', 'Заметки': '.md' };
+const FOLDERS = { 'Главы': '.md', 'Персонажи': '.json', 'Места': '.json', 'Предметы': '.json', 'Заметки': '.md' };
 
 /** Файлы вида «<id> 2.md», «<id> (conflicted copy …).md», «project (1).json»: облако так помечает спорные версии. */
 function findConflictCopies(dir) {
   const view = project.openProject(dir);
-  const ids = new Set([...view.chapters, ...view.characters, ...view.places, ...view.notes].map((x) => x.id));
+  const ids = new Set([...view.chapters, ...view.characters, ...view.places, ...view.items, ...view.notes].map((x) => x.id));
   const out = [];
   for (const [folder, ext] of Object.entries(FOLDERS)) {
     let names = [];

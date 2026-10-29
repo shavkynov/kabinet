@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { hashText, lastWritten } = require('./fsutil');
 
-const FOLDERS = new Set(['Главы', 'Персонажи', 'Места', 'Заметки']);
+const FOLDERS = new Set(['Главы', 'Персонажи', 'Места', 'Предметы', 'Заметки']);
 
 /** Относительный путь (с «/») интересен, если это project.json, файл глав, карточек или заметок. */
 function isRelevant(rel) {

@@ -75,6 +75,15 @@
             <div id="placeList" class="list" tabindex="0" aria-label="Список мест"></div>
           </div>
         </section>
+        <section class="sec" data-sec="item">
+          <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
+            <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">🗝</span><span class="sec-name">Предметы</span>
+            <button id="addItem" type="button" class="side-plus" title="Новый предмет" aria-label="Новый предмет">+</button>
+          </div>
+          <div class="sec-body">
+            <div id="itemList" class="list" tabindex="0" aria-label="Список предметов"></div>
+          </div>
+        </section>
         <section class="sec" data-sec="note">
           <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
             <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">📝</span><span class="sec-name">Заметки</span>
@@ -84,6 +93,9 @@
             <div id="noteList" class="list" tabindex="0" aria-label="Список заметок"></div>
           </div>
         </section>
+        <button id="binderTop" type="button" class="binder-top" title="К началу списка" aria-label="К началу списка" hidden>↑</button>
+      </div>
+      <div id="sideDock">
         <section class="sec" data-sec="trash">
           <div class="sec-head" role="button" tabindex="0" aria-expanded="true" title="Свернуть / развернуть">
             <span class="chev" aria-hidden="true"></span><span class="sec-ic" aria-hidden="true">🗑</span><span class="sec-name">Корзина</span><span id="trashCount" class="badge" hidden></span>
@@ -344,8 +356,20 @@
         <label for="setTheme">Тема</label>
         <select id="setTheme">
           <option value="system">Как в системе</option>
-          <option value="light">Светлая</option>
-          <option value="dark">Тёмная</option>
+          <optgroup label="Светлые">
+            <option value="light">Бумага</option>
+            <option value="light-snow">Снежная</option>
+            <option value="light-sage">Шалфей</option>
+            <option value="light-sand">Песок</option>
+            <option value="light-rose">Пудра</option>
+          </optgroup>
+          <optgroup label="Тёмные">
+            <option value="dark">Тёплая тьма</option>
+            <option value="dark-graphite">Графит</option>
+            <option value="dark-forest">Лес</option>
+            <option value="dark-midnight">Полночь</option>
+            <option value="dark-ember">Кофе</option>
+          </optgroup>
         </select>
       </div>
       <div class="row">
@@ -379,6 +403,10 @@
       <div class="row stories-only">
         <label for="setStoryPlaces">Показывать места</label>
         <input id="setStoryPlaces" type="checkbox">
+      </div>
+      <div class="row stories-only">
+        <label for="setStoryItems">Показывать предметы</label>
+        <input id="setStoryItems" type="checkbox">
       </div>
       <p class="hint">Числа можно вписать вручную, стрелки вверх и вниз меняют их на шаг. Горячие клавиши: ⌘B, ⌘I, заголовки ⌘⌥1 и ⌘⌥2.</p>
     </div>

@@ -17,7 +17,7 @@ const { guardWrite, assertNotPlaceholder } = require('./syncguard');
 const META = 'project.json';
 const CHAPTERS_DIR = 'Главы';
 const TRASH_DIR = 'Корзина';
-const SUBDIRS = [CHAPTERS_DIR, 'Персонажи', 'Места', 'Заметки', 'Изображения', TRASH_DIR];
+const SUBDIRS = [CHAPTERS_DIR, 'Персонажи', 'Места', 'Предметы', 'Заметки', 'Изображения', TRASH_DIR];
 
 // Предельные размеры текстов. Это защита от испорченных файлов, а не рабочие ограничения:
 // всё, что автор мог ввести в поле, должно сохраняться целиком, поэтому пределы с большим запасом.
@@ -44,9 +44,11 @@ function renumber(meta) {
 const MARKERS = ['red', 'orange', 'green'];
 
 // Карточки персонажей и мест (JSON) и заметки (Markdown). Названия и порядок лежат в project.json.
+// Предметы устроены так же, но без шаблона: новые карточки создаются пустыми.
 const KINDS = {
   character: { list: 'characters', dir: 'Персонажи', ext: 'json', title: 'Новый персонаж' },
   place: { list: 'places', dir: 'Места', ext: 'json', title: 'Новое место' },
+  item: { list: 'items', dir: 'Предметы', ext: 'json', title: 'Новый предмет' },
   note: { list: 'notes', dir: 'Заметки', ext: 'md', title: 'Новая заметка' },
 };
 
@@ -275,6 +277,7 @@ function view(dir, meta) {
     })),
     characters: meta.characters.map((c) => ({ id: c.id, title: c.title, icon: c.icon ?? null })),
     places: meta.places.map((c) => ({ id: c.id, title: c.title, icon: c.icon ?? null })),
+    items: meta.items.map((c) => ({ id: c.id, title: c.title, icon: c.icon ?? null })),
     notes: meta.notes.map((c) => ({ id: c.id, title: c.title, icon: c.icon ?? null })),
     templates: { character: [...meta.templates.character], place: [...meta.templates.place] },
     trash: meta.trash.slice().reverse().map((e) => ({
@@ -311,6 +314,7 @@ function createProject(dir, name, { mode } = {}) {
     chapters: [{ id, title: tr(mode === 'stories' ? 'Рассказ {0}' : 'Глава {0}', 1) }],
     characters: [],
     places: [],
+    items: [],
     notes: [],
     templates: {
       character: DEFAULT_TEMPLATES.character.map((x) => tr(x)),
@@ -838,7 +842,7 @@ function readImage(dir, file) {
 function cardIndex(dir) {
   const meta = loadMeta(dir);
   const out = [];
-  for (const kind of ['character', 'place']) {
+  for (const kind of ['character', 'place', 'item']) {
     for (const item of meta[kindOf(kind).list]) {
       let card;
       try {
@@ -863,7 +867,7 @@ function cardIndex(dir) {
         image: card.image,
         protagonist: card.protagonist,
         inflect,
-        forms: inflect ? declension.nameForms(item.title, card.aliases, { kind }) : [], // падежные формы названия и имён
+        forms: inflect ? declension.nameForms(item.title, card.aliases, { kind: kind === 'item' ? 'place' : kind }) : [], // падежные формы названия и имён; предметы склоняются как места: «кольцо», «зеркало»
       });
     }
   }

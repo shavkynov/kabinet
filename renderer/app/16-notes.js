@@ -211,6 +211,7 @@ function wireLists() {
 
   characterListCtl = makeCardList('character', '#characterList');
   placeListCtl = makeCardList('place', '#placeList');
+  itemListCtl = makeCardList('item', '#itemList');
 
   trashListCtl = createList({
     el: $('#trashList'),
@@ -309,6 +310,7 @@ function wireLists() {
   } catch { /* ignore */ }
   $('#addCharacter').addEventListener('click', () => addDoc('character'));
   $('#addPlace').addEventListener('click', () => addDoc('place'));
+  $('#addItem').addEventListener('click', () => addDoc('item'));
   $('#btnRestore').addEventListener('click', () => restoreFromTrash(trashSel));
   $('#btnEmptyTrash').addEventListener('click', emptyTrashAll);
   // правый клик по заголовку «Персонажи» / «Места»: шаблон карточки

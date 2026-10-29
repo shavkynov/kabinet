@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS = {
   fillerSkipSpeech: true, // слова-паразиты не отмечаются в репликах героев
   storyCharacters: false, // режим «Рассказы»: показывать раздел «Персонажи»
   storyPlaces: false,     // режим «Рассказы»: показывать раздел «Места»
+  storyItems: false,      // режим «Рассказы»: показывать раздел «Предметы»
 };
 
 // Допустимые значения для чисел, которые можно вписать вручную (шире, чем у ползунков).
@@ -92,7 +93,7 @@ function loadSettings() {
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;
     if (typeof raw.typoLayout === 'boolean') s.typoLayout = raw.typoLayout;
     if (raw.typoWeb !== true) s.typoNbsp = false; // один раз при обновлении неразрывные пробелы выключаются, дальше выбор за автором
-    if (['system', 'light', 'dark'].includes(raw.theme)) s.theme = raw.theme;
+    if (isTheme(raw.theme)) s.theme = raw.theme;
     if (['none', 'grain', 'warm'].includes(raw.paper)) s.paper = raw.paper;
     if (typeof raw.font === 'string' && (Object.hasOwn(FONTS, raw.font) || raw.font.startsWith('custom:'))) {
       s.font = raw.font;
@@ -112,6 +113,7 @@ function loadSettings() {
     if (typeof raw.storyCharacters === 'boolean') s.storyCharacters = raw.storyCharacters;
     if (typeof raw.fillerSkipSpeech === 'boolean') s.fillerSkipSpeech = raw.fillerSkipSpeech;
     if (typeof raw.storyPlaces === 'boolean') s.storyPlaces = raw.storyPlaces;
+    if (typeof raw.storyItems === 'boolean') s.storyItems = raw.storyItems;
     if (typeof raw.ambient === 'string' && Object.hasOwn(AMBIENTS, raw.ambient)) s.ambient = raw.ambient;
     if (typeof raw.goalChime === 'boolean') s.goalChime = raw.goalChime;
     if (['space', 'indent'].includes(raw.para)) s.para = raw.para;
@@ -157,6 +159,7 @@ function applySettings() {
   document.body.classList.toggle('typewriter', settings.typewriter);
   updateTwPad();
 
+  document.documentElement.setAttribute('data-theme', settings.theme); // цвета цветных тем лежат в style.css
   // Тему применяет сама macOS-часть окна: так подстраиваются и меню, и полосы прокрутки
   if (settings.theme !== lastTheme) {
     lastTheme = settings.theme;
@@ -199,6 +202,7 @@ function applySettings() {
   $('#setProjectGoalOn').checked = settings.projectGoalOn;
   $('#setStoryCharacters').checked = settings.storyCharacters;
   $('#setStoryPlaces').checked = settings.storyPlaces;
+  $('#setStoryItems').checked = settings.storyItems;
   applyKinds();
   if (project) renderTotal();
   if (!settings.projectGoalOn) closeProjPop();

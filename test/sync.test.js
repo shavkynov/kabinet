@@ -131,6 +131,25 @@ test('копии-конфликты облака находятся и пере�
   assert.equal(moved.length, 1);
 });
 
+test('предметы: конфликтная копия из облака находится, свои правки не теряются', () => {
+  const { dir } = mk();
+  const { id } = project.addItem(dir, 'item', null);
+  project.writeItem(dir, 'item', id, JSON.stringify({ short: 'моя версия', aliases: [], fields: [] }));
+  // облако принесло копию файла предмета
+  fs.writeFileSync(path.join(dir, 'Предметы', `${id} (conflicted copy 2026-10-20).json`), '{"short":"чужая"}');
+  const list = cloud.findConflictCopies(dir);
+  assert.deepEqual(list, [`Предметы/${id} (conflicted copy 2026-10-20).json`]);
+  assert.equal(cloud.moveConflictCopies(dir, list), 1);
+  assert.equal(JSON.parse(project.readItem(dir, 'item', id)).short, 'моя версия');
+  // копия уехала в «Конфликты/облако …/Предметы/…», из папки предметов исчезла
+  assert.ok(!fs.existsSync(path.join(dir, 'Предметы', `${id} (conflicted copy 2026-10-20).json`)));
+  const saved = fs.readdirSync(path.join(dir, 'Конфликты')).map((d) => {
+    const sub = path.join(dir, 'Конфликты', d, 'Предметы');
+    return fs.existsSync(sub) ? fs.readdirSync(sub) : [];
+  }).flat();
+  assert.deepEqual(saved, [`${id} (conflicted copy 2026-10-20).json`]);
+});
+
 test('замок: чужое устройство видно, своё и старое нет', () => {
   const { dir } = mk();
   const now = Date.now();
@@ -149,6 +168,7 @@ test('следилка: какие файлы интересны', () => {
   assert.equal(isRelevant('project.json'), true);
   assert.equal(isRelevant('Главы/abc123.md'), true);
   assert.equal(isRelevant('Персонажи/abc123.json'), true);
+  assert.equal(isRelevant('Предметы/abc123.json'), true);
   assert.equal(isRelevant('Главы/abc123.md.123.tmp'), false);
   assert.equal(isRelevant('Главы/.abc123.md.icloud'), false);
   assert.equal(isRelevant('Резервные копии/2026/project.json'), false);

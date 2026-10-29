@@ -3,8 +3,8 @@
 // Здесь: обновляем списки и открытые документы. Документ с несохранёнными правками не трогаем:
 // при его сохранении main сам спрячет чужую версию в папку «Конфликты».
 
-const FOLDER_OF = { chapter: 'Главы', character: 'Персонажи', place: 'Места', note: 'Заметки' };
-const EXT_OF = { chapter: 'md', character: 'json', place: 'json', note: 'md' };
+const FOLDER_OF = { chapter: 'Главы', character: 'Персонажи', place: 'Места', item: 'Предметы', note: 'Заметки' };
+const EXT_OF = { chapter: 'md', character: 'json', place: 'json', item: 'json', note: 'md' };
 let syncBusy = false;
 let syncQueue = [];
 
@@ -86,7 +86,7 @@ async function applyExternal(files) {
   }
 
   // 3. Имена в тексте и счётчики.
-  if ([...set].some((f) => f.startsWith('Персонажи/') || f.startsWith('Места/'))) await refreshIndex();
+  if ([...set].some((f) => f.startsWith('Персонажи/') || f.startsWith('Места/') || f.startsWith('Предметы/'))) await refreshIndex();
   if ([...set].some((f) => f.startsWith('Главы/'))) refreshTotals();
 
   if (kept) setStatus('ok', t('Этот текст изменили на другом устройстве. Ваша версия сохранится, чужая уйдёт в папку «Конфликты».'));

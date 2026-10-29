@@ -18,7 +18,7 @@ test('createProject создаёт структуру и одну главу', (
   const p = project.createProject(dir, 'Роман');
   assert.equal(p.name, 'Роман');
   assert.equal(p.chapters.length, 1);
-  for (const d of ['Главы', 'Персонажи', 'Места', 'Заметки', 'Изображения', 'Корзина']) {
+  for (const d of ['Главы', 'Персонажи', 'Места', 'Предметы', 'Заметки', 'Изображения', 'Корзина']) {
     assert.ok(fs.existsSync(path.join(dir, d)), d);
   }
   assert.ok(fs.existsSync(path.join(dir, 'Главы', `${p.chapters[0].id}.md`)));
@@ -233,6 +233,84 @@ test('карточки: запись очищается, мусор отверг
   assert.throws(() => project.writeItem(dir, 'place', 'abcdef123456', '{}'), /не найдена/);
   assert.throws(() => project.readItem(dir, 'place', '../x'), /Неверный идентификатор/);
   assert.throws(() => project.addItem(dir, 'chapter', null), /Неизвестный вид/);
+});
+
+test('предметы: карточки без шаблона, тот же цикл жизни', () => {
+  const dir = path.join(tmp(), 'P');
+  const p = project.createProject(dir, 'P');
+  assert.deepEqual(p.items, []);
+  const { id } = project.addItem(dir, 'item', null);
+  // без шаблона: новая карточка пустая
+  const fresh = JSON.parse(project.readItem(dir, 'item', id));
+  assert.deepEqual(fresh.fields, []);
+  assert.equal(fresh.short, '');
+  // запись и чтение полей — как у мест и персонажей
+  project.writeItem(dir, 'item', id, JSON.stringify({
+    short: 'Ржавый ключ',
+    aliases: ['Ключ', 'ключик'],
+    fields: [{ name: 'Где найден', value: 'в колодце' }],
+  }));
+  const saved = JSON.parse(project.readItem(dir, 'item', id));
+  assert.equal(saved.short, 'Ржавый ключ');
+  assert.deepEqual(saved.aliases, ['Ключ', 'ключик']);
+  assert.ok(fs.existsSync(path.join(dir, 'Предметы', `${id}.json`)));
+  project.renameItem(dir, 'item', id, 'Ржавый ключ');
+  // переименование, порядок и перемещение — как у остальных карточек
+  const { id: second } = project.addItem(dir, 'item', id);
+  const v = project.renameItem(dir, 'item', second, 'Лунный амулет');
+  assert.deepEqual(v.items.map((x) => x.id), [id, second]);
+  assert.equal(v.items[1].title, 'Лунный амулет');
+  assert.deepEqual(project.moveItem(dir, 'item', second, 0).items.map((x) => x.id), [second, id]);
+  assert.deepEqual(project.moveItem(dir, 'item', second, 99).items.map((x) => x.id), [id, second]);
+  // индекс карточек: предметы попадают в общую подсветку
+  const cid = p.chapters[0].id;
+  project.writeChapter(dir, cid, 'Ключ лежал у колодца, а Лунный амулет пропал.');
+  const idx = project.cardIndex(dir);
+  const key = idx.find((c) => c.kind === 'item' && c.id === id);
+  assert.equal(key.title, 'Ржавый ключ');
+  assert.ok(idx.some((c) => c.kind === 'item' && c.id === second));
+  // корзина и восстановление: карточка с содержимым и иконкой возвращается целиком
+  project.writeItem(dir, 'item', second, JSON.stringify({
+    short: 'светится в темноте', aliases: [], fields: [{ name: 'Где найден', value: 'в пещере' }],
+  }));
+  project.setItemIcon(dir, 'item', second, '💎');
+  project.deleteItem(dir, 'item', second);
+  assert.ok(project.openProject(dir).trash.some((e) => e.kind === 'item' && e.id === second));
+  const restored = project.restoreTrash(dir, project.openProject(dir).trash.find((e) => e.id === second).tid);
+  assert.ok(restored.project.items.some((x) => x.id === second));
+  assert.equal(restored.project.items.find((x) => x.id === second).icon, '💎');
+  const back = JSON.parse(project.readItem(dir, 'item', second));
+  assert.equal(back.short, 'светится в темноте');
+  assert.deepEqual(back.fields, [{ name: 'Где найден', value: 'в пещере' }]);
+  assert.equal(project.openProject(dir).trash.length, 0);
+  // предметы среднего рода склоняются как места: «кольцо» -> «кольцом»
+  const { id: ring } = project.addItem(dir, 'item', null);
+  project.renameItem(dir, 'item', ring, 'Кольцо');
+  const ringCard = project.cardIndex(dir).find((c) => c.kind === 'item' && c.id === ring);
+  assert.ok(ringCard.forms.includes('Кольцом'));
+});
+
+test('предметы: старый project.json без списка items открывается и дополняется', () => {
+  const dir = path.join(tmp(), 'P');
+  const p = project.createProject(dir, 'P');
+  const { id: cid } = project.addItem(dir, 'character', null);
+  project.renameItem(dir, 'character', cid, 'Алиса');
+  // проект до 0.32.0: ключа items нет
+  const metaPath = path.join(dir, 'project.json');
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  delete meta.items;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  // открытие: список появляется пустым, чужие данные не тронуты
+  const v = project.openProject(dir);
+  assert.deepEqual(v.items, []);
+  assert.equal(v.characters[0].title, 'Алиса');
+  assert.deepEqual(v.templates.character, p.templates.character);
+  // создание предмета дописывает ключ и не ломает сохранение
+  const { id } = project.addItem(dir, 'item', null);
+  const after = project.openProject(dir);
+  assert.ok(after.items.some((x) => x.id === id));
+  assert.equal(after.characters[0].title, 'Алиса');
+  assert.ok(fs.existsSync(path.join(dir, 'Предметы')));
 });
 
 test('корзина: если файл пропал, пустая запись под видом восстановленной не создаётся', () => {

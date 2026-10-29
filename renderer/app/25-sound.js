@@ -85,6 +85,7 @@ function wireChrome() {
   $('#btnSettings').addEventListener('click', toggleSettings);
   $('#btnSound').addEventListener('click', () => togglePanel('sound'));
   wireChips();
+  wireBinderTop();
 
   bindSetting('#setLinks', 'links', (el) => el.checked);
   bindSetting('#setSpell', 'spellOn', (el) => el.checked);
@@ -113,6 +114,7 @@ function wireChrome() {
   bindSetting('#setStoryCharacters', 'storyCharacters', (el) => el.checked);
   bindSetting('#anFillerSpeech', 'fillerSkipSpeech', (el) => el.checked);
   bindSetting('#setStoryPlaces', 'storyPlaces', (el) => el.checked);
+  bindSetting('#setStoryItems', 'storyItems', (el) => el.checked);
   bindSetting('#setGoalChime', 'goalChime', (el) => el.checked);
   for (const key of Object.keys(LIMITS)) bindNumeric(key);
 

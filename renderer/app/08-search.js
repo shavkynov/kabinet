@@ -1,6 +1,6 @@
 // ---------- поиск по проекту и экспорт ----------
 
-const KIND_NAME = { chapter: 'Глава', character: 'Персонаж', place: 'Место', note: 'Заметка' };
+const KIND_NAME = { chapter: 'Глава', character: 'Персонаж', place: 'Место', item: 'Предмет', note: 'Заметка' };
 let searchTimer = null;
 let searchToken = 0;
 let searchQuery = '';
@@ -210,7 +210,7 @@ async function replaceAll() {
     const text = [
       t('Заменить «{0}» на «{1}»?', q, to || t('(пусто)')),
       t('Вхождений: {0}, документов: {1}.', plan.total, plan.docs.length),
-      t('Главы: {0}, карточки: {1}, заметки: {2}.', sum(['chapter']), sum(['character', 'place']), sum(['note'])),
+      t('Главы: {0}, карточки: {1}, заметки: {2}.', sum(['chapter']), sum(['character', 'place', 'item']), sum(['note'])),
       t('Перед заменой делается резервная копия проекта.'),
     ].join('\n');
     if (!confirm(text)) return;

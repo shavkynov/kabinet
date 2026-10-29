@@ -1,17 +1,18 @@
 // ---------- списки в левой колонке: главы и карточки ----------
 
-const LIST_KEY = { character: 'characters', place: 'places', note: 'notes' };
-const TRASH_ICON = { chapter: '📄', character: '👤', place: '📍', note: '📝' };
+const LIST_KEY = { character: 'characters', place: 'places', item: 'items', note: 'notes' };
+const TRASH_ICON = { chapter: '📄', character: '👤', place: '📍', item: '🗝', note: '📝' };
 let trashSel = null; // выбранная в корзине запись (tid)
 const MARKER_COLORS = { green: '#2fb344', red: '#e5484d', orange: '#f59f00' };
 
 let chapterListCtl = null;
 let characterListCtl = null;
 let placeListCtl = null;
+let itemListCtl = null;
 let noteListCtl = null;
 let trashListCtl = null;
 let cardView = null;
-const lastSelected = { chapter: null, character: null, place: null, note: null };
+const lastSelected = { chapter: null, character: null, place: null, item: null, note: null };
 
 function itemsOf(kind) {
   if (!project) return [];
@@ -39,7 +40,7 @@ function updateCenter() {
 }
 
 function allListCtls() {
-  return [chapterListCtl, characterListCtl, placeListCtl, noteListCtl, trashListCtl];
+  return [chapterListCtl, characterListCtl, placeListCtl, itemListCtl, noteListCtl, trashListCtl];
 }
 
 function updateAllSelections() {
@@ -56,7 +57,7 @@ function refreshLists() {
 }
 
 function listCtl(kind) {
-  return { chapter: chapterListCtl, character: characterListCtl, place: placeListCtl, note: noteListCtl, trash: trashListCtl }[kind];
+  return { chapter: chapterListCtl, character: characterListCtl, place: placeListCtl, item: itemListCtl, note: noteListCtl, trash: trashListCtl }[kind];
 }
 
 // Список глав, где встречается открытая карточка (под полями карточки).
