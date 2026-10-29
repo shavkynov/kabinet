@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.tmp
 renderer/app.gen.js
+
+WINDOWS.md
+CLAUDE.md
