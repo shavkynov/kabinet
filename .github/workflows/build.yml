@@ -3,9 +3,13 @@ name: Проверка и сборка
 on:
   push:
     branches: [main, master]
-    tags: ['v*']
+    tags: ['v*', '[0-9]*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Метка выпуска, к которому добавить установщики (например, v0.31.2). Пусто: только собрать'
+        required: false
 
 permissions:
   contents: write   # нужен, чтобы выпуск (Release) получил файлы
@@ -24,7 +28,7 @@ jobs:
 
   build:
     # установщики собираются только при выпуске версии (метка v0.0.0) или вручную
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: check
     strategy:
       fail-fast: false
@@ -42,6 +46,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -59,7 +65,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag' || inputs.tag != ''
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -69,5 +75,5 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: files/*
-          generate_release_notes: true
