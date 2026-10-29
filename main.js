@@ -187,24 +187,41 @@ async function showSyncInfo() {
   }
 }
 
-// «Отзывы» и «Обновления» в верхнем меню: адреса зашиты в код, наружу открываются только они.
-const FEEDBACK_EMAIL = 'Shavkynov@gmail.com';
-const UPDATES_URL = 'https://boosty.to/writer_room';
+// «Обновления» в верхнем меню: адрес зашит в код, наружу открывается только он.
+const UPDATES_URL = 'https://github.com/shavkynov/kabinet';
 
-async function showFeedback() {
-  const res = await dialog.showMessageBox(win, {
-    type: 'info',
-    message: t('Отзывы'),
-    detail: [
-      t('Расскажите, пожалуйста, о своём опыте работы с «Кабинетом»: что удобно, что мешает, чего не хватает, что работает не так.'),
-      t('Напишите на почту: {0}', FEEDBACK_EMAIL),
-    ].join('\n\n'),
-    buttons: ['OK', t('Скопировать адрес'), t('Написать письмо')],
-    defaultId: 0,
-    cancelId: 0,
-  });
-  if (res.response === 1) clipboard.writeText(FEEDBACK_EMAIL);
-  else if (res.response === 2) shell.openExternal(`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`Kabinet ${app.getVersion()} - feedback`)}`);
+const RELEASE_API = 'https://api.github.com/repos/shavkynov/kabinet/releases/latest';
+
+async function checkUpdates() {
+  const { compareVersions, parseRelease } = require('./src/updates');
+  const current = app.getVersion();
+  let release = null, failed = false;
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10000);
+    try {
+      const res = await net.fetch(RELEASE_API, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Kabinet/${current}` }, signal: ctl.signal });
+      if (res.ok) release = parseRelease(await res.json());
+      else if (res.status !== 404) failed = true;
+    } finally { clearTimeout(timer); }
+  } catch { failed = true; }
+  if (failed) {
+    await dialog.showMessageBox(win, { type: 'info', message: t('Обновления'), detail: t('Не удалось проверить: нет связи с GitHub. Попробуйте позже или откройте страницу выпусков сами.'), buttons: ['OK'], defaultId: 0 });
+    return;
+  }
+  if (release && compareVersions(release.version, current) > 0) {
+    const res = await dialog.showMessageBox(win, {
+      type: 'info',
+      message: t('Доступна версия {0}', release.version),
+      detail: [t('Сейчас у вас версия {0}.', current), release.notes].filter(Boolean).join('\n\n'),
+      buttons: [t('Открыть страницу GitHub'), t('Позже')],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (res.response === 0) shell.openExternal(release.url || UPDATES_URL);
+    return;
+  }
+  await dialog.showMessageBox(win, { type: 'info', message: t('Обновления'), detail: t('У вас последняя версия: {0}.', current), buttons: ['OK'], defaultId: 0 });
 }
 
 async function showUpdatesInfo() {
@@ -212,11 +229,10 @@ async function showUpdatesInfo() {
     type: 'info',
     message: t('Обновления'),
     detail: [
-      t('Новые версии «Кабинета» выкладываются на Boosty: {0}', UPDATES_URL),
-      t('Всё бесплатно: Boosty выбран просто потому, что автору так удобно публиковать новые версии.'),
+      t('Новые версии «Кабинета» выкладываются на GitHub: {0}', UPDATES_URL),
       t('Сейчас у вас версия {0}.', app.getVersion()),
     ].join('\n\n'),
-    buttons: ['OK', t('Открыть Boosty')],
+    buttons: ['OK', t('Открыть GitHub')],
     defaultId: 0,
     cancelId: 0,
   });
@@ -942,6 +958,7 @@ function buildMenu() {
         { label: tm('Показать / скрыть панель глав'), accelerator: 'CmdOrCtrl+\\', click: () => send('ui:toggleSidebar') },
         { label: t('Только лист'), accelerator: 'CmdOrCtrl+Shift+F', click: () => send('ui:toggleFocus') },
         { label: t('Режим «печатная машинка»'), accelerator: 'CmdOrCtrl+Shift+T', click: () => send('ui:toggleTypewriter') },
+        { label: t('Скрытые символы'), accelerator: 'CmdOrCtrl+Shift+8', click: () => send('ui:toggleMarks') },
         { label: t('Звуки клавиш вкл / выкл'), accelerator: 'CmdOrCtrl+Shift+M', click: () => send('ui:toggleSound') },
         { label: t('Фоновый эмбиент вкл / выкл'), accelerator: 'CmdOrCtrl+Shift+A', click: () => send('ui:toggleAmbient') },
         { label: t('Текст и оформление…'), accelerator: 'CmdOrCtrl+,', click: () => send('ui:openSettings') },
@@ -954,8 +971,7 @@ function buildMenu() {
         ...(isMac ? [] : [sep, { label: t('Показывать строку меню'), type: 'checkbox', checked: menuBarVisible, click: (item) => setMenuBar(item.checked) }]),
       ],
     },
-    { label: t('Отзывы'), submenu: [{ label: t('Написать отзыв…'), click: showFeedback }] },
-    { label: t('Обновления'), submenu: [{ label: t('Где взять новые версии…'), click: showUpdatesInfo }] },
+    { label: t('Обновления'), submenu: [{ label: t('Проверить обновления…'), click: checkUpdates }, { label: t('Где взять новые версии…'), click: showUpdatesInfo }] },
     {
       label: t('Окно'),
       submenu: [

@@ -458,6 +458,15 @@
         <input id="setTypeAnim" type="checkbox">
       </div>
       <div class="row">
+        <label class="wrap" for="setMarks">Показывать скрытые символы (⌘⇧8)</label>
+        <input id="setMarks" type="checkbox">
+      </div>
+      <div class="row">
+        <label class="wrap" for="setMarksSpaces">…и обычные пробелы точками</label>
+        <input id="setMarksSpaces" type="checkbox">
+      </div>
+      <p class="hint">¶ — конец абзаца, ° — неразрывный пробел, → — табуляция и красная строка, ↵ — мягкий перенос. Метки видны только на экране: в текст, копирование и экспорт они не попадают.</p>
+      <div class="row">
         <label class="wrap" for="setTypo">Типографика: «ёлочки», тире, многоточие</label>
         <input id="setTypo" type="checkbox">
       </div>
@@ -666,12 +675,6 @@
       <h2>Новый проект</h2>
       <label>Название
         <input id="projectNameInput" autocomplete="off" required maxlength="80">
-      </label>
-      <label>Что будете писать
-        <select id="projectModeInput">
-          <option value="novel">Роман (главы)</option>
-          <option value="stories">Рассказы</option>
-        </select>
       </label>
       <p class="hint">Дальше нужно выбрать папку, внутри которой появится папка проекта.</p>
       <div class="dialog-actions">

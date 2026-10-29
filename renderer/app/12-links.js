@@ -3,6 +3,8 @@
 let checker = null; // проверка текста (textcheck.js)
 let cardIdx = []; // сводка по карточкам: имена, краткая справка, картинка
 let lastLinks = null;
+let lastMarks = false;
+let lastMarksSpaces = false;
 const imageCache = new Map();
 
 function getImageUrl(file) {

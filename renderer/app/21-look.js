@@ -4,6 +4,8 @@ const DEFAULT_SETTINGS = {
   an: {},          // какие виды слов подсвечены (анализ текста)
   anLongMin: 30,   // с скольких слов предложение считается длинным
   typo: true,
+  marks: false,       // показ скрытых символов (¶, неразрывные пробелы, табуляции)
+  marksSpaces: false, // ...и обычных пробелов
   typeAnim: true,   // плавное появление набираемых букв
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
   typoLayout: true, // «Привести типографику в порядок» убирает пустые строки между абзацами и включает красную строку
@@ -85,6 +87,8 @@ function loadSettings() {
     if (typeof raw.spellOn === 'boolean') s.spellOn = raw.spellOn;
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
+    if (typeof raw.marks === 'boolean') s.marks = raw.marks;
+    if (typeof raw.marksSpaces === 'boolean') s.marksSpaces = raw.marksSpaces;
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;
     if (typeof raw.typoLayout === 'boolean') s.typoLayout = raw.typoLayout;
     if (raw.typoWeb !== true) s.typoNbsp = false; // один раз при обновлении неразрывные пробелы выключаются, дальше выбор за автором
@@ -175,6 +179,15 @@ function applySettings() {
   $('#setTypoNbsp').checked = settings.typoNbsp;
   $('#setTypoLayout').checked = settings.typoLayout;
   $('#setTypeAnim').checked = settings.typeAnim;
+  $('#setMarks').checked = settings.marks;
+  $('#setMarksSpaces').checked = settings.marksSpaces;
+  $('#setMarksSpaces').disabled = !settings.marks;
+  document.body.classList.toggle('marks-on', settings.marks);
+  if (editor && (settings.marks !== lastMarks || settings.marksSpaces !== lastMarksSpaces)) {
+    lastMarks = settings.marks;
+    lastMarksSpaces = settings.marksSpaces;
+    refreshMarks(editor);
+  }
   document.documentElement.setAttribute('spellcheck', settings.spellOn ? 'true' : 'false');
   document.body.classList.toggle('links-off', !settings.links);
   if (settings.links !== lastLinks) {

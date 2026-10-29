@@ -10,6 +10,7 @@ import { showMenu, closeMenu, ICONS_CHARACTER, ICONS_PLACE } from './menu.js';
 import { t, tdom, LANG, LOCALE, initDomTranslation, initKeyLabels, setTermsMode, applyTermsDom } from './i18n.js';
 import { LangIssues, initTextCheck } from './textcheck.js';
 import { TypeAnim } from './typeanim.js';
+import { HiddenMarks, refreshMarks } from './marks.js';
 import { Comments, commentRanges, setCommentRanges, addCommentRange, removeCommentRange, setActiveComment } from './comments.js';
 import { TextAnalysis, refreshAnalysis, scanTense, scanRhythm, analysisRanges, analysisAt, stepIndex, AN_CATS, AN_NAV_CATS } from './analysis.js';
 import { Typography, fixDocTypography } from './typo.js';

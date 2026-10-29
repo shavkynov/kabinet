@@ -1091,3 +1091,19 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 #rhythmBar i.run { background: var(--an-rhythm); }
 #rhythmBar i.dlg { background: var(--line); }
 #rhythmBar i:hover { outline: 1px solid var(--text); }
+
+/* показ скрытых символов: метки рисуются поверх, вёрстка не сдвигается */
+.mk-nb, .mk-nn, .mk-th, .mk-em, .mk-tab, .mk-shy, .mk-zw, .mk-sp { position: relative; }
+.mk-nb::after, .mk-nn::after, .mk-th::after, .mk-em::after, .mk-tab::after, .mk-shy::after, .mk-zw::after, .mk-sp::after {
+  position: absolute; left: 0; top: 0; width: 100%; text-align: center; pointer-events: none;
+  color: var(--accent, #b4543a); opacity: .6; font-size: .8em; line-height: inherit; text-indent: 0;
+}
+.mk-nb::after { content: "°"; }
+.mk-nn::after { content: "°"; font-size: .6em; }
+.mk-th::after { content: "·"; }
+.mk-em::after, .mk-tab::after { content: "→"; }
+.mk-shy::after { content: "¬"; }
+.mk-zw::after { content: "|"; opacity: .35; }
+.mk-sp::after { content: "·"; opacity: .35; }
+.mk-para::after { content: "¶"; position: absolute; margin-left: .25em; color: var(--accent, #b4543a); opacity: .5; font-size: .8em; pointer-events: none; }
+.mk-br::before { content: "↵"; position: absolute; color: var(--accent, #b4543a); opacity: .6; font-size: .8em; pointer-events: none; }

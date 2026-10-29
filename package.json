@@ -1,14 +1,14 @@
 {
   "name": "kabinet",
   "productName": "Кабинет",
-  "version": "0.30.2",
+  "version": "0.31.2",
   "description": "Редактор Александра Шавкунова для писателей",
   "main": "main.js",
   "private": true,
   "scripts": {
     "build": "node scripts/build.js",
     "start": "npm run build && electron .",
-    "test": "node --test test/project.test.js test/langcheck.test.js test/i18n.test.js test/typo.test.js test/clip.test.js test/import.test.js test/morph.test.js test/editing.test.js test/tense.test.js test/docx.test.js test/replace.test.js test/mentions.test.js test/stats.test.js test/sync.test.js test/rhythm.test.js test/terms.test.js test/mode.test.js test/sentences.test.js test/stem.test.js test/fillers.test.js test/pos.test.js test/backup.test.js test/passive.test.js test/declension.test.js test/namematch.test.js test/names-forms.test.js test/analysis-ui.test.js test/audit-eval.test.js test/comments.test.js test/en.test.js",
+    "test": "node --test test/project.test.js test/langcheck.test.js test/i18n.test.js test/typo.test.js test/clip.test.js test/import.test.js test/marks.test.js test/updates.test.js test/morph.test.js test/editing.test.js test/tense.test.js test/docx.test.js test/replace.test.js test/mentions.test.js test/stats.test.js test/sync.test.js test/rhythm.test.js test/terms.test.js test/mode.test.js test/sentences.test.js test/stem.test.js test/fillers.test.js test/pos.test.js test/backup.test.js test/passive.test.js test/declension.test.js test/namematch.test.js test/names-forms.test.js test/analysis-ui.test.js test/audit-eval.test.js test/comments.test.js test/en.test.js",
     "dist": "npm run build && electron-builder --mac dir --arm64 --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "dist:win-nosign": "npm run build && electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false",

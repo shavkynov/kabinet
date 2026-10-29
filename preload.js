@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('kabinet', {
   onOpenProject: (cb) => on('ui:openProject', cb),
   onCloseProject: (cb) => on('ui:closeProject', cb),
   onToggleTypewriter: (cb) => on('ui:toggleTypewriter', cb),
+  onToggleMarks: (cb) => on('ui:toggleMarks', cb),
   onToggleFocus: (cb) => on('ui:toggleFocus', cb),
   onOpenSettings: (cb) => on('ui:openSettings', cb),
 

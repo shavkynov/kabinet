@@ -41,6 +41,7 @@ function initEditor() {
       NameLinks,
       Comments,
       TypeAnim.configure({ isEnabled: () => settings.typeAnim }),
+      HiddenMarks.configure({ getOptions: () => ({ on: settings.marks, spaces: settings.marksSpaces }) }),
       Typography.configure({ getOptions: () => ({ enabled: settings.typo, quotes: true, dashes: true, nbsp: settings.typoNbsp, lang: LANG }) }),
       LangIssues.configure({ onChange: () => { if (checker) checker.scheduleRender(); } }),
       TextAnalysis.configure({ getConfig: () => ({ cats: settings.an, longMin: settings.anLongMin, fillers: settings.fillers, fillerSkipSpeech: settings.fillerSkipSpeech, repeatWin: settings.anRepeatWin, tenseMode: settings.tenseMode, skip: project ? project.analysisSkip : null }), onStats: showAnalysisStats }),

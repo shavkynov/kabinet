@@ -360,7 +360,7 @@ function init() {
   dlg.addEventListener('close', () => {
     if (dlg.returnValue !== 'ok') return;
     const name = $('#projectNameInput').value.trim();
-    if (name) createProjectFromName(name, $('#projectModeInput').value);
+    if (name) createProjectFromName(name, dlg.dataset.mode || 'novel');
   });
 
   api.onToggleSidebar(() => { if (project) toggleSidebar(); });
@@ -368,6 +368,7 @@ function init() {
   api.onOpenProject(openProjectFromDialog);
   api.onCloseProject(() => { if (project) leaveProject(); });
   api.onToggleTypewriter(() => { if (project) toggleTypewriter(); });
+  api.onToggleMarks(() => { settings.marks = !settings.marks; applySettings(); saveSettings(); });
   api.onToggleFocus(() => toggleFocusMode());
   api.onOpenSettings(() => { if (project) toggleSettings(); });
   api.onToggleSound(() => toggleSound());

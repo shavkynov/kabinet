@@ -95,7 +95,7 @@ async function openProjectFromDialog() {
 function askNewProject(mode) {
   const dlg = $('#nameDialog');
   const input = $('#projectNameInput');
-  $('#projectModeInput').value = mode === 'stories' ? 'stories' : 'novel';
+  dlg.dataset.mode = mode === 'stories' ? 'stories' : 'novel'; // тип проекта уже выбран карточкой
   input.value = '';
   dlg.returnValue = '';
   dlg.showModal();
