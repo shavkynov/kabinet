@@ -40,6 +40,9 @@ jobs:
           - os: macos-latest
             name: mac-intel
             cmd: npx electron-builder --mac dmg --x64 --publish never -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
+          - os: ubuntu-latest
+            name: linux
+            cmd: npx electron-builder --linux AppImage --x64 --publish never
           - os: windows-latest
             name: windows
             cmd: npx electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
@@ -62,6 +65,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.exe
+            dist/*.AppImage
           if-no-files-found: error
 
   release:
