@@ -18,6 +18,7 @@ import { Slice, Fragment } from '@tiptap/pm/model';
 import { isOfficeHtml, officeTextToParagraphs } from '../src/paste.js';
 import { clipboardPlain } from '../src/clip.js';
 import { isTheme } from '../src/themes.js';
+import { isEngine } from '../src/searchengines.js';
 import { authorSheets } from '../src/terms.js';
 import { DEFAULT_FILLERS, cleanFiller, cleanFillerList, skipKey } from '../src/editing.js';
 

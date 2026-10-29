@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('kabinet', {
   onContextMenu: (cb) => onData('ui:contextMenu', cb),
   editCommand: (cmd) => call('ctx:edit', cmd),
   replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
-  webSearch: (text) => call('ctx:webSearch', text),
+  webSearch: (text, engine) => call('ctx:webSearch', text, engine),
   // проекты
   listRecents: () => call('recents:list'),
   removeRecent: (p) => call('recents:remove', p),

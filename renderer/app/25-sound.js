@@ -93,6 +93,7 @@ function wireChrome() {
   bindSetting('#setTypoNbsp', 'typoNbsp', (el) => el.checked);
   bindSetting('#setTypoLayout', 'typoLayout', (el) => el.checked);
   bindSetting('#setTypeAnim', 'typeAnim', (el) => el.checked);
+  bindSetting('#setSearchEngine', 'searchEngine', (el) => el.value);
   bindSetting('#setMarks', 'marks', (el) => el.checked);
   bindSetting('#setMarksSpaces', 'marksSpaces', (el) => el.checked);
   $('#btnFixTypo').addEventListener('click', fixChapterTypography);

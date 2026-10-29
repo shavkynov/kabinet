@@ -23,6 +23,7 @@ const { writeFileAtomic } = require('./src/fsutil');
 const langcheck = require('./src/langcheck');
 const i18n = require('./src/i18n');
 const themes = require('./src/themes');
+const searchEngines = require('./src/searchengines');
 const { t, tdom } = i18n;
 
 // ---------- данные приложения: одна папка и для запуска из исходников, и для собранной программы ----------
@@ -879,12 +880,11 @@ handle('ctx:replaceMisspelling', (word) => {
   return true;
 });
 
-// «Искать в интернете»: слово из контекстного меню уходит в поисковик (русский интерфейс: Яндекс, английский: Google).
-handle('ctx:webSearch', (text) => {
-  const q = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-  if (!q) return false;
-  const base = i18n.getLang() === 'en' ? 'https://www.google.com/search?q=' : 'https://yandex.ru/search/?text=';
-  shell.openExternal(base + encodeURIComponent(q));
+// «Искать в интернете»: слово из контекстного меню уходит в выбранный автором поисковик (настройка searchEngine).
+handle('ctx:webSearch', (text, engine) => {
+  const url = searchEngines.searchUrl(engine, text, i18n.getLang());
+  if (!url) return false;
+  shell.openExternal(url);
   return true;
 });
 

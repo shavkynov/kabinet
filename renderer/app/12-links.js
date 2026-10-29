@@ -170,7 +170,7 @@ function onNativeContext(p) {
   const picked = String(p.selectionText || '').replace(/\s+/g, ' ').trim();
   if (picked && picked.length <= 100) {
     const shown = picked.length > 28 ? `${picked.slice(0, 28)}…` : picked;
-    groups.push([{ label: t('Искать в интернете: «{0}»', shown), raw: true, onClick: () => api.webSearch(picked).catch((e) => showError(e.message)) }]);
+    groups.push([{ label: t('Искать в интернете: «{0}»', shown), raw: true, onClick: () => api.webSearch(picked, settings.searchEngine).catch((e) => showError(e.message)) }]);
   }
 
   const f = p.editFlags || {};

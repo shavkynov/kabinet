@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   typo: true,
   marks: false,       // показ скрытых символов (¶, неразрывные пробелы, табуляции)
   marksSpaces: false, // ...и обычных пробелов
+  searchEngine: LANG === 'en' ? 'google' : 'yandex', // «Искать в интернете» в меню правой кнопки
   typeAnim: true,   // плавное появление набираемых букв
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
   typoLayout: true, // «Привести типографику в порядок» убирает пустые строки между абзацами и включает красную строку
@@ -88,6 +89,7 @@ function loadSettings() {
     if (typeof raw.spellOn === 'boolean') s.spellOn = raw.spellOn;
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
+    if (isEngine(raw.searchEngine)) s.searchEngine = raw.searchEngine;
     if (typeof raw.marks === 'boolean') s.marks = raw.marks;
     if (typeof raw.marksSpaces === 'boolean') s.marksSpaces = raw.marksSpaces;
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;
@@ -182,6 +184,7 @@ function applySettings() {
   $('#setTypoNbsp').checked = settings.typoNbsp;
   $('#setTypoLayout').checked = settings.typoLayout;
   $('#setTypeAnim').checked = settings.typeAnim;
+  $('#setSearchEngine').value = settings.searchEngine;
   $('#setMarks').checked = settings.marks;
   $('#setMarksSpaces').checked = settings.marksSpaces;
   $('#setMarksSpaces').disabled = !settings.marks;
