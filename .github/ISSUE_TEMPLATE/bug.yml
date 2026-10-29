@@ -1,0 +1,43 @@
+name: Ошибка
+description: Что-то работает не так, как ожидалось
+title: "Ошибка: "
+labels: ["ошибка"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версия программы
+      description: Номер указан в окне «Обновления → Проверить обновления…»
+      placeholder: "0.31.2"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Система
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10
+        - Windows 11
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Что сделали
+      description: Шаги по порядку, начиная с открытия программы
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидали и что получилось
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Скриншот или пример текста
+      description: Перетащите изображение или файл в это поле. Для проблем со вставкой укажите, из какой программы копировали (например, Word на Windows).
