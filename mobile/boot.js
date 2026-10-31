@@ -137,9 +137,9 @@ function buildMenu(be, hw) {
     if (!st.linked) {
       return [
         { sep: true },
-        { head: t('Папка') },
-        { label: t('Открыть проект из папки…'), run: run(() => be.call('folder:open')) },
-        { label: t('Сохранять этот проект в папке…'), run: run(() => be.call('folder:choose')), disabled: !has },
+        { head: t('Синхронизация между устройствами') },
+        { label: t('Открыть проект из папки синхронизации…'), run: run(() => be.call('folder:open')) },
+        { label: t('Включить синхронизацию этого проекта…'), run: run(() => be.call('folder:choose')), disabled: !has },
       ];
     }
     const label = t('Синхронизация с папкой «{0}»', st.name || '');
