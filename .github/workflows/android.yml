@@ -4,8 +4,15 @@ name: Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Метка выпуска, к которому добавить APK (например, v0.34.0). Пусто: только собрать'
+        required: false
   push:
     tags: ['android-*']
+
+permissions:
+  contents: write   # нужен, чтобы APK попал в выпуск (Release)
 
 jobs:
   apk:
@@ -72,3 +79,10 @@ jobs:
         with:
           name: Kabinet-android
           path: out/*.apk
+
+      - name: Добавить APK в выпуск
+        if: inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: out/*.apk
