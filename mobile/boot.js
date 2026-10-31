@@ -163,6 +163,27 @@ function buildMenu(be, hw) {
     { label: t('Сохранить проект в ZIP'), run: () => be.exportZip().catch((e) => toast(e.message)), disabled: !has },
     { label: t('Шаблоны карточек…'), run: go('ui:openTemplates'), disabled: !has },
     { label: t('Сделать копию сейчас'), run: go('ui:backupNow'), disabled: !has },
+    { label: t('Копии проекта…'), run: run(async () => {
+      const list = be.listCopies();
+      if (!list.length) { toast(t('Копий пока нет.')); return; }
+      const pick = await chooseBox({
+        title: t('Копии проекта'),
+        message: t('Выберите копию. Она откроется как отдельный проект, текущий не изменится.'),
+        options: list.map((n) => ({ label: n.replace(/-(\d\d)-(\d\d)$/, ':$1:$2'), value: n })),
+        cancel: t('Отмена'),
+      });
+      if (!pick) return;
+      const name = be.restoreCopy(pick);
+      toast(t('Создан проект «{0}». Он в списке «Открыть проект…».', name));
+    }), disabled: !has },
+    { label: t('Поделиться текстом главы…'), run: run(async () => {
+      const el = document.querySelector('#editor .ProseMirror');
+      const text = el ? el.innerText.trim() : '';
+      if (!text) { toast(t('Откройте главу с текстом.')); return; }
+      if (native) {
+        try { await Share.share({ text, dialogTitle: t('Поделиться текстом') }); } catch (e) { if (!/cancel/i.test(String((e && e.message) || e))) throw e; }
+      } else if (navigator.clipboard) { await navigator.clipboard.writeText(text); toast(t('Текст скопирован.')); }
+    }), disabled: !has },
     { label: t('Закрыть проект'), run: go('ui:closeProject'), disabled: !has },
     ...folderMenu(),
     { sep: true },
@@ -264,6 +285,34 @@ function showFatal(err) {
     window.kabinet = Object.assign({}, be.api, { hw });
     window.kabinetBackend = be;
 
+    // Точка состояния синхронизации: серая — всё выгружено, мигает — идёт обмен, красная — ошибка, жёлтая — был конфликт.
+    const dot = document.createElement('button');
+    dot.id = 'syncDot';
+    dot.type = 'button';
+    dot.hidden = true;
+    document.body.append(dot);
+    const paintDot = () => {
+      const st = be.folderStatus();
+      dot.hidden = !st.linked || !be.hasProject();
+      if (dot.hidden) return;
+      const state = st.error ? 'err' : st.busy ? 'busy' : st.conflict ? 'conflict' : 'ok';
+      dot.className = state;
+      const text = {
+        err: i18n.t('Ошибка папки: {0}', st.error),
+        busy: i18n.t('Идёт синхронизация…'),
+        conflict: i18n.t('Был конфликт: чужая версия лежит в папке «Конфликты». Нажмите, чтобы синхронизировать.'),
+        ok: i18n.t('Синхронизировано'),
+      }[state];
+      dot.setAttribute('aria-label', text);
+      dot.dataset.text = text;
+    };
+    setInterval(paintDot, 1500);
+    dot.addEventListener('click', async () => {
+      toast(dot.dataset.text || '');
+      try { await be.call('folder:syncNow'); } catch (e) { toast(String((e && e.message) || e)); }
+      paintDot();
+    });
+
     wireShortcuts(be);
     wireContextMenu(be);
 
@@ -271,7 +320,7 @@ function showFatal(err) {
     if (be.folderStatus().available) be.resume().catch((e) => console.error('folder resume:', e));
 
     // Всё, что ещё не записано, уходит на диск при любом уходе из приложения.
-    const save = () => { fs.flush(); };
+    const save = () => { fs.flush(); try { be.flushFolder(); } catch { /* папка не подключена */ } };
     window.addEventListener('pagehide', save);
     window.addEventListener('beforeunload', save);
     document.addEventListener('visibilitychange', () => { if (document.hidden) { save(); be.autoBackup(); } });

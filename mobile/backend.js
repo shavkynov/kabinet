@@ -147,7 +147,7 @@ function createBackend(host, { session } = {}) {
   }
   const saveLinks = (map) => { try { writeFileAtomic(linksFile(), JSON.stringify(map, null, 2)); } catch (err) { console.error('folder links:', err); } };
 
-  const folder = { uri: null, name: '', sync: null, pending: new Set(), pushTimer: null, pullTimer: null, lockTimer: null, unwatch: null, lastSync: 0, lastError: '' };
+  const folder = { uri: null, name: '', sync: null, pending: new Set(), pushTimer: null, pullTimer: null, lockTimer: null, unwatch: null, lastSync: 0, lastError: '', busy: 0, conflict: false };
 
   function linkOf(dir) { return dir ? loadLinks()[dir] || null : null; }
   function setLink(dir, link) {
@@ -167,6 +167,7 @@ function createBackend(host, { session } = {}) {
     folder.uri = null;
     folder.name = '';
     folder.lastError = '';
+    folder.conflict = false;
   }
 
   const stateFileFor = (dir, uri) => path.join(APP,
@@ -227,10 +228,12 @@ function createBackend(host, { session } = {}) {
     if (!folder.sync || !currentDir || !folder.pending.size) return;
     const rels = [...folder.pending];
     folder.pending.clear();
+    folder.busy += 1;
     try {
       const res = await folder.sync.push(rels);
       folder.lastSync = Date.now();
       folder.lastError = '';
+      if (res.conflicts.length) folder.conflict = true;
       if (res.conflicts.length) {
         notify(t('Этот текст изменили на другом устройстве. Чужая версия сохранена в папке «Конфликты».'));
       }
@@ -238,17 +241,21 @@ function createBackend(host, { session } = {}) {
       folder.lastError = String((err && err.message) || err);
       console.error('folder push:', err);
       notify(t('Не удалось сохранить в папку: {0}', folder.lastError));
+    } finally {
+      folder.busy -= 1;
     }
   }
 
   /** Вычитываем правки с другого устройства. Пришедшие файлы не считаем своими. */
   async function pullChanges() {
     if (!folder.sync || !currentDir) return;
+    folder.busy += 1;
     try {
       const run = () => folder.sync.sync();
       const res = await (fs.unmute ? fs.unmute(run) : run());
       folder.lastSync = Date.now();
       folder.lastError = '';
+      if (res.conflicts.length) folder.conflict = true;
       if (res.conflicts.length) {
         notify(t('Этот текст изменили на другом устройстве. Ваша версия сохранится, чужая уйдёт в папку «Конфликты».'));
       }
@@ -257,7 +264,15 @@ function createBackend(host, { session } = {}) {
     } catch (err) {
       folder.lastError = String((err && err.message) || err);
       console.error('folder pull:', err);
+    } finally {
+      folder.busy -= 1;
     }
+  }
+
+  /** Немедленно выгрузить накопленное (уход приложения в фон). */
+  function flushFolder() {
+    clearTimeout(folder.pushTimer);
+    return pushChanged();
   }
 
   /** Название проекта в выбранной папке; null — если проекта там нет. */
@@ -282,6 +297,8 @@ function createBackend(host, { session } = {}) {
       uri: folder.uri,
       lastSync: folder.lastSync,
       error: folder.lastError,
+      busy: folder.busy > 0 || folder.pending.size > 0,
+      conflict: folder.conflict,
       available: !!host.folder,
     };
   }
@@ -361,6 +378,37 @@ function createBackend(host, { session } = {}) {
     if (!recents.has(recentsFile(), dir)) throw new Error('Этого проекта нет в списке недавних.');
     return openAt(dir);
   });
+
+  /** Автоматические копии открытого проекта, новые первыми. */
+  const listCopies = () => (currentDir ? backup.listBackups(currentDir, backupRoot(currentDir)).reverse() : []);
+
+  /** Копия становится новым отдельным проектом: открытый проект и сама копия не меняются. */
+  function restoreCopy(stamp) {
+    const dir = requireDir();
+    const src = path.join(backupRoot(dir), String(stamp));
+    if (!listCopies().includes(String(stamp))) throw new Error(t('Такой копии нет.'));
+    const label = `${path.basename(dir)} (${t('копия')} ${String(stamp).slice(0, 16).replace(/-(\d\d)$/, ':$1')})`;
+    const out = uniqueDir(safeFolderName(label));
+    const walk = (rel) => {
+      for (const e of fs.readdirSync(path.join(src, rel), { withFileTypes: true })) {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) { walk(r); continue; }
+        if (e.name === '.sig') continue;
+        fs.mkdirSync(path.dirname(path.join(out, r)), { recursive: true });
+        fs.writeFileSync(path.join(out, r), fs.readFileSync(path.join(src, r)));
+      }
+    };
+    walk('');
+    let name = path.basename(out);
+    try {
+      const pj = path.join(out, 'project.json');
+      const raw = JSON.parse(fs.readFileSync(pj, 'utf8'));
+      raw.name = name;
+      fs.writeFileSync(pj, JSON.stringify(raw, null, 2));
+    } catch { /* название останется прежним */ }
+    recents.add(recentsFile(), { path: out, name });
+    return name;
+  }
 
   handle('backup:now', () => autoBackup());
   // Папки копий на телефоне не видно, поэтому вместо «открыть папку» отдаём ZIP со всем проектом.
@@ -549,6 +597,7 @@ function createBackend(host, { session } = {}) {
   handle('folder:status', () => folderStatus());
   handle('folder:syncNow', async () => {
     if (!folder.sync) throw new Error(t('Проект не связан с папкой.'));
+    folder.conflict = false;
     await pushChanged();
     await pullChanges();
     return folderStatus();
@@ -959,6 +1008,9 @@ function createBackend(host, { session } = {}) {
     exportZip,
     resume,
     folderStatus,
+    flushFolder,
+    listCopies,
+    restoreCopy,
     hasProject: () => !!currentDir,
     handlers,
     PATHS: { ROOT, PROJECTS, APP, COPIES },

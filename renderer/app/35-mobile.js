@@ -77,6 +77,58 @@ function mobileBack() {
   return false;
 }
 
+// Панель клавиш над экранной клавиатурой: курсив, жирный, тире, кавычки, отмена. Горячих клавиш на телефоне нет.
+function wireMobileKeys() {
+  const bar = document.createElement('div');
+  bar.id = 'mobKeys';
+  bar.setAttribute('role', 'toolbar');
+  const defs = [
+    ['italic', 'К', 'Курсив'], ['bold', 'Ж', 'Жирный'], ['dash', '—', 'Тире'], ['quotes', '«»', 'Кавычки'],
+    ['undo', '↶', 'Отменить'], ['redo', '↷', 'Вернуть'], ['hide', '⌄', 'Скрыть клавиатуру'],
+  ];
+  for (const [id, text, title] of defs) {
+    const bt = document.createElement('button');
+    bt.type = 'button';
+    bt.dataset.k = id;
+    bt.textContent = text;
+    bt.title = t(title);
+    bt.setAttribute('aria-label', t(title));
+    bar.append(bt);
+  }
+  $('#stage').insertBefore(bar, $('#toolbar'));
+  bar.addEventListener('mousedown', (e) => e.preventDefault()); // фокус остаётся в тексте, клавиатура не закрывается
+  bar.addEventListener('click', (e) => {
+    const bt = e.target.closest('button[data-k]');
+    if (!bt || !editor || !editor.isEditable) return;
+    const c = editor.chain().focus();
+    switch (bt.dataset.k) {
+      case 'italic': c.toggleItalic().run(); break;
+      case 'bold': c.toggleBold().run(); break;
+      case 'dash': c.insertContent('—').run(); break;
+      case 'undo': c.undo().run(); break;
+      case 'redo': c.redo().run(); break;
+      case 'hide': if (document.activeElement) document.activeElement.blur(); break;
+      case 'quotes': {
+        const { from, to } = editor.state.selection;
+        if (from === to) { c.insertContent('«»').run(); editor.commands.setTextSelection(from + 1); }
+        else c.insertContentAt(to, '»').insertContentAt(from, '«').run();
+        break;
+      }
+      default:
+    }
+    paintKeys();
+  });
+  const paintKeys = () => {
+    if (!editor) return;
+    for (const id of ['italic', 'bold']) bar.querySelector(`[data-k="${id}"]`).classList.toggle('active', editor.isActive(id));
+  };
+  const inEditor = () => !!document.activeElement && !!document.activeElement.closest && !!document.activeElement.closest('#editor');
+  const sync = () => { document.body.classList.toggle('m-typing', inEditor()); if (inEditor()) paintKeys(); };
+  document.addEventListener('focusin', sync);
+  document.addEventListener('focusout', () => setTimeout(sync, 0));
+  document.addEventListener('selectionchange', () => { if (document.body.classList.contains('m-typing')) paintKeys(); });
+}
+
 function wireMobile() {
   const b = document.body;
   if (!b.classList.contains('mob')) return;
@@ -132,6 +184,12 @@ function wireMobile() {
     }
   }, true);
 
+  wireMobileKeys();
+  document.addEventListener('visibilitychange', async () => { // уход в фон: дописываем главу и сразу выгружаем в папку
+    if (!document.hidden) return;
+    try { await flush(); } catch { /* сохранится позже */ }
+    try { await window.kabinetBackend.flushFolder(); } catch { /* папка не подключена */ }
+  });
   window.addEventListener('resize', applyMobileLayout);
   window.addEventListener('orientationchange', applyMobileLayout);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { updateTwPad(); if (twOn()) recenterNow(); });

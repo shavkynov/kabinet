@@ -140,3 +140,34 @@ body.mob .start-inner { padding-left: 18px; padding-right: 18px; }
   .mob-modal { align-items: center; }
   .mob-sheet { border-radius: 16px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 }
+
+/* ---------- точка синхронизации ---------- */
+#syncDot {
+  position: fixed; z-index: 30; left: 50%; transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  width: 14px; height: 14px; padding: 0; border-radius: 50%;
+  border: 2px solid var(--bg); background: var(--muted);
+  box-sizing: content-box; /* зона касания больше самой точки */
+  outline: 10px solid transparent;
+}
+#syncDot[hidden] { display: none; }
+#syncDot.ok { background: var(--muted); opacity: .6; }
+#syncDot.busy { background: var(--accent); animation: sync-pulse 1s ease-in-out infinite; }
+#syncDot.err { background: #e5484d; }
+#syncDot.conflict { background: #f5a524; }
+@keyframes sync-pulse { 50% { opacity: .25; } }
+body.focus-mode #syncDot.ok { display: none; }
+
+/* ---------- панель клавиш над клавиатурой ---------- */
+#mobKeys { display: none; }
+body.mob:not(.m-kbd).m-typing #mobKeys {
+  display: flex; justify-content: space-around; gap: 4px;
+  padding: 4px 8px; border-top: 1px solid var(--line); background: var(--panel, var(--bg));
+}
+#mobKeys button {
+  flex: 1 1 0; min-height: 40px; max-width: 64px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; font-size: 17px;
+}
+#mobKeys button[data-k="italic"] { font-style: italic; font-family: serif; }
+#mobKeys button[data-k="bold"] { font-weight: 700; }
+#mobKeys button:active, #mobKeys button.active { background: var(--sel); color: var(--accent); }

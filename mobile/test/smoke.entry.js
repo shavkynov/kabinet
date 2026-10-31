@@ -50,6 +50,12 @@ const host = {
   assert.equal(String(Buffer.from(sent[0].data.slice(0, 2))), 'PK');
 
   assert.ok(await api.backupNow() !== undefined);
+  const copies = be.listCopies();
+  assert.ok(copies.length >= 1, 'копия есть в списке');
+  const restored = be.restoreCopy(copies[0]);
+  assert.match(restored, /копия/);
+  assert.equal(be.flushFolder() instanceof Promise, true);
+  assert.equal(be.folderStatus().busy, false);
   const zipName = await api.openBackupFolder();
   assert.equal(zipName, 'Мой роман.zip');
 
@@ -80,8 +86,8 @@ const host = {
   assert.deepEqual([...fs._files.keys()].sort(), before);
   const be2 = createBackend(host);
   const list = await be2.api.listRecents();
-  assert.equal(list.length, 1);
-  const reopened = await be2.api.openRecent(list[0].path);
+  assert.equal(list.length, 2); // проект и восстановленная из копии версия
+  const reopened = await be2.api.openRecent(list.find((r) => r.name === 'Мой роман').path);
   assert.equal(reopened.name, 'Мой роман');
 
   // синхронизация с обычной папкой: два устройства работают в одной папке
