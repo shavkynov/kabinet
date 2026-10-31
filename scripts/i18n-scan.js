@@ -132,7 +132,7 @@ function collect() {
 }
 
 if (require.main === module) {
-  const dict = require('../src/i18n-en');
+  const dict = require('../src/i18n-dictionary');
   const found = collect();
   const missing = [...found.keys()].filter((k) => dict[k] === undefined);
   if (process.argv.includes('--json')) {
