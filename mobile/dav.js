@@ -136,16 +136,32 @@ export async function chooseDavFolder(ctx = {}) {
   const logins = [];
   const seen = new Set();
   for (const acc of Object.values(saved)) {
+    // Остальные сохранённые связи остаются рабочими, но не предлагаются для новых подключений.
+    if (!acc || typeof acc !== 'object') continue;
+    let isYandex = acc.preset === 'yandex';
+    if (!isYandex) {
+      try { isYandex = webdav.normalizeUrl(acc.url) === 'https://webdav.yandex.ru'; } catch { /* некорректный адрес */ }
+    }
+    if (!isYandex) continue;
     const k = `${acc.url}|${acc.user}`;
     if (seen.has(k)) continue;
     seen.add(k);
     logins.push(acc);
   }
   const options = logins.map((a) => ({ label: `${a.label || a.url}: ${a.user}`, value: { saved: a } }));
-  for (const p of webdav.PRESETS) options.push({ label: options.length ? `+ ${t(p.name)}` : t(p.name), value: { preset: p } });
+  for (const p of webdav.PRESETS) {
+    const available = p.id === 'yandex';
+    options.push({
+      label: available
+        ? (logins.length ? `+ ${t(p.name)}` : t(p.name))
+        : `${t(p.name)} — ${t('Временно недоступно')}`,
+      value: { preset: p },
+      disabled: !available,
+    });
+  }
   const first = await chooseBox({
     title: t('Сетевая папка'),
-    message: t('Выберите, где лежит папка. Нужен логин и пароль приложения: подсказка появится на следующем шаге.'),
+    message: t('Выберите сервис. Сейчас доступен только Яндекс Диск.'),
     options,
     cancel: t('Отмена'),
   });
@@ -153,6 +169,7 @@ export async function chooseDavFolder(ctx = {}) {
 
   let acc = first.saved || null;
   if (!acc) {
+    if (!first.preset || first.preset.id !== 'yandex') return null;
     acc = await askLogin(first.preset);
     if (!acc) return null;
   }

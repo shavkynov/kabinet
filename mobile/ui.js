@@ -42,7 +42,7 @@ export function confirmBox({ message, detail, buttons = ['OK'], cancelId = butto
   }).then((v) => (v == null ? cancelId : v));
 }
 
-/** Список вариантов. Возвращает value выбранного пункта или null. */
+/** Список вариантов { label, value, disabled? }. Возвращает value выбранного пункта или null. */
 export function chooseBox({ title, message, options, cancel }) {
   return openModal((sheet, close) => {
     sheet.append(el('h2', '', title));
@@ -51,7 +51,9 @@ export function chooseBox({ title, message, options, cancel }) {
     for (const o of options) {
       const b = el('button', '', o.label);
       b.type = 'button';
-      b.addEventListener('click', () => close(o.value));
+      b.disabled = !!o.disabled;
+      if (b.disabled) b.style.opacity = '0.5';
+      b.addEventListener('click', () => { if (!b.disabled) close(o.value); });
       list.append(b);
     }
     sheet.append(list);
@@ -83,8 +85,8 @@ export function formBox({ title, hint, fields, submit, cancel, onSubmit }) {
       inp.autocomplete = 'off';
       inp.autocapitalize = 'none';
       inp.spellcheck = false;
-      lab.append(inp);
       form.append(lab);
+      lab.append(inp);
       inputs[f.key] = inp;
     }
     const err = el('div', 'mob-err');
@@ -153,7 +155,7 @@ export function pickFiles({ accept, multiple }) {
     input.multiple = !!multiple;
     // Android плохо понимает расширения вроде .md или .ttf: фильтр оставляем только для картинок и звука
     const a = String(accept || '');
-    input.accept = /^image\//.test(a) ? 'image/*' : /audio\//.test(a) ? 'audio/*,.wav,.mp3,.ogg,.m4a,.aac' : '*/*';
+    input.accept = /^image\//.test(a) ? 'image/*' : /audio\//.test(a) ? 'audio/*' : '*/*';
     input.style.display = 'none';
     document.body.append(input);
     let finished = false;
