@@ -85,8 +85,8 @@ export function formBox({ title, hint, fields, submit, cancel, onSubmit }) {
       inp.autocomplete = 'off';
       inp.autocapitalize = 'none';
       inp.spellcheck = false;
-      form.append(lab);
       lab.append(inp);
+      form.append(lab);
       inputs[f.key] = inp;
     }
     const err = el('div', 'mob-err');
@@ -155,7 +155,7 @@ export function pickFiles({ accept, multiple }) {
     input.multiple = !!multiple;
     // Android плохо понимает расширения вроде .md или .ttf: фильтр оставляем только для картинок и звука
     const a = String(accept || '');
-    input.accept = /^image\//.test(a) ? 'image/*' : /audio\//.test(a) ? 'audio/*' : '*/*';
+    input.accept = /^image\//.test(a) ? 'image/*' : /audio\//.test(a) ? 'audio/*,.wav,.mp3,.ogg,.m4a,.aac' : '*/*';
     input.style.display = 'none';
     document.body.append(input);
     let finished = false;
