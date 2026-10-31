@@ -35,7 +35,7 @@ test('foreign state does not consume real session', async () => {
 });
 test('reject foreign endpoint, fragment, duplicate params, invalid code and contradictory response', async () => {
   const x = setup();
-  for (const raw of [x.callback().replace('://oauth/', '://other/'), x.callback()+'#token=x', x.callback()+'&state=other', x.callback()+'&code=2', x.callback({code:'bad'}), x.callback({error:'access_denied'})]) await assert.rejects(x.flow.complete(raw));
+  for (const raw of [x.callback().replace('://oauth/', '://other/'), x.callback()+'#token=x', x.callback()+'&state=other', x.callback()+'&code=2', x.callback({code:'bad\ncode'}), x.callback({error:'access_denied'})]) await assert.rejects(x.flow.complete(raw));
   assert.equal(x.calls.length, 0);
 });
 test('cancel and expiry prevent exchange', async () => {
@@ -72,4 +72,20 @@ test('timeout during response and invalid config', async () => {
   let t=0; const x=setup({now:()=>t,ttlMs:1000,request:async()=>{t=1000;return good;}});
   await assert.rejects(x.flow.complete(x.callback()), /истекло/);
   assert.throws(()=>createYandexOAuth({}));
+});
+
+test('opaque 16-character authorization codes are forwarded unchanged', async () => {
+  for (const code of ['0123456789012345', 'AbCdEf0123456789']) {
+    const x=setup(); await x.flow.complete(x.callback({code}));
+    const form=new URLSearchParams(new TextDecoder().decode(x.calls[0].body));
+    assert.equal(form.get('code'),code);
+  }
+});
+test('code validator bounds size and rejects control characters', async () => {
+  const {validAuthorizationCode}=require('../src/yandex-oauth');
+  for (const code of ['x','1234567','AbCdEf0123456789','x'.repeat(2048)]) assert.equal(validAuthorizationCode(code),true);
+  for (const code of ['', 'x'.repeat(2049), 'bad\ncode', '\0code', '\x7f', null]) {
+    assert.equal(validAuthorizationCode(code),false);
+    const x=setup();await assert.rejects(x.flow.complete(x.callback({code:code || ''})));assert.equal(x.calls.length,0);
+  }
 });

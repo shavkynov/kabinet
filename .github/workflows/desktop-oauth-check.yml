@@ -42,13 +42,14 @@ jobs:
           - os: macos-latest
             name: mac-arm64-and-intel
             command: |
-              npx electron-builder --mac dmg --arm64 --publish never -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
-              npx electron-builder --mac dmg --x64 --publish never -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
+              npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
+              npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
     defaults:
       run:
         shell: bash
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      KABINET_TEST_ADHOC: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,6 +77,21 @@ jobs:
           {
             ${{ matrix.command }}
           } 2>&1 | tee ci-logs/package.log
+      - name: Verify macOS signatures
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          {
+            found=0
+            while IFS= read -r -d '' app; do
+              /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+              found=$((found + 1))
+            done < <(find dist -type d -name '*.app' -prune -print0)
+            if [ "$found" -ne 2 ]; then
+              echo "Expected two signed macOS app bundles; found $found" >&2
+              exit 1
+            fi
+          } 2>&1 | tee ci-logs/mac-signatures.log
       - name: Upload test installers
         uses: actions/upload-artifact@v4
         with:

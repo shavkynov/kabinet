@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const config = require('./yandex-oauth-config.json');
 const SCOPES = ['cloud_api:disk.read', 'cloud_api:disk.write'];
+const validAuthorizationCode = (value) => typeof value === 'string' && /^[\x20-\x7E]{1,2048}$/.test(value);
 
 function createYandexOAuth({ request, now = Date.now, ttlMs = 600000 } = {}) {
   if (typeof request !== 'function' || !Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error('Неверная конфигурация OAuth.');
@@ -40,7 +41,7 @@ function createYandexOAuth({ request, now = Date.now, ttlMs = 600000 } = {}) {
     const error = url.searchParams.get('error');
     if (code && error) throw new Error('Противоречивый ответ OAuth.');
     if (error) { cancel(); throw new Error('Доступ не предоставлен.'); }
-    if (!/^\d{7}$/.test(code || '')) throw new Error('Некорректный код авторизации.');
+    if (!validAuthorizationCode(code)) throw new Error('Некорректный код авторизации.');
     session.exchanging = true;
     try {
       let res;
@@ -71,4 +72,4 @@ function createYandexOAuth({ request, now = Date.now, ttlMs = 600000 } = {}) {
   return { begin, complete, cancel };
 }
 
-module.exports = { createYandexOAuth, SCOPES };
+module.exports = { createYandexOAuth, SCOPES, validAuthorizationCode };
