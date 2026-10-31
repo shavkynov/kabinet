@@ -17,6 +17,9 @@ let statusTimer = null;
 // Объявлено здесь: части 29+ выполняются позже init().
 const MOB = { kbd: false, drawer: null };
 
+// Окно «Синхронизация…» с сетевой папкой (36-dav.js): session — вход, выполненный в главном процессе; mode — 'link' (связать открытый проект) или 'open' (открыть проект из папки).
+const DAV = { session: null, label: '', mode: 'link', lastError: '' };
+
 function showError(message) {
   alert(tdom(message));
 }

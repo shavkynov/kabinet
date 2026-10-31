@@ -34,6 +34,7 @@
       <p id="noRecent" class="muted" hidden>Пока нет проектов. Создайте первый или откройте существующую папку.</p>
       <div class="start-actions">
         <button id="btnOpen" type="button" class="secondary">Открыть папку…</button>
+        <button id="btnOpenCloud" type="button" class="secondary" title="Проект, который лежит в облаке (Яндекс Диск, Nextcloud и другие по WebDAV)">Открыть из облака…</button>
       </div>
       <p class="start-legal">Некоммерческий проект. Программа распространяется бесплатно и создана без использования чужого исходного кода и чужих материалов; открытые библиотеки (Electron, TipTap, ProseMirror и др.) применяются на условиях их лицензий.</p>
       <div class="start-lang" role="group" aria-label="Язык интерфейса">
@@ -707,6 +708,10 @@
       </div>
     </div>
   </section>
+
+  <dialog id="syncDialog">
+    <div id="syncBody"></div>
+  </dialog>
 
   <dialog id="nameDialog">
     <form method="dialog">

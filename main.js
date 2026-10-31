@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme, session, shell, net, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeTheme, session, shell, net, clipboard, safeStorage } = require('electron');
 const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
@@ -15,6 +15,8 @@ const mentions = require('./src/mentions');
 const stats = require('./src/stats');
 const { termize } = require('./src/terms');
 const cloud = require('./src/cloud');
+const webdav = require('./src/webdav');
+const { createDavLink } = require('./src/davlink');
 const syncguard = require('./src/syncguard');
 const { createWatcher } = require('./src/watcher');
 const exporter = require('./src/export');
@@ -94,6 +96,7 @@ let askingCopies = false;
 const declinedCopies = new Set();
 
 function syncStop() {
+  try { dav().stopWork(); } catch { /* связь с сетевой папкой не создана */ }
   if (watcher) { watcher.close(); watcher = null; }
   clearInterval(lockTimer);
   lockTimer = null;
@@ -114,6 +117,7 @@ function syncStart(dir) {
     lockTimer.unref();
     if (where === 'iCloud Drive') syncguard.requestDownload(dir);
   }
+  try { dav().start(dir); } catch (err) { console.error('dav start:', err); }
   setTimeout(checkConflictCopies, 2000);
 }
 
@@ -173,6 +177,7 @@ async function showSyncInfo() {
   lines.push(
     t('Как включить: переместите папку проекта в iCloud Drive (есть на каждом Маке, 5 ГБ бесплатно), Dropbox, Яндекс Диск или Google Drive и откройте её оттуда. На втором устройстве откройте ту же папку.'),
     t('Что делает программа: сама подхватывает правки с другого устройства, не даёт затереть чужие правки (чужая версия сохраняется в папке «Конфликты») и предупреждает, если проект открыт в другом месте.'),
+    t('Облако без установки программ: «Файл → Синхронизация…» подключает Яндекс Диск, Mail.ru, Nextcloud и другие серверы WebDAV по логину и паролю приложения. Проект остаётся на этом компьютере, а его копия синхронизируется с облаком; на телефоне в Кабинете для Android подключается тот же сервер.'),
     t('Совет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать. Резервные копии облачного проекта хранятся на этом компьютере, вне облака.'),
   );
   const res = await dialog.showMessageBox(win, {
@@ -278,6 +283,97 @@ function handle(channel, fn) {
     }
   });
 }
+
+// ---------- сетевая папка (WebDAV) ----------
+
+// Запросы идут из главного процесса: окну приложения WebDAV недоступен (PROPFIND, CORS).
+async function davRequest({ method, url, headers, body }) {
+  const res = await fetch(url, { method, headers, body: body && body.length ? Buffer.from(body) : undefined, redirect: 'manual', signal: AbortSignal.timeout(90_000) });
+  const h = {};
+  res.headers.forEach((v, k) => { h[k.toLowerCase()] = v; });
+  return { status: res.status, headers: h, body: new Uint8Array(await res.arrayBuffer()) };
+}
+
+// Пароль хранится в защищённом хранилище системы (связка ключей, Credential Manager), если оно есть.
+const davSecret = {
+  seal: (s) => (safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(String(s)).toString('base64')}` : `raw:${s}`),
+  open: (s) => (String(s).startsWith('enc:') ? safeStorage.decryptString(Buffer.from(String(s).slice(4), 'base64')) : String(s).replace(/^raw:/, '')),
+};
+
+let davLink = null;
+function dav() {
+  if (!davLink) {
+    davLink = createDavLink({
+      dataDir: app.getPath('userData'),
+      request: davRequest,
+      secret: davSecret,
+      device: cloud.deviceName(),
+      onEvent: (e) => {
+        if (e.type === 'changed') send('sync:changed', e.files);
+        else send('dav:event', e);
+      },
+    });
+  }
+  return davLink;
+}
+
+const davSessions = new Map(); // вход, выполненный в окне подключения: пароль остаётся в главном процессе
+function davSessionOf(id) {
+  const acc = davSessions.get(String(id));
+  if (!acc) throw new Error('Вход устарел. Войдите заново.');
+  return acc;
+}
+function davNewSession(acc, label) {
+  const id = crypto.randomBytes(8).toString('hex');
+  davSessions.set(id, { ...acc, label });
+  return id;
+}
+
+handle('dav:presets', () => webdav.PRESETS);
+handle('dav:saved', () => dav().logins().map((l, i) => ({ index: i, label: l.label, user: l.user, url: l.url })));
+handle('dav:useSaved', (index) => {
+  const l = dav().logins()[Number(index)];
+  if (!l) throw new Error('Сохранённый вход не найден.');
+  return { session: davNewSession(l, l.label), label: l.label };
+});
+handle('dav:login', async (form) => {
+  const preset = webdav.PRESETS.find((p) => p.id === (form && form.preset)) || webdav.PRESETS[webdav.PRESETS.length - 1];
+  const url = preset.url || (form && form.url);
+  if (!form || !form.user || !form.pass) throw new Error('Введите логин и пароль.');
+  const acc = await dav().login({ url, user: form.user, pass: form.pass });
+  return { session: davNewSession(acc, preset.name), label: preset.name };
+});
+handle('dav:browse', async (id, at) => {
+  const acc = davSessionOf(id);
+  return { path: at || '/', folders: await dav().browse(acc, at && at !== '/' ? at : '') };
+});
+handle('dav:mkdir', (id, at, name) => dav().makeFolder(davSessionOf(id), at === '/' ? '' : at, name));
+handle('dav:attach', async (id, root, mode) => {
+  const dir = requireDir();
+  const acc = { ...davSessionOf(id), root: String(root || '') };
+  if (!acc.root) throw new Error('Выберите папку.');
+  return dav().attach(dir, acc, mode || 'ask');
+});
+handle('dav:open', async (id, root) => {
+  const acc = { ...davSessionOf(id), root: String(root || '') };
+  const picked = await dialog.showOpenDialog(win, {
+    title: t('Где сохранить копию проекта на этом компьютере?'),
+    message: t('Выберите папку, внутри которой появится папка проекта'),
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: t('Выбрать'),
+  });
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  const name = safeFolderName(acc.root.split('/').filter(Boolean).pop() || 'Проект');
+  let target = path.join(picked.filePaths[0], name);
+  for (let i = 2; fs.existsSync(target); i += 1) target = path.join(picked.filePaths[0], `${name} ${i}`);
+  if (currentDir) { autoBackup(); try { await dav().stop(); } catch { /* ничего */ } syncStop(); currentDir = null; }
+  await dav().openRemote(acc, target);
+  return openAt(target);
+});
+handle('dav:status', () => (currentDir ? dav().status(currentDir) : { linked: false }));
+handle('dav:syncNow', () => dav().syncNow());
+handle('dav:detach', async () => { await dav().detach(requireDir()); return true; });
+handle('dav:info', () => showSyncInfo());
 
 // ---------- проекты ----------
 
@@ -446,8 +542,9 @@ handle('project:setMode', (mode) => {
   return v;
 });
 
-handle('project:close', () => {
+handle('project:close', async () => {
   autoBackup();
+  try { await dav().stop(); } catch (err) { console.error('dav stop:', err); }
   syncStop();
   currentDir = null;
   if (projectMode !== 'novel') { projectMode = 'novel'; buildMenu(); }
@@ -939,7 +1036,7 @@ function buildMenu() {
             { label: t('Открыть папку копий'), click: () => send('ui:openBackups') },
           ],
         },
-        { label: t('Синхронизация…'), click: showSyncInfo },
+        { label: t('Синхронизация…'), click: () => send('ui:openSync') },
         sep,
         { label: t('Закрыть проект'), accelerator: 'CmdOrCtrl+Shift+W', click: () => send('ui:closeProject') },
         { label: t('Закрыть окно'), role: 'close' },
@@ -1062,7 +1159,18 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => { autoBackup(); syncStop(); });
+let quitFlushed = false;
+app.on('before-quit', (e) => {
+  autoBackup();
+  // сетевая папка: перед выходом дописываем изменения (не дольше 8 секунд)
+  if (!quitFlushed && currentDir && dav().status(currentDir).linked) {
+    e.preventDefault();
+    quitFlushed = true;
+    Promise.race([dav().stop(), new Promise((r) => setTimeout(r, 8000))]).catch(() => {}).finally(() => { syncStop(); app.quit(); });
+    return;
+  }
+  syncStop();
+});
 // Окно дописывает несохранённые правки при закрытии (beforeunload), это уже после before-quit:
 // итоговую копию делаем, когда все окна закрыты.
 app.on('will-quit', () => { autoBackup(); });

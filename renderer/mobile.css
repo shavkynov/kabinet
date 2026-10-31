@@ -171,3 +171,15 @@ body.mob:not(.m-kbd).m-typing #mobKeys {
 #mobKeys button[data-k="italic"] { font-style: italic; font-family: serif; }
 #mobKeys button[data-k="bold"] { font-weight: 700; }
 #mobKeys button:active, #mobKeys button.active { background: var(--sel); color: var(--accent); }
+
+/* форма подключения к сетевой папке (mobile/ui.js formBox) */
+.mob-form { display: flex; flex-direction: column; gap: 10px; padding: 4px 20px 0; overflow-y: auto; }
+.mob-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.mob-form input {
+  font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+}
+.mob-form input:focus { outline: none; border-color: var(--accent); }
+.mob-form .mob-actions { padding: 6px 0 0; margin: 0 -8px; }
+.mob-err { color: #e5484d; font-size: 14px; line-height: 1.4; }
+body.mob #btnOpenCloud { display: none; }

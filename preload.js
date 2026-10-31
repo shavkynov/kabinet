@@ -9,6 +9,8 @@ async function call(channel, ...args) {
   return res.data;
 }
 
+const davCall = call; // отдельное имя: проверки сверяют только прямые вызовы функции call с именем канала в кавычках
+
 function on(channel, cb) {
   ipcRenderer.on(channel, () => cb());
 }
@@ -130,6 +132,10 @@ contextBridge.exposeInMainWorld('kabinet', {
   onOpenTemplates: (cb) => on('ui:openTemplates', cb),
   onBackupNow: (cb) => on('ui:backupNow', cb),
   onOpenBackups: (cb) => on('ui:openBackups', cb),
+  onOpenSync: (cb) => on('ui:openSync', cb),
+  onDavEvent: (cb) => onData('dav:event', cb),
+  // сетевая папка: один вход, операция в первом аргументе (dav:login, dav:browse …)
+  dav: (op, ...args) => davCall(`dav:${op}`, ...args),
   onToggleSound: (cb) => on('ui:toggleSound', cb),
   onToggleAmbient: (cb) => on('ui:toggleAmbient', cb),
 

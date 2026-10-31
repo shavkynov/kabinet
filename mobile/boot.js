@@ -12,6 +12,7 @@ import { createIdbStore } from './shim/idbstore.js';
 import { confirmBox, chooseBox, menuBox, toast, pickFiles } from './ui.js';
 import { createBackend } from './backend.js';
 import { createSafAdapter, chooseFolder, forgetFolder, safAvailable } from './saf.js';
+import { createDavAdapter, chooseDavFolder, forgetDav, isDavUri } from './dav.js';
 import i18n from '../src/i18n.js';
 
 const VERSION = __APP_VERSION__;
@@ -109,7 +110,24 @@ const host = {
   },
   unzip: (bytes) => Object.entries(unzipSync(new Uint8Array(bytes))).map(([path, data]) => ({ path, data })),
   // Обычная папка (своя или облачная): выбор системным окном и доступ к файлам.
-  folder: safAvailable() ? { choose: chooseFolder, forget: forgetFolder, adapter: createSafAdapter } : null,
+  folder: safAvailable() ? {
+    // Сначала вопрос «куда»: сетевая папка (WebDAV) или папка на телефоне; дальше мастер выбранного способа.
+    async choose(ctx) {
+      const where = await chooseBox({
+        title: i18n.t('Где хранить проект?'),
+        message: i18n.t('Облако (Яндекс Диск, Nextcloud…) подключается по логину и паролю приложения. Папка на телефоне подходит, если синхронизацию ведёт другая программа.'),
+        options: [
+          { label: i18n.t('Облако или сетевая папка (WebDAV)'), value: 'dav' },
+          { label: i18n.t('Папка на телефоне'), value: 'saf' },
+        ],
+        cancel: i18n.t('Отмена'),
+      });
+      if (!where) return null;
+      return where === 'dav' ? chooseDavFolder(ctx) : chooseFolder();
+    },
+    forget: (uri) => (isDavUri(uri) ? forgetDav(uri) : forgetFolder(uri)),
+    adapter: (uri) => (isDavUri(uri) ? createDavAdapter(uri) : createSafAdapter(uri)),
+  } : null,
 };
 
 // ---------- меню («☰») ----------

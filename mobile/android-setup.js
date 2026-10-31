@@ -27,7 +27,16 @@ run('npx', ['cap', 'sync', 'android']);
 // Список должен совпадать с registerPlugin(...) в MainActivity, иначе сборка не скомпилируется.
 const javaDir = path.join(android, 'app', 'src', 'main', 'java', 'ru', 'kabinet', 'writer');
 fs.mkdirSync(javaDir, { recursive: true });
-for (const f of ['HwKeyboardPlugin.java', 'SafPlugin.java', 'MainActivity.java']) fs.copyFileSync(path.join(here, 'android-src', f), path.join(javaDir, f));
+for (const f of ['HwKeyboardPlugin.java', 'SafPlugin.java', 'DavPlugin.java', 'MainActivity.java']) fs.copyFileSync(path.join(here, 'android-src', f), path.join(javaDir, f));
+
+// WebDAV: плагин Dav использует OkHttp (в шаблоне Capacitor его может не быть).
+{
+  const appGradle = path.join(android, 'app', 'build.gradle');
+  const text = fs.readFileSync(appGradle, 'utf8');
+  if (!text.includes('com.squareup.okhttp3:okhttp')) {
+    patch(appGradle, /dependencies\s*\{/, "dependencies {\n    implementation 'com.squareup.okhttp3:okhttp:4.12.0'", 'dependencies');
+  }
+}
 
 // значки
 const res = path.join(android, 'app', 'src', 'main', 'res');

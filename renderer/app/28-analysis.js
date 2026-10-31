@@ -347,6 +347,7 @@ function init() {
   applySettings();
   wireSidebar();
   wireMobile();
+  wireDav();
   // шрифты и звуки подгружаем в фоне; после загрузки применяем настройки ещё раз
   loadCustomFonts().then(applySettings);
   loadSounds();

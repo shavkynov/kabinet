@@ -1190,3 +1190,13 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 }
 :root[data-theme="light"][data-paper="warm"] { --paper: #f4ecd9; }
 :root[data-theme="dark"][data-paper="warm"] { --paper: #2a251d; }
+
+/* ---------- окно «Синхронизация» (WebDAV) ---------- */
+#syncDialog { width: 460px; }
+#syncDialog .sync-line { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
+#syncDialog .sync-line.muted { color: var(--muted); }
+#syncDialog .sync-line.err { color: #e5484d; }
+#syncDialog .sync-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+#syncDialog .sync-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 38vh; overflow-y: auto; }
+#syncDialog .sync-main { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+#syncDialog button.sync-row { text-align: left; padding: 10px 12px; }

@@ -64,6 +64,60 @@ export function chooseBox({ title, message, options, cancel }) {
   });
 }
 
+/**
+ * Форма с полями. fields: { key, label, type, value, placeholder }. onSubmit(values) → строка с ошибкой
+ * (форма остаётся открытой) или null (форма закрывается). Возвращает значения или null при отмене.
+ */
+export function formBox({ title, hint, fields, submit, cancel, onSubmit }) {
+  return openModal((sheet, close) => {
+    sheet.append(el('h2', '', title));
+    if (hint) sheet.append(el('div', 'mob-msg', hint));
+    const form = el('form', 'mob-form');
+    const inputs = {};
+    for (const f of fields) {
+      const lab = el('label', '', f.label);
+      const inp = document.createElement('input');
+      inp.type = f.type || 'text';
+      inp.value = f.value || '';
+      inp.placeholder = f.placeholder || '';
+      inp.autocomplete = 'off';
+      inp.autocapitalize = 'none';
+      inp.spellcheck = false;
+      lab.append(inp);
+      form.append(lab);
+      inputs[f.key] = inp;
+    }
+    const err = el('div', 'mob-err');
+    err.hidden = true;
+    form.append(err);
+    const acts = el('div', 'mob-actions');
+    const ok = el('button', 'mob-primary', submit || 'OK');
+    ok.type = 'submit';
+    const c = el('button', '', cancel || 'Отмена');
+    c.type = 'button';
+    c.addEventListener('click', () => close(null));
+    acts.append(ok, c);
+    form.append(acts);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const values = {};
+      for (const k of Object.keys(inputs)) values[k] = inputs[k].value.trim();
+      ok.disabled = true;
+      const label = ok.textContent;
+      ok.textContent = '…';
+      let message = null;
+      try { message = onSubmit ? await onSubmit(values) : null; } catch (x) { message = String((x && x.message) || x); }
+      ok.disabled = false;
+      ok.textContent = label;
+      if (message) { err.textContent = message; err.hidden = false; return; }
+      close(values);
+    });
+    sheet.append(form);
+    const first = form.querySelector('input');
+    if (first) setTimeout(() => first.focus(), 50);
+  });
+}
+
 /** Меню программы: items — { head } | { sep } | { label, run, disabled }. */
 export function menuBox(title, items) {
   return openModal((sheet, close) => {

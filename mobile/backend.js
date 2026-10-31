@@ -192,7 +192,7 @@ function createBackend(host, { session } = {}) {
         folder.pushTimer = setTimeout(pushChanged, PUSH_MS);
       });
     }
-    folder.pullTimer = setInterval(pullChanges, PULL_MS);
+    folder.pullTimer = setInterval(pullChanges, String(link.uri).startsWith('dav:') ? PULL_MS * 3 : PULL_MS); // по сети вычитка тяжелее: каждый обход — десяток запросов
     folder.pullTimer.unref?.();
     folder.lockTimer = setInterval(writeFolderLock, LOCK_MS);
     folder.lockTimer.unref?.();
@@ -522,7 +522,7 @@ function createBackend(host, { session } = {}) {
   handle('folder:choose', async () => {
     if (!host.folder) throw new Error('Выбор папки здесь недоступен.');
     const dir = requireDir();
-    const link = await host.folder.choose();
+    const link = await host.folder.choose({ mode: 'link', name: project.openProject(dir).name });
     if (!link) return null;
     const adapter = host.folder.adapter(link.uri);
     const sync = folderSync.createFolderSync(dir, adapter, { stateFile: stateFileFor(dir, link.uri) });
@@ -555,7 +555,7 @@ function createBackend(host, { session } = {}) {
   /** Открыть проект, который лежит в выбранной папке (например, начатый на компьютере). */
   handle('folder:open', async () => {
     if (!host.folder) throw new Error('Выбор папки здесь недоступен.');
-    const link = await host.folder.choose();
+    const link = await host.folder.choose({ mode: 'open' });
     if (!link) return null;
     const adapter = host.folder.adapter(link.uri);
     const name = await remoteName(adapter, link);
@@ -990,6 +990,9 @@ function createBackend(host, { session } = {}) {
     onOpenTemplates: on('ui:openTemplates'),
     onBackupNow: on('ui:backupNow'),
     onOpenBackups: on('ui:openBackups'),
+    onOpenSync: on('ui:openSync'),
+    onDavEvent: () => {},
+    dav: () => Promise.reject(new Error('Сетевая папка на телефоне подключается через меню.')),
     onToggleSound: on('ui:toggleSound'),
     onToggleAmbient: on('ui:toggleAmbient'),
     setTheme: (theme) => call('ui:setTheme', theme),
