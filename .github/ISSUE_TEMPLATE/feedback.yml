@@ -1,0 +1,28 @@
+name: Отзыв или предложение
+description: Что удобно, что мешает, чего не хватает
+title: "Отзыв: "
+labels: ["отзыв"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версия программы
+      placeholder: "0.31.2"
+  - type: textarea
+    id: used
+    attributes:
+      label: Чем пользуетесь чаще всего
+    validations:
+      required: true
+  - type: textarea
+    id: unused
+    attributes:
+      label: Чем не пользуетесь вообще
+  - type: textarea
+    id: annoying
+    attributes:
+      label: Что мешает или раздражает
+  - type: textarea
+    id: missing
+    attributes:
+      label: Чего не хватает

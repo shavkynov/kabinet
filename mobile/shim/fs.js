@@ -23,7 +23,27 @@ function err(code, syscall, p) {
 }
 
 const norm = (p) => P.resolve(String(p));
-const mark = (p) => { dirty.add(p); schedule(); };
+
+// Слушатели изменений (нужны синхронизации с обычной папкой: любая запись — повод выгрузить изменения).
+const watchers = new Set();
+let muted = false;
+function notify(p) {
+  if (muted) return;
+  for (const cb of watchers) {
+    try { cb(p); } catch (e) { console.error('fs watcher:', e); }
+  }
+}
+const onNodeChange = (cb) => {
+  watchers.add(cb);
+  return () => watchers.delete(cb);
+};
+/** На время cb не сообщать об изменениях (когда файлы приходят из внешней папки). */
+function unmute(fn) {
+  muted = true;
+  try { return Promise.resolve(fn()).finally(() => { muted = false; }); } catch (e) { muted = false; throw e; }
+}
+
+const mark = (p) => { dirty.add(p); notify(p); schedule(); };
 
 function schedule() {
   if (!store || timer) return;
@@ -255,5 +275,5 @@ module.exports = {
   readFileSync, existsSync, statSync, readdirSync, writeFileSync, appendFileSync, mkdirSync, unlinkSync, rmSync, rmdirSync,
   renameSync, copyFileSync, cpSync, openSync, closeSync, fsyncSync, watch,
   // служебное (не из node:fs)
-  setStore, loadAll, flush, reset, _files: files, _dirs: dirs,
+  setStore, loadAll, flush, reset, onNodeChange, unmute, _files: files, _dirs: dirs,
 };

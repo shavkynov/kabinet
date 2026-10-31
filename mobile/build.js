@@ -39,7 +39,7 @@ loadEsbuild().buildSync({
   format: 'iife',
   platform: 'browser',
   target: 'chrome100',
-  external: ['node:crypto'],
+  external: ['node:crypto'], // запасной путь только для проверок в Node; в Android есть globalThis.crypto
   logLevel: 'info',
   nodePaths: [path.join(__dirname, 'node_modules'), path.join(root, 'node_modules')],
   alias: {

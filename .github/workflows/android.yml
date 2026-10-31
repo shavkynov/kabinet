@@ -28,10 +28,34 @@ jobs:
           npm install --ignore-scripts
           cd mobile && npm install
 
+      - name: Тесты (прерывают сборку, если что-то сломано)
+        run: |
+          npm test
+          node mobile/test/run-smoke.js
+
       - name: Сборка интерфейса для Android
         run: node mobile/build.js
 
+      # Ключ подписи хранится в Secrets репозитория, а не в коде:
+      #   KABINET_KEYSTORE_BASE64  файл ключа в base64 (base64 -w0 kabinet-release.keystore)
+      #   KABINET_KEYSTORE_PASSWORD, KABINET_KEY_ALIAS (необязательно), KABINET_KEY_PASSWORD (необязательно)
+      # Без них APK подпишется отладочным ключом и не встанет поверх уже установленной боевой версии.
+      - name: Ключ подписи
+        env:
+          KS_B64: ${{ secrets.KABINET_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/kabinet-release.keystore"
+            echo "KABINET_KEYSTORE=$RUNNER_TEMP/kabinet-release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Секрет KABINET_KEYSTORE_BASE64 не задан: APK будет подписан отладочным ключом."
+          fi
+
       - name: Проект Android (значки, подпись, плагин клавиатуры)
+        env:
+          KABINET_KEYSTORE_PASSWORD: ${{ secrets.KABINET_KEYSTORE_PASSWORD }}
+          KABINET_KEY_ALIAS: ${{ secrets.KABINET_KEY_ALIAS }}
+          KABINET_KEY_PASSWORD: ${{ secrets.KABINET_KEY_PASSWORD }}
         run: node mobile/android-setup.js
 
       - name: APK

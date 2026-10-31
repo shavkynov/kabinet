@@ -35,6 +35,17 @@
   }
 }
 
+/* «Бумага» и «Тёплая тьма» заданы явно: на Android системная тема не переключается из программы */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f3ee; --paper: #fbfaf7; --side: #ebe8e1; --text: #2a2926; --muted: #6a665d; --line: #d9d5cb;
+  --accent: #7a5c3e; --sel: #dcd6c8; --danger: #b3382c; --sticky: #f1e7c3; --sticky-text: #3b3322;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1a18; --paper: #232220; --side: #171614; --text: #dedad0; --muted: #999589; --line: #34322e;
+  --accent: #c9a27a; --sel: #33302b; --danger: #e0685a; --sticky: #3b3626; --sticky-text: #e6dfc8;
+}
 /* цветовые темы (список в src/themes.js; контраст текста проверяет test/themes.test.js) */
 :root[data-theme="light-snow"] {
   color-scheme: light;
@@ -1165,3 +1176,17 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 .mk-sp::after { content: "·"; opacity: .35; }
 .mk-para::after { content: "¶"; position: absolute; margin-left: .25em; color: var(--accent, #b4543a); opacity: .5; font-size: .8em; pointer-events: none; }
 .mk-br::before { content: "↵"; position: absolute; color: var(--accent, #b4543a); opacity: .6; font-size: .8em; pointer-events: none; }
+
+/* зерно и тёплая бумага следуют выбранной теме, а не только системной (на Android выбор темы не меняет системную) */
+:root[data-theme^="light"][data-paper="grain"] #grain,
+:root[data-theme^="light"][data-paper="warm"] #grain {
+  opacity: calc(var(--grain-level, .35) * .63);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.25  0 0 0 0 0.2  0 0 0 0 0.15  0 0 0 0.9 -0.35'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+}
+:root[data-theme^="dark"][data-paper="grain"] #grain,
+:root[data-theme^="dark"][data-paper="warm"] #grain {
+  opacity: calc(var(--grain-level, .35) * .43);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n' x='0' y='0' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.88  0 0 0 0 0.82  0 0 0 0.9 -0.4'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>");
+}
+:root[data-theme="light"][data-paper="warm"] { --paper: #f4ecd9; }
+:root[data-theme="dark"][data-paper="warm"] { --paper: #2a251d; }

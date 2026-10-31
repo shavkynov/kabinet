@@ -25,6 +25,8 @@ const stats = require('../src/stats');
 const exporter = require('../src/export');
 const importer = require('../src/import');
 const { writeFileAtomic } = require('../src/fsutil');
+const folderSync = require('../src/folder');
+const cloud = require('../src/cloud');
 const langcheck = require('../src/langcheck');
 const i18n = require('../src/i18n');
 const themes = require('../src/themes');
@@ -118,12 +120,170 @@ function createBackend(host, { session } = {}) {
     sess.set('currentDir', dir);
   }
 
-  function openAt(dir) {
+  function openAt(dir, link) {
     const proj = project.openProject(dir);
     setCurrent(dir);
     recents.add(recentsFile(), { path: dir, name: proj.name });
     autoBackup();
+    startFolder(dir, link || linkOf(dir));
     return proj;
+  }
+
+  // ---------- обычная папка (своя или облачная) ----------
+  // Проект можно вести в папке, выбранной пользователем через системное окно: тогда его же можно
+  // открыть на компьютере (и наоборот). Правила те же, что у компьютерной синхронизации:
+  // правки с другого устройства подтягиваются, при спорной правке чужая версия уходит в «Конфликты».
+  const PULL_MS = 15_000;
+  const PUSH_MS = 1_500;
+  const LOCK_MS = 60_000;
+  const deviceId = () => host.device || 'Android';
+
+  const linksFile = () => path.join(APP, 'folder-links.json');
+  function loadLinks() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(linksFile(), 'utf8'));
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch { return {}; }
+  }
+  const saveLinks = (map) => { try { writeFileAtomic(linksFile(), JSON.stringify(map, null, 2)); } catch (err) { console.error('folder links:', err); } };
+
+  const folder = { uri: null, name: '', sync: null, pending: new Set(), pushTimer: null, pullTimer: null, lockTimer: null, unwatch: null, lastSync: 0, lastError: '' };
+
+  function linkOf(dir) { return dir ? loadLinks()[dir] || null : null; }
+  function setLink(dir, link) {
+    const map = loadLinks();
+    if (link) map[dir] = link; else delete map[dir];
+    saveLinks(map);
+  }
+
+  function stopFolder() {
+    clearTimeout(folder.pushTimer);
+    clearInterval(folder.pullTimer);
+    clearInterval(folder.lockTimer);
+    folder.pushTimer = folder.pullTimer = folder.lockTimer = null;
+    if (folder.unwatch) { try { folder.unwatch(); } catch { /* подписка уже снята */ } folder.unwatch = null; }
+    folder.pending.clear();
+    folder.sync = null;
+    folder.uri = null;
+    folder.name = '';
+    folder.lastError = '';
+  }
+
+  const stateFileFor = (dir, uri) => path.join(APP,
+    `folder-state-${crypto.createHash('sha1').update(`${dir}|${uri}`).digest('hex').slice(0, 12)}.json`);
+
+  function startFolder(dir, link, { pull = true } = {}) {
+    stopFolder();
+    if (!link || !host.folder) return;
+    folder.uri = link.uri;
+    folder.name = link.name || '';
+    folder.sync = folderSync.createFolderSync(dir, host.folder.adapter(link.uri), { stateFile: stateFileFor(dir, link.uri) });
+    // любое изменение в проекте — повод выгрузить его в папку (в тестах Node такой подписки нет)
+    if (typeof fs.onNodeChange === 'function') {
+      folder.unwatch = fs.onNodeChange((rel) => {
+        if (!folder.sync || !currentDir) return;
+        const abs = String(rel);
+        if (!abs.startsWith(`${currentDir}/`)) return;
+        const relToProject = abs.slice(currentDir.length + 1);
+        if (!folderSync.isSyncable(relToProject)) return;
+        folder.pending.add(relToProject);
+        clearTimeout(folder.pushTimer);
+        folder.pushTimer = setTimeout(pushChanged, PUSH_MS);
+      });
+    }
+    folder.pullTimer = setInterval(pullChanges, PULL_MS);
+    folder.pullTimer.unref?.();
+    folder.lockTimer = setInterval(writeFolderLock, LOCK_MS);
+    folder.lockTimer.unref?.();
+    writeFolderLock();
+    // «Заменить папку» сначала выгружает проект, а вычитка перед этим успела бы влить чужие главы.
+    if (pull) pullChanges();
+  }
+
+  // Замок «проект открыт на другом устройстве» пишем сразу в внешнюю папку: на компьютере
+  // его читает main.js. В локальном проекте замок не нужен, а в папке он и должен лежать.
+  async function writeFolderLock() {
+    if (!folder.uri || !host.folder) return;
+    try {
+      const data = new TextEncoder().encode(JSON.stringify({ device: deviceId(), time: Date.now() }));
+      await host.folder.adapter(folder.uri).write(cloud.LOCK_FILE, data);
+    } catch (err) { console.error('folder lock:', err); }
+  }
+
+  async function releaseFolderLock() {
+    if (!folder.uri || !host.folder) return;
+    const adapter = host.folder.adapter(folder.uri);
+    try {
+      const bytes = await adapter.read(cloud.LOCK_FILE);
+      if (!bytes) return;
+      const raw = JSON.parse(new TextDecoder().decode(bytes));
+      if (raw && raw.device === deviceId()) await adapter.remove(cloud.LOCK_FILE);
+    } catch (err) { console.error('folder lock release:', err); }
+  }
+
+  /** Выгружаем то, что изменилось у нас. Конфликты и пришедшие правки — в интерфейс. */
+  async function pushChanged() {
+    folder.pushTimer = null;
+    if (!folder.sync || !currentDir || !folder.pending.size) return;
+    const rels = [...folder.pending];
+    folder.pending.clear();
+    try {
+      const res = await folder.sync.push(rels);
+      folder.lastSync = Date.now();
+      folder.lastError = '';
+      if (res.conflicts.length) {
+        notify(t('Этот текст изменили на другом устройстве. Чужая версия сохранена в папке «Конфликты».'));
+      }
+    } catch (err) {
+      folder.lastError = String((err && err.message) || err);
+      console.error('folder push:', err);
+      notify(t('Не удалось сохранить в папку: {0}', folder.lastError));
+    }
+  }
+
+  /** Вычитываем правки с другого устройства. Пришедшие файлы не считаем своими. */
+  async function pullChanges() {
+    if (!folder.sync || !currentDir) return;
+    try {
+      const run = () => folder.sync.sync();
+      const res = await (fs.unmute ? fs.unmute(run) : run());
+      folder.lastSync = Date.now();
+      folder.lastError = '';
+      if (res.conflicts.length) {
+        notify(t('Этот текст изменили на другом устройстве. Ваша версия сохранится, чужая уйдёт в папку «Конфликты».'));
+      }
+      const touched = [...new Set([...res.pulled, ...res.conflicts])];
+      if (touched.length) emit('sync:changed', touched);
+    } catch (err) {
+      folder.lastError = String((err && err.message) || err);
+      console.error('folder pull:', err);
+    }
+  }
+
+  /** Название проекта в выбранной папке; null — если проекта там нет. */
+  async function remoteName(adapter, link) {
+    let bytes = null;
+    try { bytes = await adapter.read('project.json'); } catch { /* папка недоступна */ }
+    if (!bytes) return null;
+    try {
+      const raw = JSON.parse(new TextDecoder().decode(bytes));
+      if (raw && raw.name) return String(raw.name);
+    } catch { /* читаем дальше */ }
+    // project.json есть, но не читается: всё равно считаем, что проект там есть
+    return link.name || 'Проект';
+  }
+
+  const notify = (message) => { if (host.notify) { try { host.notify(message); } catch { /* тост не критичен */ } } };
+
+  function folderStatus() {
+    return {
+      linked: !!folder.sync,
+      name: folder.name,
+      uri: folder.uri,
+      lastSync: folder.lastSync,
+      error: folder.lastError,
+      available: !!host.folder,
+    };
   }
 
   // ---------- каналы ----------
@@ -299,11 +459,134 @@ function createBackend(host, { session } = {}) {
   handle('project:setGoalUnit', (unit) => project.setGoalUnit(requireDir(), unit));
   handle('project:setCharLimit', (limit) => project.setCharLimit(requireDir(), limit));
   handle('project:setMode', (mode) => project.setProjectMode(requireDir(), mode));
-  handle('project:close', () => {
+  handle('project:close', async () => {
     autoBackup();
+    await pushChanged();
+    await releaseFolderLock();
+    stopFolder();
     setCurrent(null);
     return true;
   });
+
+  // ----- работа с обычной папкой -----
+
+  /** Пользователь выбрал папку: связываем с ней открытый проект. */
+  handle('folder:choose', async () => {
+    if (!host.folder) throw new Error('Выбор папки здесь недоступен.');
+    const dir = requireDir();
+    const link = await host.folder.choose();
+    if (!link) return null;
+    const adapter = host.folder.adapter(link.uri);
+    const sync = folderSync.createFolderSync(dir, adapter, { stateFile: stateFileFor(dir, link.uri) });
+    if (await sync.hasProject().catch(() => false)) {
+      const res = await host.confirm({
+        message: t('В выбранной папке уже есть проект.'),
+        detail: t('«Соединить» — правки с обеих сторон останутся, спорные тексты уйдут в папку «Конфликты».\n\n«Заменить папку» — в папку запишется открытый здесь проект; то, что в папке лежало, тоже не удалится, а попадёт в «Конфликты».'),
+        buttons: [t('Соединить'), t('Заменить папку'), t('Отмена')],
+        cancelId: 2,
+      });
+      if (res === 2) return null;
+      setLink(dir, link);
+      if (res === 1) {
+        startFolder(dir, link, { pull: false });
+        await folder.sync.replaceAll();
+        notify(t('Проект выгружен в папку «{0}».', link.name || ''));
+      } else {
+        startFolder(dir, link);
+        await pullChanges();
+      }
+      return project.openProject(dir);
+    }
+    setLink(dir, link);
+    startFolder(dir, link);
+    await folder.sync.exportAll();
+    notify(t('Проект выгружен в папку «{0}».', link.name || ''));
+    return project.openProject(dir);
+  });
+
+  /** Открыть проект, который лежит в выбранной папке (например, начатый на компьютере). */
+  handle('folder:open', async () => {
+    if (!host.folder) throw new Error('Выбор папки здесь недоступен.');
+    const link = await host.folder.choose();
+    if (!link) return null;
+    const adapter = host.folder.adapter(link.uri);
+    const name = await remoteName(adapter, link);
+    if (!name) throw new Error(t('В выбранной папке нет проекта Кабинета. Создайте проект и свяжите его с папкой.'));
+    if (currentDir) {
+      const res = await host.confirm({
+        message: t('Сейчас открыт другой проект.'),
+        detail: t('Открыть проект из папки? Текущий проект останется на этом устройстве.'),
+        buttons: [t('Открыть из папки'), t('Отмена')],
+        cancelId: 1,
+      });
+      if (res !== 0) return null;
+      autoBackup();
+      await pushChanged();
+      await releaseFolderLock();
+      stopFolder();
+      setCurrent(null);
+    }
+    const dir = uniqueDir(safeFolderName(name));
+    const sync = folderSync.createFolderSync(dir, adapter, { stateFile: stateFileFor(dir, link.uri) });
+    await sync.importAll();
+    setLink(dir, link);
+    const proj = openAt(dir, link);
+    notify(t('Открыто из папки «{0}».', link.name || ''));
+    return proj;
+  });
+
+  /** Разорвать связь с папкой (файлы в папке остаются). */
+  handle('folder:detach', async () => {
+    const dir = currentDir;
+    if (!dir || !folder.sync) return false;
+    await pushChanged();
+    await releaseFolderLock();
+    setLink(dir, null);
+    stopFolder();
+    return true;
+  });
+
+  handle('folder:status', () => folderStatus());
+  handle('folder:syncNow', async () => {
+    if (!folder.sync) throw new Error(t('Проект не связан с папкой.'));
+    await pushChanged();
+    await pullChanges();
+    return folderStatus();
+  });
+
+  /** После запуска: если открытый проект был связан с папкой, возобновляем связь. */
+  async function resume() {
+    if (!currentDir) return null;
+    const link = linkOf(currentDir);
+    if (!link || !host.folder) return null;
+    startFolder(currentDir, link);
+    const foreign = await foreignFolderLock().catch(() => null);
+    if (foreign) {
+      const mins = Math.max(1, Math.round((Date.now() - foreign.time) / 60000));
+      await host.confirm({
+        message: t('Проект, похоже, открыт на другом устройстве: {0}', foreign.device),
+        detail: t('Последний сигнал оттуда был {0} мин. назад. Если работать в обоих местах сразу, правки одной главы могут столкнуться: ничего не пропадёт, но чужая версия уйдёт в папку «Конфликты». Лучше закрыть проект на другом устройстве.', mins),
+        buttons: [t('Всё равно открыть'), t('Отмена')],
+        defaultId: 1,
+        cancelId: 1,
+      });
+    }
+    await pullChanges();
+    return folderStatus();
+  }
+
+  /** Замок в внешней папке: недавно ли проект открывали не на этом устройстве. */
+  async function foreignFolderLock() {
+    if (!host.folder || !folder.uri) return null;
+    try {
+      const bytes = await host.folder.adapter(folder.uri).read(cloud.LOCK_FILE);
+      if (!bytes) return null;
+      const raw = JSON.parse(new TextDecoder().decode(bytes));
+      if (!raw || typeof raw.device !== 'string' || !Number.isFinite(raw.time)) return null;
+      if (raw.device === deviceId()) return null;
+      return Date.now() - raw.time < cloud.LOCK_FRESH_MS ? raw : null;
+    } catch { return null; }
+  }
 
   handle('chapter:add', (afterId) => project.addChapter(requireDir(), afterId || null));
   handle('chapter:rename', (id, title) => project.renameChapter(requireDir(), id, title));
@@ -674,6 +957,8 @@ function createBackend(host, { session } = {}) {
     call,
     autoBackup,
     exportZip,
+    resume,
+    folderStatus,
     hasProject: () => !!currentDir,
     handlers,
     PATHS: { ROOT, PROJECTS, APP, COPIES },

@@ -3,7 +3,10 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 let esbuild;
-try { esbuild = require('esbuild'); } catch { esbuild = require('/opt/npm-tools/node_modules/esbuild'); }
+for (const p of ['esbuild', path.join(__dirname, '..', '..', 'node_modules', 'esbuild'), path.join(__dirname, '..', 'node_modules', 'esbuild')]) {
+  try { esbuild = require(p); break; } catch { /* пробуем дальше */ }
+}
+if (!esbuild) throw new Error('Не найден esbuild: выполните npm install в корне проекта.');
 const shim = path.join(__dirname, '..', 'shim');
 const out = path.join(require('os').tmpdir(), 'kabinet-smoke.cjs');
 esbuild.buildSync({

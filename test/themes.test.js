@@ -55,3 +55,12 @@ test('темы: цветные темы читаются (контраст те�
     if (t.mode === 'light') assert.ok(lum(v.paper) < lum('#fefefe'), `${t.id}: бумага слишком белая`);
   }
 });
+
+test('темы: базовые «Бумага» и «Тёплая тьма» заданы явно и читаются', () => {
+  for (const t of THEMES.filter((x) => !x.id.includes('-'))) {
+    const v = vars(t.id);
+    assert.equal(v.mode, t.mode, `${t.id}: режим`);
+    assert.ok(ratio(v.text, v.paper) >= 7, `${t.id}: текст на бумаге`);
+    assert.ok(ratio(v.muted, v.side) >= 4.5, `${t.id}: второстепенный текст на панели`);
+  }
+});

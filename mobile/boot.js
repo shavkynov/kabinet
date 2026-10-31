@@ -11,11 +11,30 @@ import { zipSync, unzipSync } from 'fflate';
 import { createIdbStore } from './shim/idbstore.js';
 import { confirmBox, chooseBox, menuBox, toast, pickFiles } from './ui.js';
 import { createBackend } from './backend.js';
+import { createSafAdapter, chooseFolder, forgetFolder, safAvailable } from './saf.js';
 import i18n from '../src/i18n.js';
 
 const VERSION = __APP_VERSION__;
 const native = Capacitor.isNativePlatform();
 const HwKeyboard = registerPlugin('HwKeyboard');
+
+// Имя этого устройства для замка «проект открыт на другом устройстве» (src/cloud.js).
+// Модель телефона может повторяться, поэтому к ней добавляем короткий случайный знак.
+function deviceName() {
+  try {
+    const key = 'kabinet.mobile.device';
+    let name = localStorage.getItem(key);
+    if (name) return name;
+    const model = String(navigator.userAgent || '').match(/\(Android[^;]*;\s*([^;)]+?)\s*(?:Build\/[^)]*)?\)/);
+    const base = (model && model[1] ? model[1].trim() : 'Телефон').slice(0, 24);
+    const rnd = [...crypto.getRandomValues(new Uint8Array(2))].map((x) => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+    name = `${base} (${rnd})`;
+    localStorage.setItem(key, name);
+    return name;
+  } catch {
+    return 'Android';
+  }
+}
 
 // ---------- физическая клавиатура ----------
 // Основной источник — маленький плагин на Java (HwKeyboardPlugin): он видит подключённые устройства ввода.
@@ -77,6 +96,7 @@ async function deliver({ name, mime, data }) {
 const host = {
   version: VERSION,
   platform: 'android',
+  device: deviceName(),
   confirm: confirmBox,
   choose: chooseBox,
   pickFiles,
@@ -88,6 +108,8 @@ const host = {
     return zipSync(o, { level: 6 });
   },
   unzip: (bytes) => Object.entries(unzipSync(new Uint8Array(bytes))).map(([path, data]) => ({ path, data })),
+  // Обычная папка (своя или облачная): выбор системным окном и доступ к файлам.
+  folder: safAvailable() ? { choose: chooseFolder, forget: forgetFolder, adapter: createSafAdapter } : null,
 };
 
 // ---------- меню («☰») ----------
@@ -97,6 +119,41 @@ function buildMenu(be, hw) {
   const t = i18n.t;
   const has = be.hasProject();
   const go = (ch) => () => be.emit(ch);
+  const run = (fn) => async () => {
+    try { await fn(); } catch (e) { toast(String((e && e.message) || e)); }
+  };
+
+  // Раздел «Папка»: проект в обычной или облачной папке, чтобы работать на двух устройствах.
+  const ago = (ts) => {
+    if (!ts) return t('ещё не синхронизировалась');
+    const min = Math.floor((Date.now() - ts) / 60000);
+    if (min < 1) return t('только что');
+    if (min < 60) return t('{0} мин. назад', min);
+    return t('{0} ч. назад', Math.floor(min / 60));
+  };
+  const folderMenu = () => {
+    if (!host.folder) return [];
+    const st = be.folderStatus();
+    if (!st.linked) {
+      return [
+        { sep: true },
+        { head: t('Папка') },
+        { label: t('Открыть проект из папки…'), run: run(() => be.call('folder:open')) },
+        { label: t('Сохранять этот проект в папке…'), run: run(() => be.call('folder:choose')), disabled: !has },
+      ];
+    }
+    const label = t('Синхронизация с папкой «{0}»', st.name || '');
+    return [
+      { sep: true },
+      { head: label },
+      { label: st.error ? t('Ошибка папки: {0}', st.error) : t('Обновлено: {0}', ago(st.lastSync)), disabled: true },
+      { label: t('Синхронизировать сейчас'), run: run(() => be.call('folder:syncNow')) },
+      { label: t('Выбрать другую папку…'), run: run(() => be.call('folder:choose')) },
+      { label: t('Больше не синхронизировать с этой папкой'), run: run(async () => { await be.call('folder:detach'); toast(t('Связь с папкой убрана. Файлы в папке остались.')); }) },
+      { label: t('Открыть другой проект из папки…'), run: run(() => be.call('folder:open')) },
+    ];
+  };
+
   return [
     { head: t('Файл') },
     { label: t('Новый проект…'), run: go('ui:newProject') },
@@ -107,6 +164,7 @@ function buildMenu(be, hw) {
     { label: t('Шаблоны карточек…'), run: go('ui:openTemplates'), disabled: !has },
     { label: t('Сделать копию сейчас'), run: go('ui:backupNow'), disabled: !has },
     { label: t('Закрыть проект'), run: go('ui:closeProject'), disabled: !has },
+    ...folderMenu(),
     { sep: true },
     { head: t('Вид') },
     { label: t('Поиск по проекту…'), run: go('ui:openSearch'), disabled: !has },
@@ -169,7 +227,7 @@ function wireContextMenu(be) {
 function showFatal(err) {
   const d = document.createElement('div');
   d.style.cssText = 'padding:24px;font:16px/1.5 sans-serif;color:#b00020;white-space:pre-wrap';
-  d.textContent = `Не удалось запустить Кабинет.\n\n${(err && err.stack) || err}`;
+  d.textContent = i18n.t('Не удалось запустить Кабинет.\n\n{0}', (err && err.stack) || String(err));
   document.body.replaceChildren(d);
 }
 
@@ -194,12 +252,16 @@ function showFatal(err) {
         set: (k, v) => { try { if (v) sessionStorage.setItem(`kabinet.mobile.${k}`, v); else sessionStorage.removeItem(`kabinet.mobile.${k}`); } catch { /* не критично */ } },
       },
     });
+    host.notify = (message) => toast(message);
     host.popupMenu = () => { menuBox(i18n.t('Кабинет'), buildMenu(be, hw)); };
     window.kabinet = Object.assign({}, be.api, { hw });
     window.kabinetBackend = be;
 
     wireShortcuts(be);
     wireContextMenu(be);
+
+    // Открытый проект мог быть связан с обычной папкой: возобновляем синхронизацию.
+    if (be.folderStatus().available) be.resume().catch((e) => console.error('folder resume:', e));
 
     // Всё, что ещё не записано, уходит на диск при любом уходе из приложения.
     const save = () => { fs.flush(); };
@@ -220,7 +282,7 @@ function showFatal(err) {
     s.src = 'dist/app.js';
     s.onerror = () => showFatal(new Error('Не загрузился dist/app.js'));
     document.body.append(s);
-    if (!persistent) setTimeout(() => toast('Хранилище недоступно: проекты не сохранятся после закрытия. Сохраняйте ZIP.'), 800);
+    if (!persistent) setTimeout(() => toast(i18n.t('Хранилище недоступно: проекты не сохранятся после закрытия. Сохраните ZIP.')), 800);
   } catch (err) {
     showFatal(err);
   }

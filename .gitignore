@@ -4,6 +4,17 @@ dist/
 .DS_Store
 *.tmp
 renderer/app.gen.js
+
+# внутренние заметки не публикуются
+WINDOWS.md
+CLAUDE.md
+docs/
+
+# Android: сборка и ключи подписи (ключ хранится только в Secrets репозитория)
 mobile/node_modules/
 mobile/www/
 mobile/android/
+mobile/*.keystore
+mobile/*.jks
+*.keystore
+*.jks
