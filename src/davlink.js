@@ -141,7 +141,7 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
     const c = cur;
     if (!c) return;
     clearInterval(c.timer);
-    clearTimeout(cur.pushTimer);
+    clearTimeout(c.pushTimer);
     for (let i = 0; i < 50 && c.busy; i += 1) await new Promise((r) => setTimeout(r, 100));
     await run(true);
     await releaseLock(c);
@@ -243,7 +243,7 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
       if (!acc) continue;
       const key = `${acc.url}|${acc.user}`;
       if (seen.has(key)) continue;
-      seen.add(k);
+      seen.add(key);
       out.push({ url: acc.url, user: acc.user, pass: acc.pass, label: acc.label || acc.url });
     }
     return out;
