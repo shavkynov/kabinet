@@ -1,9 +1,12 @@
 'use strict';
 
-const crypto = require('node:crypto');
+// Этот файл работает и в программе для компьютера (Node), и в Android (WebView): обычный require('crypto')
+// на телефоне подменяется заглушкой mobile/shim/crypto.js, а Buffer не знает кодировку base64url.
+const crypto = require('crypto');
 const config = require('./yandex-oauth-config.json');
 const SCOPES = ['cloud_api:disk.read', 'cloud_api:disk.write'];
 const validAuthorizationCode = (value) => typeof value === 'string' && /^[\x20-\x7E]{1,2048}$/.test(value);
+const base64url = (bytes) => Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 function createYandexOAuth({ request, now = Date.now, ttlMs = 600000 } = {}) {
   if (typeof request !== 'function' || !Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error('Неверная конфигурация OAuth.');
@@ -11,13 +14,13 @@ function createYandexOAuth({ request, now = Date.now, ttlMs = 600000 } = {}) {
   const cancel = () => { pending = null; };
   function begin() {
     if (pending && now() < pending.deadline) throw new Error('Авторизация уже выполняется.');
-    const verifier = crypto.randomBytes(32).toString('base64url');
-    const state = crypto.randomBytes(32).toString('base64url');
+    const verifier = base64url(crypto.randomBytes(32));
+    const state = base64url(crypto.randomBytes(32));
     pending = { verifier, state, deadline: now() + ttlMs, exchanging: false };
     const url = new URL('https://oauth.yandex.ru/authorize');
     url.search = new URLSearchParams({ response_type: 'code', client_id: config.clientId,
       redirect_uri: config.redirectUri, scope: SCOPES.join(' '), state,
-      code_challenge_method: 'S256', code_challenge: crypto.createHash('sha256').update(verifier).digest('base64url'),
+      code_challenge_method: 'S256', code_challenge: base64url(crypto.createHash('sha256').update(verifier).digest()),
     }).toString();
     return url.href;
   }

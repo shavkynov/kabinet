@@ -1,5 +1,5 @@
 'use strict';
-const crypto = require('node:crypto');
+const crypto = require('crypto');
 const API = 'https://cloud-api.yandex.net/v1/disk';
 const PREFIX = 'oauth-yandex:';
 const isOAuthUser = (s) => typeof s === 'string' && /^oauth-yandex:[a-f0-9]{32}$/.test(s);
