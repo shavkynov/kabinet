@@ -60,7 +60,7 @@ async function openNote(id) {
     ta.value = text;
     ta.disabled = false;
     ta.scrollTop = 0;
-    if (document.body.classList.contains('notes-hidden')) applyNotesHidden(false);
+    if (!notesShown()) applyNotesHidden(false);
     expandSection('notetext');
     updateNoteTitle();
     noteListCtl.updateSelection();
@@ -157,6 +157,7 @@ function wireNotes() {
 }
 
 function applyNotesHidden(hidden) {
+  if (document.body.classList.contains('m-dr')) { setDrawer('r', !hidden); return; } // Android: панель выезжает поверх листа
   document.body.classList.toggle('notes-hidden', hidden);
   try { localStorage.setItem('kabinet.notesHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
   refreshBar();
@@ -304,7 +305,7 @@ function wireLists() {
   $('#addChapter').addEventListener('click', () => addDoc('chapter'));
   $('#addNote').addEventListener('click', addNote);
   wireNotes();
-  $('#btnNotes').addEventListener('click', () => applyNotesHidden(!document.body.classList.contains('notes-hidden')));
+  $('#btnNotes').addEventListener('click', () => applyNotesHidden(notesShown()));
   try {
     if (localStorage.getItem('kabinet.notesHidden') === '1') document.body.classList.add('notes-hidden');
   } catch { /* ignore */ }

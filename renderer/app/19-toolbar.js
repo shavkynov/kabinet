@@ -31,7 +31,7 @@ function wireToolbar() {
       case 'typewriter': toggleTypewriter(); break;
       case 'sound': toggleSound(); break;
       case 'ambient': toggleAmbient(); break;
-      case 'notes': applyNotesHidden(!document.body.classList.contains('notes-hidden')); break;
+      case 'notes': applyNotesHidden(notesShown()); break;
       case 'focus': toggleFocusMode(); break;
       case 'split': toggleSplit(); break;
       default:

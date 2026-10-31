@@ -13,6 +13,10 @@ let openToken = 0;    // защита от гонок при быстром пе
 let busy = false;     // защита от двойного создания
 let statusTimer = null;
 
+// Android (35-mobile.js): kbd — подключена физическая клавиатура, drawer — какая панель выехала ('l' | 'r' | null).
+// Объявлено здесь: части 29+ выполняются позже init().
+const MOB = { kbd: false, drawer: null };
+
 function showError(message) {
   alert(tdom(message));
 }

@@ -9,6 +9,7 @@ function setSidebarWidth(px) {
 let sidebarWidth = 260; // последняя «нормальная» ширина
 
 function applySidebarHidden(hidden) {
+  if (document.body.classList.contains('m-dl')) { setDrawer('l', !hidden); return; } // Android: панель выезжает поверх листа
   document.body.classList.toggle('sidebar-hidden', hidden);
   try { localStorage.setItem('kabinet.sidebarHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
   setTimeout(() => { updateTwPad(); layoutGoal(); }, 0);
@@ -61,7 +62,7 @@ function wireSidebar() {
 }
 
 function toggleSidebar() {
-  const hidden = !document.body.classList.contains('sidebar-hidden');
+  const hidden = sidebarShown();
   applySidebarHidden(hidden);
   if (hidden && currentId && isTextKind(currentKind)) editor.commands.focus();
 }

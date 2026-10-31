@@ -222,6 +222,7 @@ async function createCardFromText(kind, name) {
 
 // Какой звук соответствует клавише. Сочетания с Cmd/Ctrl/Option и стрелки звука не дают.
 function playKeySound(e, force) {
+  if (document.body.classList.contains('mob') && !MOB.kbd) return; // Android: клавиши звучат только при подключённой клавиатуре
   if ((!force && !editor.isEditable) || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
   if (e.key === 'Enter') sounds.play('enter');
   else if (e.key === 'Backspace' || e.key === 'Delete') sounds.play('backspace');

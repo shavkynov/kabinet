@@ -1,0 +1,50 @@
+# Собирает APK для Android в облаке GitHub (на компьютере автора Android Studio не нужна).
+# Запуск: вкладка Actions → «Android APK» → Run workflow. Готовый файл — внизу страницы запуска, раздел Artifacts.
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['android-*']
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Зависимости (Electron для Android не нужен, его не качаем)
+        run: |
+          npm install --ignore-scripts
+          cd mobile && npm install
+
+      - name: Сборка интерфейса для Android
+        run: node mobile/build.js
+
+      - name: Проект Android (значки, подпись, плагин клавиатуры)
+        run: node mobile/android-setup.js
+
+      - name: APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Переименовать
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p out
+          cp mobile/android/app/build/outputs/apk/release/*.apk "out/Kabinet-${VERSION}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kabinet-android
+          path: out/*.apk

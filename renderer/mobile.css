@@ -1,0 +1,142 @@
+/* Кабинет для Android: адаптация под телефон и планшет. Всё действует только при body.mob.
+   Режимы (классы ставит renderer/app/35-mobile.js): m-compact (телефон), m-full (планшет или клавиатура),
+   m-dl / m-dr (панели выезжают поверх листа), m-narrow (узкое окно), m-kbd (клавиатура подключена). */
+
+html, body { overscroll-behavior: none; }
+body.mob {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  box-sizing: border-box;
+}
+body.mob #drag { display: none; }
+body.mob .ProseMirror { caret-color: var(--accent); }
+
+/* ---------- кнопки сверху ---------- */
+body.mob .chrome-btn { min-width: 40px; height: 36px; top: calc(4px + env(safe-area-inset-top)); }
+body.mob #chromeRight { top: calc(4px + env(safe-area-inset-top)); right: calc(6px + env(safe-area-inset-right)); gap: 0; }
+body.mob #chromeRight .chrome-btn { top: auto; }
+body.mob #btnSidebar { left: calc(6px + env(safe-area-inset-left)); }
+body.mob #paper-area { inset: calc(44px + env(safe-area-inset-top)) 0 0; scrollbar-gutter: auto; }
+
+/* ---------- панели: выезжают поверх листа ---------- */
+body.mob.m-dl #sidebar,
+body.mob.m-dr #notesbar {
+  position: fixed;
+  top: 0; bottom: 0;
+  z-index: 40;
+  display: flex !important; /* перекрывает скрытие классами sidebar-hidden / notes-hidden с компьютера */
+  width: min(86vw, 360px);
+  padding-top: calc(10px + env(safe-area-inset-top));
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 0 28px rgba(0, 0, 0, .3);
+  transition: transform .22s ease;
+  will-change: transform;
+}
+body.mob.m-dl #sidebar { left: 0; transform: translateX(-104%); padding-left: env(safe-area-inset-left); }
+body.mob.m-dr #notesbar { right: 0; transform: translateX(104%); padding-right: env(safe-area-inset-right); }
+body.mob.m-dl.drawer-l #sidebar,
+body.mob.m-dr.drawer-r #notesbar { transform: none; }
+body.mob.m-dl #resizer,
+body.mob.m-dr #notesResizer { display: none !important; }
+/* при запуске и смене раскладки панели не «уезжают» на глазах */
+body.mob:not(.m-ready) #sidebar, body.mob:not(.m-ready) #notesbar, body.mob:not(.m-ready) #mobScrim { transition: none !important; }
+#mobScrim {
+  position: fixed; inset: 0; z-index: 39;
+  background: rgba(0, 0, 0, .38);
+  opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+body.mob.drawer-l #mobScrim, body.mob.drawer-r #mobScrim { opacity: 1; pointer-events: auto; }
+body.mob.m-dl #sidebar, body.mob.m-dr #notesbar { overscroll-behavior: contain; }
+
+/* строки списков: пальцу нужна цель побольше */
+body.mob .ch { padding: 10px 10px; min-height: 22px; }
+body.mob .sec-head { padding-top: 10px; padding-bottom: 10px; }
+body.mob .side-plus { min-width: 36px; min-height: 32px; }
+body.mob .side-foot .link { padding: 8px 6px; }
+body.mob .ch .num { opacity: .7; }
+
+/* ---------- телефон: лист и две панели ---------- */
+body.mob.m-compact #chromeRight .chrome-btn:not(#btnMenu):not(#btnNotes):not(#btnSettings) { display: none; }
+body.mob.m-compact #toolbar { padding: 4px 12px; border-top: none; justify-content: center !important; }
+body.mob.m-compact #toolbar .bar-btns,
+body.mob.m-compact #pane2,
+body.mob.m-compact #barRead,
+body.mob.m-compact #barToday,
+body.mob.m-compact #barTotal { display: none !important; }
+body.mob.m-compact #paper-area { padding-left: 14px; padding-right: 14px; }
+body.mob.m-compact #goal { display: none; }
+
+/* ---------- окна настроек: снизу на узком экране, на планшете у кнопок ---------- */
+body.mob.m-narrow .panel,
+body.mob.m-narrow .panel.wide {
+  top: auto; left: 0; right: 0; bottom: 0;
+  width: auto;
+  max-height: 78vh;
+  border-radius: 16px 16px 0 0;
+  border-width: 1px 0 0;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 45;
+}
+body.mob .panel { max-height: calc(100vh - 56px - env(safe-area-inset-top)); overscroll-behavior: contain; }
+body.mob .panel .row { padding: 8px 0; }
+body.mob .panel input[type="range"] { width: 150px; height: 28px; }
+body.mob .panel input[type="checkbox"] { width: 20px; height: 20px; }
+body.mob .panel select, body.mob .panel input.text, body.mob .panel input.num { min-height: 34px; font-size: 15px; }
+body.mob .panel button { min-height: 36px; }
+body.mob #goalPop, body.mob #search { max-width: calc(100vw - 24px); }
+body.mob #search { top: calc(48px + env(safe-area-inset-top)); }
+body.mob dialog { max-width: calc(100vw - 24px); }
+body.mob dialog input { font-size: 16px; }
+
+/* на планшете с панелями поверх листа нижняя строка сведений остаётся */
+body.mob.m-full #toolbar { padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
+
+/* ---------- стартовый экран ---------- */
+body.mob.m-compact .mode-pick { flex-direction: column; align-items: stretch; }
+body.mob.m-compact .mode-card { width: auto; }
+body.mob .start-inner { padding-left: 18px; padding-right: 18px; }
+
+/* ---------- окна выбора, подтверждений и меню (mobile/ui.js) ---------- */
+.mob-modal {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .42);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+.mob-sheet {
+  width: min(100%, 520px);
+  max-height: 86vh;
+  display: flex; flex-direction: column;
+  background: var(--paper); color: var(--text);
+  border: 1px solid var(--line); border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 34px rgba(0, 0, 0, .28);
+  padding: 14px 0 calc(8px + env(safe-area-inset-bottom));
+  font-family: var(--font-ui, inherit);
+}
+.mob-sheet h2 { margin: 0; padding: 2px 20px 2px; font-size: 17px; }
+.mob-sheet .mob-msg { padding: 4px 20px 10px; color: var(--muted); font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
+.mob-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px; }
+.mob-list button, .mob-actions button {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text);
+  padding: 13px 14px; font-size: 16px; border-radius: 10px;
+}
+.mob-list button:active, .mob-actions button:active { background: var(--sel); }
+.mob-list button[disabled] { opacity: .4; }
+.mob-list .mob-head { padding: 12px 14px 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.mob-list .mob-sep { height: 1px; background: var(--line); margin: 6px 10px; }
+.mob-actions { display: flex; flex-direction: column; padding: 4px 8px 0; }
+.mob-actions .mob-primary { color: var(--accent); font-weight: 600; }
+.mob-toast {
+  position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 110; max-width: 88vw;
+  background: var(--text); color: var(--paper);
+  padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: .94;
+}
+@media (min-width: 720px) {
+  .mob-modal { align-items: center; }
+  .mob-sheet { border-radius: 16px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+}

@@ -150,7 +150,7 @@ async function openSearchHit(hit, n, sn) {
     await openDoc('chapter', hit.id);
     if (currentKind === 'chapter' && currentId === hit.id && q) selectInEditor(q, n, sn);
   } else if (hit.kind === 'note') {
-    if (document.body.classList.contains('notes-hidden')) applyNotesHidden(false);
+    if (!notesShown()) applyNotesHidden(false);
     expandSection('note');
     await openNote(hit.id);
     if (noteId === hit.id && q) selectInTextarea($('#noteText'), q, n);

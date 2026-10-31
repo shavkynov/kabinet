@@ -77,7 +77,7 @@ function refreshBar() {
     typewriter: settings.typewriter,
     sound: settings.soundOn,
     ambient: settings.ambientOn,
-    notes: !document.body.classList.contains('notes-hidden'),
+    notes: notesShown(),
     split: !!p2.id,
     focus: document.body.classList.contains('focus-mode'),
   };
