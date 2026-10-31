@@ -136,8 +136,13 @@ jobs:
           APK=$(ls mobile/android/app/build/outputs/apk/release/*.apk | head -n1)
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           SIGNER=$(ls -d "$SDK"/build-tools/*/apksigner | sort -V | tail -n1)
-          "$SIGNER" verify --print-certs "$APK" | tee signer.txt
-          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signer.txt | head -n1)
+          "$SIGNER" verify --print-certs "$APK" > signer.txt
+          grep -v '^WARNING: META-INF' signer.txt || true
+          ACTUAL=$(grep -m1 'certificate SHA-256 digest:' signer.txt | sed 's/.*digest: *//' | tr -d '[:space:]' | tr 'A-F' 'a-f' || true)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::Не удалось прочитать отпечаток подписи APK."
+            exit 1
+          fi
           echo "Отпечаток подписи APK: $ACTUAL"
           if [ "$PUBLISH" = "true" ] && [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
             echo "::error::APK подписан не рабочим ключом (ожидался $EXPECTED_CERT_SHA256). В выпуск он не попадёт."
