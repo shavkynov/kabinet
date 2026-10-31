@@ -1,0 +1,5 @@
+{
+  "clientId": "ad77a3cab040483a967554354d75d03a",
+  "redirectUri": "https://shavkynov.github.io/kabinet/oauth/yandex/",
+  "callbackUri": "kabinet://oauth/yandex"
+}
