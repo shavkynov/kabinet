@@ -5,7 +5,14 @@ const vm=require('node:vm');
 const fs=require('node:fs');
 const path=require('node:path');
 const {createSingleFlight}=require('../src/single-flight');
-const source=fs.readFileSync(path.join(__dirname,'../renderer/app/37-yandex.js'),'utf8').replace("import { createSingleFlight } from '../src/single-flight.js';\n",'');
+const rawSource=fs.readFileSync(path.join(__dirname,'../renderer/app/37-yandex.js'),'utf8');
+function loadVmSource(raw){
+  const normalized=raw.replace(/\r\n?/g,'\n');
+  const importLine="import { createSingleFlight } from '../src/single-flight.js';\n";
+  assert.ok(normalized.startsWith(importLine),'Expected the explicit single-flight import');
+  return normalized.slice(importLine.length);
+}
+const source=loadVmSource(rawSource);
 function setup(platform='linux',authorize=async()=>({user:'oauth-yandex:'+'a'.repeat(32),ticket:'fixture-ticket'}),actions={}){
   const calls=[],shown=[],errors=[];let folder;
   const el=(tag,cls,text)=>({tag,className:cls,textContent:text,disabled:false,style:{},children:[],attributes:{},listeners:{},
@@ -62,3 +69,12 @@ test('repeated service-button click starts one browser authorization and keeps c
   const cancel=x.shown.at(-1).at(-1).children[0];assert.equal(cancel.disabled,false);
   finish({user:'user',ticket:'ticket'});await first;
 });
+
+for(const [name,eol] of [['LF','\n'],['CRLF','\r\n']]){
+  test(`VM source loader accepts ${name} line endings`,()=>{
+    const fixture=rawSource.replace(/\r\n?/g,'\n').replace(/\n/g,eol);
+    const loaded=loadVmSource(fixture);
+    assert.equal(loaded,source);
+    assert.doesNotThrow(()=>new vm.Script(loaded));
+  });
+}
