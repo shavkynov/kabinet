@@ -97,6 +97,9 @@ body.mob.m-full #toolbar { padding-bottom: calc(6px + env(safe-area-inset-bottom
 body.mob.m-compact .mode-pick { flex-direction: column; align-items: stretch; }
 body.mob.m-compact .mode-card { width: auto; }
 body.mob .start-inner { padding-left: 18px; padding-right: 18px; }
+/* «Открыть папку…» и «Открыть из облака…»: на телефоне друг под другом и с крупной зоной нажатия */
+body.mob.m-compact .start-actions { flex-direction: column; align-items: stretch; }
+body.mob .start-actions button { min-height: 48px; }
 
 /* ---------- окна выбора, подтверждений и меню (mobile/ui.js) ---------- */
 .mob-modal {
@@ -182,4 +185,3 @@ body.mob:not(.m-kbd).m-typing #mobKeys {
 .mob-form input:focus { outline: none; border-color: var(--accent); }
 .mob-form .mob-actions { padding: 6px 0 0; margin: 0 -8px; }
 .mob-err { color: #e5484d; font-size: 14px; line-height: 1.4; }
-body.mob #btnOpenCloud { display: none; }
