@@ -1,5 +1,36 @@
+import { createSingleFlight } from '../src/single-flight.js';
 // Desktop-only OAuth; Android keeps its native connection flow until its SDK integration.
 if (['win32','darwin','linux'].includes(api.platform)) {
+  const dialogGate=createSingleFlight();
+  const originalButton=davBtn;
+  davBtn=(text,action,cls='secondary')=>{
+    const gate=createSingleFlight();
+    const button=originalButton(text,async(event)=>{
+      if(button.disabled || gate.busy || dialogGate.busy)return;
+      const label=button.textContent;
+      button.disabled=true;button.textContent=t('Идёт обмен…');
+      try{return await gate.run(()=>action(event));}
+      catch(e){showError(e.message);}
+      finally{button.disabled=false;button.textContent=label;}
+    },cls);
+    return button;
+  };
+  const withBusyDialog=async(action)=>{
+    const dialog=$('#syncDialog');
+    const buttons=[...dialog.querySelectorAll('button')].map((b)=>[b,b.disabled]);
+    const oldBusy=dialog.getAttribute('aria-busy');
+    for(const [b] of buttons)b.disabled=true;
+    dialog.setAttribute('aria-busy','true');
+    try{return await action();}
+    finally{
+      for(const [b,disabled] of buttons)b.disabled=disabled;
+      if(oldBusy===null)dialog.removeAttribute('aria-busy');else dialog.setAttribute('aria-busy',oldBusy);
+    }
+  };
+  const originalAttach=davAttach,originalOpen=davOpen;
+  davAttach=(...args)=>dialogGate.run(()=>withBusyDialog(()=>originalAttach(...args)));
+  davOpen=(...args)=>dialogGate.run(()=>withBusyDialog(()=>originalOpen(...args)));
+  $('#syncDialog')?.addEventListener('cancel',(event)=>{if(dialogGate.busy)event.preventDefault();});
   let yandexRun=0;
   const oauthUser=(s)=>typeof s==='string' && s.startsWith('oauth-yandex:');
   const cancelYandex=()=>{yandexRun++;void api.dav('yandexCancel').catch(()=>{});};
@@ -25,7 +56,7 @@ if (['win32','darwin','linux'].includes(api.platform)) {
     },'sync-row primary'));
     for(const p of presets){
       const active=p.id==='yandex';
-      const b=davBtn(active?t('Подключить Яндекс Диск'):`${t(p.name)} — ${t('Временно недоступно')}`,()=>{if(active)void davStepLogin(p);},'sync-row secondary');
+      const b=davBtn(active?t('Подключить Яндекс Диск'):`${t(p.name)} — ${t('Временно недоступно')}`,()=>active?davStepLogin(p):undefined,'sync-row secondary');
       b.disabled=!active;if(!active)b.style.opacity='0.5';list.append(b);
     }
     davShow(davEl('h2','',t('Синхронизация')),davEl('p','hint',t('Подтвердите доступ на сайте Яндекса, затем выберите папку проекта в Кабинете.')),list,

@@ -12,6 +12,7 @@ const webdav = require('./webdav');
 const folderSync = require('./folder');
 const cloud = require('./cloud');
 const { writeFileAtomic } = require('./fsutil');
+const { createSingleFlight } = require('./single-flight');
 
 const PASS_MS = 30_000; // полный обход папки — десяток запросов, чаще не нужно
 const PUSH_DELAY_MS = 4_000;
@@ -52,6 +53,13 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
   // ---------- работа открытого проекта ----------
   let cur = null; // { dir, acc, sync, adapter, timer, lockTimer, watcher, pushTimer, busy, lastSync, lastError, conflict, quietUntil }
 
+  const configGate = createSingleFlight();
+  const configure = (action) => configGate.run(async () => {
+    const c = cur;
+    while (c && c.busy) await new Promise((resolve) => setTimeout(resolve, 50));
+    return action();
+  });
+
   function stopWork() {
     if (!cur) return;
     clearInterval(cur.timer);
@@ -74,9 +82,9 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
   }
 
   /** Один полный проход: выгрузить своё, подтянуть чужое. */
-  async function run() {
+  async function run(force = false) {
     const c = cur;
-    if (!c || c.busy) return null;
+    if (!c || c.busy || (configGate.busy && force !== true)) return null;
     c.busy = true;
     try {
       const res = await c.sync.sync();
@@ -133,9 +141,9 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
     const c = cur;
     if (!c) return;
     clearInterval(c.timer);
-    clearTimeout(c.pushTimer);
+    clearTimeout(cur.pushTimer);
     for (let i = 0; i < 50 && c.busy; i += 1) await new Promise((r) => setTimeout(r, 100));
-    await run();
+    await run(true);
     await releaseLock(c);
     if (cur === c) stopWork();
   }
@@ -156,6 +164,7 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
   }
 
   async function syncNow() {
+    if (configGate.busy) throw new Error('Идёт обмен…');
     if (!cur) throw new Error('Проект не связан с сетевой папкой.');
     cur.conflict = false;
     await run();
@@ -186,22 +195,32 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
    * 'merge' — соединить; 'replace' — выгрузить этот проект, чужое уйдёт в «Конфликты».
    */
   async function attach(dir, acc, mode = 'ask') {
-    await davOf(acc).ensureRoot();
-    const probe = folderSync.createFolderSync(dir, davOf(acc), { stateFile: stateFile(dir, acc) });
-    const exists = await probe.hasProject().catch(() => false);
-    if (exists && mode === 'ask') return { exists: true };
-    setLink(dir, acc);
-    start(dir);
-    if (exists && mode === 'replace') await probe.replaceAll();
-    else if (exists) await probe.sync();
-    else await probe.exportAll();
-    return { exists, status: status(dir) };
+    const previousDir = cur ? cur.dir : null;
+    if (cur) await stop();
+    try {
+      await davOf(acc).ensureRoot();
+      const probe = folderSync.createFolderSync(dir, davOf(acc), { stateFile: stateFile(dir, acc) });
+      const exists = await probe.hasProject();
+      if (exists && mode === 'ask') {
+        if (previousDir) start(previousDir);
+        return { exists: true };
+      }
+      if (exists && mode === 'replace') await probe.replaceAll();
+      else if (exists) await probe.sync();
+      else await probe.exportAll();
+      setLink(dir, acc);
+      start(dir);
+      return { exists, status: status(dir) };
+    } catch (error) {
+      if (previousDir) start(previousDir);
+      throw error;
+    }
   }
 
   /** Копирует проект из сетевой папки в новый локальный каталог и связывает его. */
   async function openRemote(acc, targetDir) {
     const probe = folderSync.createFolderSync(targetDir, davOf(acc), { stateFile: stateFile(targetDir, acc) });
-    if (!(await probe.hasProject().catch(() => false))) throw new Error('В выбранной папке нет проекта Кабинета.');
+    if (!(await probe.hasProject())) throw new Error('В выбранной папке нет проекта Кабинета.');
     await probe.importAll();
     setLink(targetDir, acc);
     return true;
@@ -224,13 +243,18 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
       if (!acc) continue;
       const key = `${acc.url}|${acc.user}`;
       if (seen.has(key)) continue;
-      seen.add(key);
+      seen.add(k);
       out.push({ url: acc.url, user: acc.user, pass: acc.pass, label: acc.label || acc.url });
     }
     return out;
   }
 
-  return { start, stop, stopWork, logins, status, syncNow, login, browse, makeFolder, attach, openRemote, detach, linkOf };
+  return { start, stop, stopWork, logins, status, syncNow, login, browse,
+    makeFolder: (...args) => configure(() => makeFolder(...args)),
+    attach: (...args) => configure(() => attach(...args)),
+    openRemote: (...args) => configure(() => openRemote(...args)),
+    detach: (...args) => configure(() => detach(...args)),
+    linkOf };
 }
 
 module.exports = { createDavLink };
