@@ -37,7 +37,11 @@ function applyMobileLayout() {
   if (!dl && MOB.drawer === 'l') setDrawer('l', false);
   if (!dr && MOB.drawer === 'r') setDrawer('r', false);
   if (!full && p2.id && typeof closePane2 === 'function') closePane2(); // второй лист на телефоне не нужен
-  setTimeout(() => { updateTwPad(); layoutGoal(); refreshBar(); }, 0);
+  // Телефон в альбомной ориентации: печатная машинка включается сама, чтобы строка с курсором не пряталась под клавиатурой.
+  const land = !full && window.innerWidth > window.innerHeight;
+  b.classList.toggle('m-land', land);
+  b.classList.toggle('typewriter', twOn());
+  setTimeout(() => { updateTwPad(); layoutGoal(); refreshBar(); if (land) recenterNow(); }, 0);
 }
 
 function setDrawer(side, open) {
@@ -76,6 +80,8 @@ function mobileBack() {
 function wireMobile() {
   const b = document.body;
   if (!b.classList.contains('mob')) return;
+
+  $('#btnMenu').hidden = false; // на телефоне нет строки меню: кнопка нужна всегда
 
   const hw = api.hw || { connected: () => false, onChange: () => {} };
   MOB.kbd = !!hw.connected();
@@ -128,6 +134,7 @@ function wireMobile() {
 
   window.addEventListener('resize', applyMobileLayout);
   window.addEventListener('orientationchange', applyMobileLayout);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { updateTwPad(); if (twOn()) recenterNow(); });
   applyMobileLayout();
   window.kabinetMobile = { back: mobileBack };
   requestAnimationFrame(() => requestAnimationFrame(() => b.classList.add('m-ready')));

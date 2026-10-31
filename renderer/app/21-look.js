@@ -158,7 +158,7 @@ function applySettings() {
   root.style.setProperty('--grain-level', String(settings.grain / 100));
   root.dataset.paper = settings.paper;
   root.dataset.para = settings.para;
-  document.body.classList.toggle('typewriter', settings.typewriter);
+  document.body.classList.toggle('typewriter', twOn());
   updateTwPad();
 
   document.documentElement.setAttribute('data-theme', settings.theme); // цвета цветных тем лежат в style.css

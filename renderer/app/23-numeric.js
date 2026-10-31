@@ -46,6 +46,11 @@ function bindSetting(selector, key, read) {
   });
 }
 
+// Печатная машинка включена настройкой или сама (телефон в альбомной ориентации).
+function twOn() {
+  return settings.typewriter || document.body.classList.contains('m-land');
+}
+
 function toggleTypewriter() {
   settings.typewriter = !settings.typewriter;
   applySettings();
@@ -60,7 +65,7 @@ function updateTwPad() {
 }
 
 function centerCaret() {
-  if (!settings.typewriter || !editor || !editor.isEditable) return;
+  if (!twOn() || !editor || !editor.isEditable) return;
   const area = $('#paper-area');
   let rect;
   try {
@@ -90,7 +95,7 @@ function twStep() {
 }
 
 function scheduleCenter() {
-  if (!settings.typewriter || !followCaret || loading) return;
+  if (!twOn() || !followCaret || loading) return;
   requestAnimationFrame(centerCaret);
 }
 

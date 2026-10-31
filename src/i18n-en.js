@@ -166,6 +166,8 @@ module.exports = {
   "Поиск слова в интернете": "Web search for a word",
   "Яндекс": "Yandex",
   "Википедия": "Wikipedia",
+  "Цель по словам…": "Word goal…",
+  "При наборе…": "While typing…",
   "Дождь": "Rain",
   "Камин": "Fireplace",
   "Ветер": "Wind",

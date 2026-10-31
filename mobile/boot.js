@@ -177,6 +177,13 @@ function buildMenu(be, hw) {
     { label: t('Текст и оформление…'), run: go('ui:openSettings'), disabled: !has },
     { sep: true },
     { head: t('Правка') },
+    { label: t('Цель по словам…'), run: () => {
+      const q = (x) => document.querySelector(x);
+      if (q('#goal').hidden && q('#barStats')) q('#barStats').click();
+      setTimeout(() => { if (!q('#goal').hidden) q('#goalBtn').click(); }, 60);
+    }, disabled: !has },
+    { label: t('Привести типографику главы в порядок'), run: () => document.querySelector('#btnFixTypo').click(), disabled: !has },
+    { label: t('При наборе…'), run: () => document.querySelector('#btnTyping').click(), disabled: !has },
     { label: t('Проверить текст главы…'), run: go('ui:openCheck'), disabled: !has },
     { label: t('Орфография при наборе вкл / выкл'), run: go('ui:toggleSpell') },
     { sep: true },

@@ -66,7 +66,7 @@ body.mob.m-compact #barRead,
 body.mob.m-compact #barToday,
 body.mob.m-compact #barTotal { display: none !important; }
 body.mob.m-compact #paper-area { padding-left: 14px; padding-right: 14px; }
-body.mob.m-compact #goal { display: none; }
+body.mob.m-compact #goal { bottom: 44px; }
 
 /* ---------- окна настроек: снизу на узком экране, на планшете у кнопок ---------- */
 body.mob.m-narrow .panel,
