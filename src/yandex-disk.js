@@ -16,7 +16,7 @@ function createYandexDisk({ pass, root = '', request, now = Date.now, sleep = (m
   const diskPath = (rel) => 'disk:/' + [...base, ...parts(rel)].join('/');
   const known = new Set();
   function fail(status) {
-    const message = ({401:'Доступ к Яндекс Диску истёк. Подключите его заново.',403:'Яндекс не разрешил доступ к папке.',429:'Яндекс просит подождать. Повторим синхронизацию позже.',507:'На Яндекс Диске закончилось место.'})[status];
+    const message = ({401:'Доступ к Яндекс Диску истёк. Подключите его заново.',403:'Яндекс не разрешил доступ к папке.',423:'Яндекс Диск временно занят. Подождите немного и повторите действие.',429:'Яндекс просит подождать. Повторим синхронизацию позже.',507:'На Яндекс Диске закончилось место.'})[status];
     const e = new Error(message || `Яндекс Диск ответил кодом ${status}.`); e.status = status; throw e;
   }
   async function send(method, suffix, query = {}, allowMissing = false) {

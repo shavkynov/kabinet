@@ -34,6 +34,7 @@ module.exports = {
   "Недопустимый путь Диска.": "Invalid Disk path.",
   "Доступ к Яндекс Диску истёк. Подключите его заново.": "Access to Yandex Disk has expired. Reconnect it.",
   "Яндекс не разрешил доступ к папке.": "Yandex did not allow access to the folder.",
+  "Яндекс Диск временно занят. Подождите немного и повторите действие.": "Yandex Disk is temporarily busy. Wait a little and try again.",
   "Яндекс просит подождать. Повторим синхронизацию позже.": "Yandex asks you to wait. Sync will be retried later.",
   "На Яндекс Диске закончилось место.": "Yandex Disk is out of space.",
   "Яндекс Диск ответил кодом {0}.": "Yandex Disk returned status {0}.",
