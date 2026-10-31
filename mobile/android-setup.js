@@ -23,11 +23,11 @@ if (!fs.existsSync(path.join(here, 'www', 'index.html'))) throw new Error('Сн�
 if (!fs.existsSync(android)) run('npx', ['cap', 'add', 'android']);
 run('npx', ['cap', 'sync', 'android']);
 
-// Java: плагины клавиатуры и доступа к папке, а также MainActivity, которая их подключает.
+// Java: плагины клавиатуры, доступа к папке, сети и защищённого хранилища, а также MainActivity, которая их подключает.
 // Список должен совпадать с registerPlugin(...) в MainActivity, иначе сборка не скомпилируется.
 const javaDir = path.join(android, 'app', 'src', 'main', 'java', 'ru', 'kabinet', 'writer');
 fs.mkdirSync(javaDir, { recursive: true });
-for (const f of ['HwKeyboardPlugin.java', 'SafPlugin.java', 'DavPlugin.java', 'MainActivity.java']) fs.copyFileSync(path.join(here, 'android-src', f), path.join(javaDir, f));
+for (const f of ['HwKeyboardPlugin.java', 'SafPlugin.java', 'DavPlugin.java', 'SecretsPlugin.java', 'MainActivity.java']) fs.copyFileSync(path.join(here, 'android-src', f), path.join(javaDir, f));
 
 // WebDAV: плагин Dav использует OkHttp (в шаблоне Capacitor его может не быть).
 {
@@ -53,6 +53,18 @@ copyTree(path.join(here, 'android-res'), res);
 const manifest = path.join(android, 'app', 'src', 'main', 'AndroidManifest.xml');
 let m = fs.readFileSync(manifest, 'utf8');
 if (!m.includes('windowSoftInputMode')) patch(manifest, '<activity', '<activity\n            android:windowSoftInputMode="adjustResize"', '<activity');
+
+// Возврат из браузера после входа в Яндекс: kabinet://oauth/yandex?... открывает Кабинет, а @capacitor/app отдаёт адрес окну (appUrlOpen).
+// Схема, хост и путь должны совпадать с callbackUri в src/yandex-oauth-config.json (это проверяет test/android-plugins.test.js).
+if (!fs.readFileSync(manifest, 'utf8').includes('android:scheme="kabinet"')) {
+  const filter = '    <intent-filter>\n' +
+    '                <action android:name="android.intent.action.VIEW" />\n' +
+    '                <category android:name="android.intent.category.DEFAULT" />\n' +
+    '                <category android:name="android.intent.category.BROWSABLE" />\n' +
+    '                <data android:scheme="kabinet" android:host="oauth" android:pathPrefix="/yandex" />\n' +
+    '            </intent-filter>\n        ';
+  patch(manifest, '</activity>', `${filter}</activity>`, '</activity>');
+}
 
 // Подпись: один и тот же ключ во всех сборках, чтобы новая версия ставилась поверх старой без потери проектов.
 // Ключ и пароли в репозитории не хранятся. Задаются переменными окружения (в GitHub — Secrets, см. android.yml):

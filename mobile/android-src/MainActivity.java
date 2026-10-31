@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(HwKeyboardPlugin.class);
         registerPlugin(SafPlugin.class);
         registerPlugin(DavPlugin.class);
+        registerPlugin(SecretsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
