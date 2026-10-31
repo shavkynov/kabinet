@@ -39,6 +39,7 @@ loadEsbuild().buildSync({
   format: 'iife',
   platform: 'browser',
   target: 'chrome100',
+  external: ['node:crypto'],
   logLevel: 'info',
   nodePaths: [path.join(__dirname, 'node_modules'), path.join(root, 'node_modules')],
   alias: {
