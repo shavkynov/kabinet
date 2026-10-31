@@ -46,14 +46,27 @@ if (!m.includes('windowSoftInputMode')) patch(manifest, '<activity', '<activity\
 
 // подпись: один и тот же ключ во всех сборках, чтобы новая версия ставилась поверх старой без потери проектов
 const gradle = path.join(android, 'app', 'build.gradle');
-let g = fs.readFileSync(gradle, 'utf8');
+const g = fs.readFileSync(gradle, 'utf8');
 if (!g.includes('kabinet-release.keystore')) {
   const ks = path.join(here, 'kabinet-release.keystore').replace(/\\/g, '/');
-  patch(gradle, /buildTypes\s*\{/, `signingConfigs {\n        release {\n            storeFile file('${ks}')\n            storePassword 'kabinet-writer'\n            keyAlias 'kabinet'\n            keyPassword 'kabinet-writer'\n        }\n    }\n    buildTypes {`, 'buildTypes');
-  patch(gradle, /release\s*\{\s*\n(\s*)minifyEnabled/, (all) => all, 'release');
-  g = fs.readFileSync(gradle, 'utf8');
-  g = g.replace(/(buildTypes\s*\{\s*release\s*\{)/, '$1\n            signingConfig signingConfigs.release');
-  if (!g.includes('signingConfig signingConfigs.release')) throw new Error('build.gradle: не удалось подключить подпись.');
-  fs.writeFileSync(gradle, g);
+  // отдельный блок в конце файла: не зависит от того, как написан шаблон Capacitor
+  fs.appendFileSync(gradle, `
+// подпись релизной сборки (mobile/android-setup.js)
+android {
+    signingConfigs {
+        kabinetRelease {
+            storeFile file('${ks}')
+            storePassword 'kabinet-writer'
+            keyAlias 'kabinet'
+            keyPassword 'kabinet-writer'
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.kabinetRelease
+        }
+    }
+}
+`);
 }
 console.log('Проект Android готов: mobile/android. Сборка: cd mobile/android && ./gradlew assembleRelease');
