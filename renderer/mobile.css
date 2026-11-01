@@ -238,3 +238,15 @@ body.mob.m-compact #syncDot:focus-visible {
 body.mob #chipProfile button.active,
 body.mob #chipAmbient button.active { background: var(--sel); color: var(--text); }
 body.mob .ch.selected .num { color: var(--text); opacity: 1; }
+
+/* Respect the device preference without changing the default mobile effects. */
+@media (prefers-reduced-motion: reduce) {
+  body.mob.m-dl #sidebar,
+  body.mob.m-dr #notesbar,
+  body.mob #mobScrim,
+  body.mob #status,
+  body.mob #goalBtn,
+  body.mob #goalBar i { transition: none; }
+  body.mob #syncDot.busy { animation: none; opacity: 1; }
+  body.mob #goal.hit #goalBtn { animation: none; }
+}
