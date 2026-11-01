@@ -150,7 +150,7 @@ body.mob .start-actions button { min-height: 48px; }
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   width: 14px; height: 14px; padding: 0; border-radius: 50%;
   border: 2px solid var(--bg); background: var(--muted);
-  box-sizing: content-box; /* зона касания больше самой точки */
+  box-sizing: content-box; /* decorative outline does not enlarge the hit area */
   outline: 10px solid transparent;
 }
 #syncDot[hidden] { display: none; }
@@ -185,3 +185,51 @@ body.mob:not(.m-kbd).m-typing #mobKeys {
 .mob-form input:focus { outline: none; border-color: var(--accent); }
 .mob-form .mob-actions { padding: 6px 0 0; margin: 0 -8px; }
 .mob-err { color: #e5484d; font-size: 14px; line-height: 1.4; }
+
+/* ---------- mobile touch targets and keyboard focus ---------- */
+body.mob .recent-remove,
+body.mob .cf-x {
+  opacity: 1;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+body.mob .panel button { min-height: 44px; }
+body.mob .side-plus { min-width: 44px; min-height: 44px; }
+body.mob .panel :is(button, input, select, textarea):focus-visible,
+body.mob .mob-sheet :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body.mob .mob-sheet:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Expand the real compact-phone button, not its decorative outline. */
+body.mob.m-compact #syncDot {
+  top: env(safe-area-inset-top, 0px);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-sizing: border-box;
+  outline: none;
+}
+body.mob.m-compact #syncDot::before {
+  content: "";
+  position: absolute;
+  inset: 13px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--muted);
+  pointer-events: none;
+}
+body.mob.m-compact #syncDot.busy::before { background: var(--accent); }
+body.mob.m-compact #syncDot.err::before { background: #e5484d; }
+body.mob.m-compact #syncDot.conflict::before { background: #f5a524; }
+body.mob.m-compact #syncDot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
