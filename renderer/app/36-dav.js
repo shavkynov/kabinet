@@ -264,12 +264,35 @@ function wireDav() {
 
 // Android: проект из облака открывается мастером главного процесса (mobile/backend.js, канал folder:open): вход в Яндекс через
 // браузер, выбор папки, копия на телефон. Окно «Синхронизация» с компьютера здесь не работает, поэтому свой путь.
+let phoneCloudOpening = false;
 async function openCloudOnPhone() {
-  await flush();
+  if (phoneCloudOpening) return;
+  phoneCloudOpening = true;
+  const button = $('#btnOpenCloud');
+  const previous = button ? { text: button.textContent, disabled: button.disabled, busy: button.getAttribute('aria-busy') } : null;
+  if (button) {
+    button.disabled = true;
+    button.textContent = t('Проверяю…');
+    button.setAttribute('aria-busy', 'true');
+  }
   try {
+    // Даём браузеру отрисовать состояние до сохранения и сетевых обращений.
+    await new Promise((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(resolve, 0));
+      else setTimeout(resolve, 0);
+    });
+    await flush();
     const proj = await window.kabinetBackend.call('folder:open');
     if (proj) enterProject(proj); // null: отказались на любом шаге
   } catch (err) {
     showError(err.message);
+  } finally {
+    phoneCloudOpening = false;
+    if (button) {
+      button.textContent = previous.text;
+      button.disabled = previous.disabled;
+      if (previous.busy === null) button.removeAttribute('aria-busy');
+      else button.setAttribute('aria-busy', previous.busy);
+    }
   }
 }
