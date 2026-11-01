@@ -1,10 +1,37 @@
 // ---------- звук: варианты, эмбиент ----------
 
 function markChips(sel, value) {
-  document.querySelectorAll(`${sel} button`).forEach((b) => {
-    const on = b.dataset.value === value;
+  const buttons = [...document.querySelectorAll(`${sel} button`)];
+  const selected = buttons.find((b) => !b.disabled && b.dataset.value === value);
+  const entry = selected || buttons.find((b) => !b.disabled);
+  for (const b of buttons) {
+    const on = b === selected;
     b.classList.toggle('active', on);
+    b.setAttribute('role', 'radio');
     b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.tabIndex = b === entry ? 0 : -1;
+  }
+}
+
+function wireRadioChips(sel) {
+  const group = $(sel);
+  group.setAttribute('role', 'radiogroup');
+  group.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const current = e.target.closest('button[data-value]');
+    if (!current || !group.contains(current) || current.disabled) return;
+    const buttons = [...group.querySelectorAll('button[data-value]')].filter((b) => !b.disabled);
+    const index = buttons.indexOf(current);
+    if (index < 0) return;
+    let next;
+    if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = buttons.length - 1;
+    else next = (index + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    e.preventDefault();
+    e.stopPropagation();
+    buttons[next].focus();
+    if (buttons[next] !== current) buttons[next].click();
   });
 }
 
@@ -28,6 +55,10 @@ async function applyAmbient() {
 }
 
 function wireChips() {
+  wireRadioChips('#chipProfile');
+  wireRadioChips('#chipAmbient');
+  markChips('#chipProfile', settings.soundProfile);
+  markChips('#chipAmbient', settings.ambient);
   $('#chipProfile').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-value]');
     if (!b) return;
