@@ -199,11 +199,11 @@ function mountOverlay(doc, win) {
   return () => { hide(); button.remove(); panel.remove(); };
 }
 
-// file: () => путь для текстового отчёта (компьютер); overlay: отчёт и прогресс импорта (Android).
-function install({ folder, file, overlay, doc, win } = {}) {
+// diagnostics:false отключает служебные панели и запись отчёта, сохраняя прогресс импорта.
+function install({ folder, file, overlay, doc, win, diagnostics = true } = {}) {
   if (installed) return installed;
   const cleanups = [instrumentFolder(folder || require('./folder'))];
-  if (typeof file === 'function') {
+  if (diagnostics && typeof file === 'function') {
     const flush = () => { try { require('fs').writeFileSync(file(), `${HEADER}\n\n${report(MAX_RUNS)}\n`); } catch { /* отчёт не критичен */ } };
     const timer = setInterval(() => { if (runs.some((r) => !r.done)) flush(); }, 3000);
     if (timer.unref) timer.unref();
@@ -213,7 +213,7 @@ function install({ folder, file, overlay, doc, win } = {}) {
   const d = doc || (typeof document !== 'undefined' ? document : null);
   const w = win || (typeof window !== 'undefined' ? window : null);
   if (overlay && d && w) {
-    cleanups.push(mountOverlay(d, w));
+    if (diagnostics) cleanups.push(mountOverlay(d, w));
     cleanups.push(mountImportProgress(d));
   }
   installed = () => { while (cleanups.length) cleanups.pop()(); installed = null; };
