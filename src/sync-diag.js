@@ -1,6 +1,6 @@
 'use strict';
 // Диагностика синхронизации (тестовая сборка): createFolderSync оборачивается снаружи, адаптер считает вызовы и время.
-// Подписи на английском: русские строки пришлось бы вносить в словарь переводов.
+// Подписи отчёта на английском; панель импорта использует существующие переводы интерфейса.
 const MAX_RUNS = 12;
 const METHODS = new Set(['list', 'read', 'write', 'remove', 'mkdir']);
 const OPS = new Set(['sync', 'push', 'replaceAll', 'importAll', 'exportAll']);
@@ -16,7 +16,7 @@ const sec = (ms) => `${(ms / 1000).toFixed(1)}s`;
 const pad = (n) => String(n).padStart(2, '0');
 
 function startRun(name, clock = Date.now) {
-  const run = { name, startedAt: clock(), ms: 0, done: false, error: '', calls: {}, files: 0, dirs: 0, summary: '' };
+  const run = { name, startedAt: clock(), ms: 0, done: false, error: '', calls: {}, files: 0, dirs: 0, summary: '', importTotal: 0, completed: 0, phase: 'listing' };
   runs.push(run);
   while (runs.length > MAX_RUNS) runs.shift();
   changed();
@@ -33,9 +33,19 @@ function wrapAdapter(adapter, current, clock = Date.now) {
       return async (...args) => {
         const run = current();
         const started = clock();
+        if (run && run.name === 'importAll' && prop === 'read') run.phase = 'download';
         try {
           const out = await value.apply(target, args);
-          if (run && prop === 'list' && Array.isArray(out)) for (const it of out) { if (it && it.dir) run.dirs += 1; else run.files += 1; }
+          if (run && prop === 'list' && Array.isArray(out)) {
+            for (const it of out) {
+              if (it && it.dir) run.dirs += 1; else run.files += 1;
+              if (run.name === 'importAll' && it && !it.dir) {
+                const rel = args[0] ? `${args[0]}/${it.name}` : it.name;
+                if (require('./folder').isSyncable(rel)) run.importTotal += 1;
+              }
+            }
+          }
+          if (run && run.name === 'importAll' && prop === 'read' && out != null) run.completed += 1;
           return out;
         } finally {
           if (run) {
@@ -117,6 +127,50 @@ function describeRun(run, now = Date.now()) {
 
 const report = (limit = 8) => runs.slice(-limit).reverse().map((r) => describeRun(r)).join('\n');
 
+function importProgress() {
+  const run = [...runs].reverse().find((r) => r.name === 'importAll' && !r.done);
+  return run ? { phase: run.phase, total: run.importTotal, completed: run.completed } : null;
+}
+
+// Немодальная панель видна автоматически во время импорта, не забирает фокус и не блокирует мастер.
+function mountImportProgress(doc, { setTimer = setInterval, clearTimer = clearInterval } = {}) {
+  const t = require('./i18n').t;
+  const banner = doc.createElement('section');
+  banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:150;max-width:520px;margin:auto;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--paper);color:var(--text);box-shadow:0 4px 20px rgba(0,0,0,.22);font:14px/1.4 sans-serif;pointer-events:none';
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+  banner.setAttribute('aria-atomic', 'true');
+  banner.hidden = true;
+  const title = doc.createElement('div');
+  title.style.cssText = 'font-weight:600;margin-bottom:6px';
+  const detail = doc.createElement('div');
+  const bar = doc.createElement('progress');
+  bar.style.cssText = 'display:block;width:100%;height:10px;margin-top:8px;accent-color:var(--accent)';
+  banner.append(title, detail, bar);
+  const paint = () => {
+    const state = importProgress();
+    banner.hidden = !state;
+    if (!state) return;
+    title.textContent = t('Открыть проект из облака');
+    const downloading = state.phase === 'download';
+    detail.textContent = downloading ? `${t('Идёт синхронизация…')} ${state.completed} / ${state.total}` : t('Проверяю…');
+    bar.hidden = !downloading || state.total === 0;
+    bar.max = Math.max(1, state.total);
+    bar.value = Math.min(state.completed, state.total);
+    bar.setAttribute('aria-label', t('Идёт синхронизация…'));
+  };
+  const attach = () => { doc.body.append(banner); paint(); };
+  if (doc.body) attach(); else doc.addEventListener('DOMContentLoaded', attach, { once: true });
+  listeners.add(paint);
+  const timer = setTimer(paint, 250);
+  return () => {
+    listeners.delete(paint);
+    clearTimer(timer);
+    doc.removeEventListener('DOMContentLoaded', attach);
+    banner.remove();
+  };
+}
+
 // Android: кнопка «diag» в углу экрана открывает отчёт поверх приложения.
 function mountOverlay(doc, win) {
   const el = (tag, css, text) => {
@@ -145,7 +199,7 @@ function mountOverlay(doc, win) {
   return () => { hide(); button.remove(); panel.remove(); };
 }
 
-// file: () => путь для текстового отчёта (компьютер); overlay: кнопка «diag» (Android).
+// file: () => путь для текстового отчёта (компьютер); overlay: отчёт и прогресс импорта (Android).
 function install({ folder, file, overlay, doc, win } = {}) {
   if (installed) return installed;
   const cleanups = [instrumentFolder(folder || require('./folder'))];
@@ -158,9 +212,12 @@ function install({ folder, file, overlay, doc, win } = {}) {
   }
   const d = doc || (typeof document !== 'undefined' ? document : null);
   const w = win || (typeof window !== 'undefined' ? window : null);
-  if (overlay && d && w) cleanups.push(mountOverlay(d, w));
+  if (overlay && d && w) {
+    cleanups.push(mountOverlay(d, w));
+    cleanups.push(mountImportProgress(d));
+  }
   installed = () => { while (cleanups.length) cleanups.pop()(); installed = null; };
   return installed;
 }
 
-module.exports = { install, report, recent, reset, startRun, wrapAdapter, instrumentFolder, describeRun };
+module.exports = { install, report, recent, reset, startRun, wrapAdapter, instrumentFolder, describeRun, importProgress, mountImportProgress };

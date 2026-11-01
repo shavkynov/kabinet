@@ -1,4 +1,4 @@
-name: Sync diagnostic test installers
+name: Sync diagnostic APK
 
 'on':
   push:
@@ -25,32 +25,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-
-  mac:
-    needs: check
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Diagnostic macOS arm64 DMG
-        env:
-          KABINET_ADHOC: '1'
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-sync-diag-mac-arm64.${ext}'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: kabinet-sync-diag-mac-arm64-${{ github.sha }}
-          path: dist/*sync-diag*.dmg
-          if-no-files-found: error
-          retention-days: 7
 
   android:
     needs: check
