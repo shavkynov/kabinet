@@ -66,7 +66,7 @@ function walkLocal(dir) {
  * Пока адаптер не сообщает size и mtime (или mtime нулевой), кэш не используется.
  */
 async function walkRemote(adapter, cache) {
-  const out = new Map();
+  const files = [];
   const walk = async (rel) => {
     const items = await adapter.list(rel);
     for (const it of items) {
@@ -74,13 +74,40 @@ async function walkRemote(adapter, cache) {
       if (it.dir) { await walk(r); continue; }
       if (!isSyncable(r)) continue;
       const sig = it.mtime > 0 && it.size >= 0 ? `${it.size}:${it.mtime}` : null;
-      const hit = sig && cache && cache.get(r);
-      if (hit && hit.sig === sig) { out.set(r, { hash: hit.hash, bytes: null, sig }); continue; }
-      const bytes = await adapter.read(r);
-      if (bytes) out.set(r, { hash: hashBytes(bytes), bytes, sig });
+      files.push({ rel: r, sig });
     }
   };
+  // Сначала получаем списки. Ошибка списка не запускает чтение неполного снимка.
   await walk('');
+  const entries = new Array(files.length);
+  let next = 0;
+  let failed = false;
+  let failure;
+  const worker = async () => {
+    while (!failed) {
+      const index = next++;
+      if (index >= files.length) return;
+      const { rel, sig } = files[index];
+      try {
+        const hit = sig && cache && cache.get(rel);
+        if (hit && hit.sig === sig) {
+          entries[index] = { hash: hit.hash, bytes: null, sig };
+        } else {
+          const bytes = await adapter.read(rel);
+          if (bytes) entries[index] = { hash: hashBytes(bytes), bytes, sig };
+        }
+      } catch (error) {
+        if (!failed) failure = error;
+        failed = true;
+      }
+    }
+  };
+  // После ошибки не берём новые файлы и ждём завершения всех уже начатых чтений.
+  await Promise.all(Array.from({ length: Math.min(3, files.length) }, () => worker()));
+  if (failed) throw failure;
+  const out = new Map();
+  // Порядок результата не зависит от того, какой запрос ответил первым.
+  for (let i = 0; i < files.length; i += 1) if (entries[i]) out.set(files[i].rel, entries[i]);
   return out;
 }
 
