@@ -1,0 +1,14 @@
+/* Android-only press feedback. Individual scale preserves existing transforms. */
+body.mob :is(button, [role="button"]):not(:disabled):not([disabled]):not([aria-disabled="true"]):active {
+  box-shadow: inset 0 0 0 999px rgba(127, 127, 127, .13);
+}
+
+/* Motion is opt-in to the system preference; static shading remains in reduce mode. */
+@media (prefers-reduced-motion: no-preference) {
+  body.mob :is(button, [role="button"]):not(:disabled):not([disabled]):not([aria-disabled="true"]):not(#syncDot) {
+    transition: scale 90ms ease-out;
+  }
+  body.mob :is(button, [role="button"]):not(:disabled):not([disabled]):not([aria-disabled="true"]):not(#syncDot):active {
+    scale: .97;
+  }
+}

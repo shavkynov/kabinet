@@ -13,7 +13,7 @@ const shim = path.join(__dirname, 'shim');
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 
 function loadEsbuild() {
-  for (const p of [path.join(root, 'node_modules', 'esbuild'), path.join(__dirname, 'node_modules', 'esbuild'), 'esbuild']) {
+  for (const p of [path.join(root, 'node_modules', 'esbuild'), path.join(__dirname, 'node_modules') , 'esbuild'].map((p, i) => i === 1 ? path.join(p, 'esbuild') : p)) {
     try { return require(p); } catch { /* пробуем дальше */ }
   }
   throw new Error('Не найден esbuild: выполните npm install в корне проекта.');
@@ -59,12 +59,12 @@ html = replaceOnce(html, /<meta http-equiv="Content-Security-Policy"[\s\S]*?>/,
   '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data: blob:; media-src \'self\' data: blob:; font-src \'self\' data: blob:; connect-src \'self\' https: http: data: blob:">', 'CSP');
 html = replaceOnce(html, '<meta name="viewport" content="width=device-width, initial-scale=1">',
   '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">', 'viewport');
-html = replaceOnce(html, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n  <link rel="stylesheet" href="mobile.css">', 'style.css');
+html = replaceOnce(html, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n  <link rel="stylesheet" href="mobile.css">\n  <link rel="stylesheet" href="press-feedback.css">', 'style.css');
 html = replaceOnce(html, '<body>', '<body class="mob">', 'body');
 html = replaceOnce(html, '<script src="dist/app.js"></script>', '<script src="boot.js"></script>', 'script');
 fs.writeFileSync(path.join(www, 'index.html'), html);
 
-for (const f of ['style.css', 'mobile.css']) fs.copyFileSync(path.join(root, 'renderer', f), path.join(www, f));
+for (const f of ['style.css', 'mobile.css', 'press-feedback.css']) fs.copyFileSync(path.join(root, 'renderer', f), path.join(www, f));
 fs.copyFileSync(path.join(root, 'renderer', 'dist', 'app.js'), path.join(www, 'dist', 'app.js'));
 
 console.log(`mobile/www готов (версия ${version}).`);
