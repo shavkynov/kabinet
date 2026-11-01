@@ -149,6 +149,32 @@ const host = {
   assert.match(await be2.api.readChapter(chapterId), /Своя правка/);
   assert.ok([...nodes.keys()].some((k) => k.startsWith('Конфликты/')), 'чужая версия видна и в папке');
 
+  // обрыв связи: ошибка видна, правка не теряется, после возвращения сети синхронизация восстанавливается сама
+  let offline = true;
+  const realAdapter = host.folder.adapter;
+  host.folder.adapter = (uri) => {
+    const inner = realAdapter(uri);
+    return new Proxy(inner, { get: (o, k) => (typeof o[k] === 'function' ? (...args) => (offline ? Promise.reject(new Error('Нет связи с Яндекс Диском.')) : o[k](...args)) : o[k]) });
+  };
+  await be2.api.closeProject(); // пересоздаём связь уже с «плохой» сетью: сначала откроем проект заново
+  assert.equal(be2.folderStatus().linked, false);
+  offline = false;
+  const reopened2 = await be2.api.openRecent((await be2.api.listRecents()).find((r) => r.name === 'Мой роман').path);
+  assert.ok(reopened2);
+  await be2.resume();
+  assert.equal(be2.folderStatus().linked, true);
+  await be2.api.writeChapter(chapterId, 'Правка без связи.\n');
+  offline = true;
+  await be2.call('folder:syncNow');
+  assert.match(be2.folderStatus().error, /Нет связи/);
+  assert.ok((await be2.api.listRecents()).find((r) => r.name === 'Мой роман').sync.error, 'ошибка видна на стартовой странице');
+  offline = false;
+  be2.syncSoon();
+  await new Promise((r) => setTimeout(r, 2200));
+  assert.equal(be2.folderStatus().error, '');
+  assert.match(Buffer.from(nodes.get(chapterRel)).toString(), /Правка без связи/);
+  assert.ok((await be2.api.listRecents()).find((r) => r.name === 'Мой роман').sync.lastSync > 0, 'время синхронизации видно на стартовой странице');
+
   await be2.api.closeProject();
   assert.equal(be2.folderStatus().linked, false);
   assert.ok(!nodes.has('kabinet.lock'), 'замок снят');

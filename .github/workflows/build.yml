@@ -36,10 +36,10 @@ jobs:
         include:
           - os: macos-latest
             name: mac-arm64
-            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
+            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
           - os: macos-latest
             name: mac-intel
-            cmd: npx electron-builder --mac dmg --x64 --publish never -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
+            cmd: npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
           - os: ubuntu-latest
             name: linux
             cmd: npx electron-builder --linux AppImage --x64 --publish never
@@ -57,8 +57,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # macOS: ad-hoc подпись (без аккаунта разработчика). Без неё скачанная из интернета программа считается «повреждённой».
       - run: ${{ matrix.cmd }}
         shell: bash
+        env:
+          KABINET_ADHOC: '1'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - uses: actions/upload-artifact@v4
         with:
           name: kabinet-${{ matrix.name }}

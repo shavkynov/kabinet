@@ -50,10 +50,14 @@ jobs:
       - name: Ключ подписи
         env:
           KS_B64: ${{ secrets.KABINET_KEYSTORE_BASE64 }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           if [ -n "$KS_B64" ]; then
             echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/kabinet-release.keystore"
             echo "KABINET_KEYSTORE=$RUNNER_TEMP/kabinet-release.keystore" >> "$GITHUB_ENV"
+          elif [ -n "$RELEASE_TAG" ] || [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "::error::Секрет KABINET_KEYSTORE_BASE64 не задан: APK с отладочной подписью в выпуск не попадёт (он не обновит установленную версию)."
+            exit 1
           else
             echo "::warning::Секрет KABINET_KEYSTORE_BASE64 не задан: APK будет подписан отладочным ключом."
           fi

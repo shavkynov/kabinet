@@ -8,9 +8,12 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.IOException;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -31,12 +34,17 @@ public class DavPlugin extends Plugin {
             .followRedirects(false)
             .followSslRedirects(false)
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
-            .writeTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(120, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build();
 
+    // Методы плагинов Capacitor выполняются на одном общем потоке: блокирующий запрос задерживал бы все остальные вызовы
+    // (в том числе чтение токена из защищённого хранилища). Поэтому запрос уходит асинхронно (enqueue), а общий срок
+    // (callTimeout, включая поиск адреса в сети) не даёт ему зависнуть: при плохой связи он завершается ошибкой.
     @PluginMethod
-    public void request(PluginCall call) {
+    public void request(final PluginCall call) {
         String method = call.getString("method", "GET");
         String url = call.getString("url");
         if (url == null) {
@@ -69,17 +77,32 @@ public class DavPlugin extends Plugin {
             if (method.equals("GET") || method.equals("HEAD")) body = null;
             rb.method(method, body);
 
-            try (Response res = CLIENT.newCall(rb.build()).execute()) {
-                JSObject out = new JSObject();
-                out.put("status", res.code());
-                JSObject h = new JSObject();
-                for (String name : res.headers().names()) h.put(name.toLowerCase(), res.header(name));
-                out.put("headers", h);
-                ResponseBody rbody = res.body();
-                byte[] bytes = rbody == null ? new byte[0] : rbody.bytes();
-                out.put("body", Base64.encodeToString(bytes, Base64.NO_WRAP));
-                call.resolve(out);
-            }
+            Integer ms = call.getInt("timeoutMs");
+            int timeout = ms == null ? 120000 : Math.max(5000, Math.min(300000, ms));
+            OkHttpClient client = CLIENT.newBuilder().callTimeout(timeout, TimeUnit.MILLISECONDS).build();
+            client.newCall(rb.build()).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call c, IOException e) {
+                    call.reject(e.getMessage() == null ? e.toString() : e.getMessage());
+                }
+
+                @Override
+                public void onResponse(Call c, Response res) {
+                    try (Response r = res) {
+                        JSObject out = new JSObject();
+                        out.put("status", r.code());
+                        JSObject h = new JSObject();
+                        for (String name : r.headers().names()) h.put(name.toLowerCase(), r.header(name));
+                        out.put("headers", h);
+                        ResponseBody rbody = r.body();
+                        byte[] bytes = rbody == null ? new byte[0] : rbody.bytes();
+                        out.put("body", Base64.encodeToString(bytes, Base64.NO_WRAP));
+                        call.resolve(out);
+                    } catch (Exception e) {
+                        call.reject(e.getMessage() == null ? e.toString() : e.getMessage());
+                    }
+                }
+            });
         } catch (Exception e) {
             call.reject(e.getMessage() == null ? e.toString() : e.getMessage());
         }

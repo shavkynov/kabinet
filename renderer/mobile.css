@@ -250,3 +250,10 @@ body.mob .ch.selected .num { color: var(--text); opacity: 1; }
   body.mob #syncDot.busy { animation: none; opacity: 1; }
   body.mob #goal.hit #goalBtn { animation: none; }
 }
+
+/* ---------- синхронизация в списке недавних проектов ---------- */
+.recent-sync { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.recent-sync i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .6; }
+.recent-sync.ok i { background: #3fa66a; opacity: 1; }
+.recent-sync.err { color: #c8363b; }
+.recent-sync.err i { background: #e5484d; opacity: 1; }

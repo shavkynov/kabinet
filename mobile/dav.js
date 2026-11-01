@@ -12,6 +12,7 @@ import { waitBox } from './wait-box.js';
 import i18n from '../src/i18n.js';
 import webdav from '../src/webdav.js';
 import yandex from './yandex-auth.js';
+import { retrying } from '../src/net-retry.js';
 
 const Dav = registerPlugin('Dav');
 const Secrets = registerPlugin('Secrets');
@@ -31,10 +32,12 @@ function toB64(u8) {
 }
 
 /** Один запрос через плагин; формат ответа — как ждёт src/webdav.js. */
-async function request({ method, url, headers, body }) {
-  const res = await Dav.request({ method, url, headers: headers || {}, body: body && body.length ? toB64(body) : undefined });
+async function rawRequest({ method, url, headers, body, timeoutMs }) {
+  const res = await Dav.request({ method, url, headers: headers || {}, body: body && body.length ? toB64(body) : undefined, timeoutMs });
   return { status: res.status, headers: res.headers || {}, body: fromB64(res.body) };
 }
+// Срок и повторы при сбое сети: без них один оборвавшийся запрос давал ошибку синхронизации, а зависший держал её бесконечно.
+const request = retrying(rawRequest);
 
 function load() {
   try { const raw = JSON.parse(localStorage.getItem(KEY) || '{}'); return raw && typeof raw === 'object' ? raw : {}; } catch { return {}; }

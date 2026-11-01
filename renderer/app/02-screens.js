@@ -15,6 +15,26 @@ async function showStart() {
   await renderRecents();
 }
 
+// Строка «синхронизация» в списке недавних проектов (Android): куда проект уходит и как давно обновлялся.
+function recentSyncLine(sync) {
+  if (!sync) return null;
+  const line = document.createElement('div');
+  const failed = !!sync.error;
+  line.className = `recent-sync ${failed ? 'err' : (sync.lastSync ? 'ok' : 'none')}`;
+  const dot = document.createElement('i');
+  const text = document.createElement('span');
+  text.setAttribute('translate', 'no');
+  const where = `${sync.cloud ? t('Облако') : t('Папка')}${sync.name ? `: ${sync.name}` : ''}`;
+  let state;
+  if (failed) state = t('ошибка синхронизации');
+  else if (sync.lastSync) state = t('обновлено {0}', new Date(sync.lastSync).toLocaleString(LOCALE, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }));
+  else state = t('ещё не синхронизировался');
+  text.textContent = `${where} · ${state}`;
+  if (failed) line.title = sync.error;
+  line.append(dot, text);
+  return line;
+}
+
 async function renderRecents() {
   let items = [];
   try {
@@ -47,6 +67,8 @@ async function renderRecents() {
       ? new Date(it.lastOpened).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long', year: 'numeric' })
       : '';
     main.append(name, where, date);
+    const sync = recentSyncLine(it.sync);
+    if (sync) main.append(sync);
     main.addEventListener('click', () => openRecent(it));
 
     const rm = document.createElement('button');

@@ -17,6 +17,7 @@ const { termize } = require('./src/terms');
 const cloud = require('./src/cloud');
 const webdav = require('./src/webdav');
 const { createDavLink } = require('./src/davlink');
+const { retrying } = require('./src/net-retry');
 const syncguard = require('./src/syncguard');
 const { createWatcher } = require('./src/watcher');
 const exporter = require('./src/export');
@@ -305,7 +306,7 @@ function dav() {
   if (!davLink) {
     davLink = createDavLink({
       dataDir: app.getPath('userData'),
-      request: davRequest,
+      request: retrying(davRequest), // срок и повторы при обрыве сети: одна ошибка не должна останавливать обмен
       secret: davSecret,
       device: cloud.deviceName(),
       onEvent: (e) => {

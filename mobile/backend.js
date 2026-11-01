@@ -25,6 +25,7 @@ const stats = require('../src/stats');
 const exporter = require('../src/export');
 const importer = require('../src/import');
 const { writeFileAtomic } = require('../src/fsutil');
+const { withTimeout } = require('../src/net-retry');
 const folderSync = require('../src/folder');
 const cloud = require('../src/cloud');
 const langcheck = require('../src/langcheck');
@@ -147,7 +148,7 @@ function createBackend(host, { session } = {}) {
   }
   const saveLinks = (map) => { try { writeFileAtomic(linksFile(), JSON.stringify(map, null, 2)); } catch (err) { console.error('folder links:', err); } };
 
-  const folder = { uri: null, name: '', sync: null, pending: new Set(), pushTimer: null, pullTimer: null, lockTimer: null, unwatch: null, lastSync: 0, lastError: '', busy: 0, conflict: false };
+  const folder = { uri: null, name: '', sync: null, pending: new Set(), pushTimer: null, pullTimer: null, lockTimer: null, unwatch: null, lastSync: 0, lastError: '', busy: 0, conflict: false, retryTimer: null, soonTimer: null, failures: 0, savedAt: 0 };
 
   function linkOf(dir) { return dir ? loadLinks()[dir] || null : null; }
   function setLink(dir, link) {
@@ -158,9 +159,12 @@ function createBackend(host, { session } = {}) {
 
   function stopFolder() {
     clearTimeout(folder.pushTimer);
+    clearTimeout(folder.retryTimer);
+    clearTimeout(folder.soonTimer);
     clearInterval(folder.pullTimer);
     clearInterval(folder.lockTimer);
-    folder.pushTimer = folder.pullTimer = folder.lockTimer = null;
+    folder.pushTimer = folder.pullTimer = folder.lockTimer = folder.retryTimer = folder.soonTimer = null;
+    folder.failures = 0;
     if (folder.unwatch) { try { folder.unwatch(); } catch { /* подписка уже снята */ } folder.unwatch = null; }
     folder.pending.clear();
     folder.sync = null;
@@ -222,6 +226,38 @@ function createBackend(host, { session } = {}) {
     } catch (err) { console.error('folder lock release:', err); }
   }
 
+  // Результат обхода. Успех сбрасывает ошибку; сбой запоминается и повторяется чаще обычного (15 с, 30 с, 60 с, дальше раз в 2 минуты),
+  // чтобы после временного обрыва связь восстанавливалась сама, не дожидаясь следующего обычного обхода.
+  const PASS_MAX_MS = 4 * 60 * 1000;
+  function passOk() {
+    folder.lastSync = Date.now();
+    folder.lastError = '';
+    folder.failures = 0;
+    clearTimeout(folder.retryTimer);
+    folder.retryTimer = null;
+    rememberSync();
+  }
+  function passFailed(err) {
+    folder.lastError = String((err && err.message) || err);
+    folder.failures += 1;
+    rememberSync();
+    clearTimeout(folder.retryTimer);
+    const wait = Math.min(120_000, 15_000 * 2 ** Math.min(folder.failures - 1, 3));
+    folder.retryTimer = setTimeout(() => { folder.retryTimer = null; pushChanged().then(() => pullChanges(true)); }, wait);
+    folder.retryTimer.unref?.();
+  }
+  /** Сведения о последней синхронизации хранятся в связи проекта с папкой: их видно на стартовой странице. */
+  function rememberSync() {
+    const dir = currentDir;
+    if (!dir) return;
+    const link = linkOf(dir);
+    if (!link) return;
+    const now = Date.now();
+    if (!folder.lastError && link.lastSync && now - folder.savedAt < 30_000 && !link.lastError) return;
+    folder.savedAt = now;
+    setLink(dir, { ...link, lastSync: folder.lastSync || link.lastSync || 0, lastError: folder.lastError || '' });
+  }
+
   /** Выгружаем то, что изменилось у нас. Конфликты и пришедшие правки — в интерфейс. */
   async function pushChanged() {
     folder.pushTimer = null;
@@ -230,31 +266,33 @@ function createBackend(host, { session } = {}) {
     folder.pending.clear();
     folder.busy += 1;
     try {
-      const res = await folder.sync.push(rels);
-      folder.lastSync = Date.now();
-      folder.lastError = '';
+      const res = await withTimeout(folder.sync.push(rels), PASS_MAX_MS, 'Синхронизация не отвечает.');
+      passOk();
       if (res.conflicts.length) folder.conflict = true;
       if (res.conflicts.length) {
         notify(t('Этот текст изменили на другом устройстве. Чужая версия сохранена в папке «Конфликты».'));
       }
     } catch (err) {
-      folder.lastError = String((err && err.message) || err);
+      // выгрузка не удалась: файлы возвращаются в очередь, их заберёт следующий проход
+      for (const r of rels) folder.pending.add(r);
+      passFailed(err);
       console.error('folder push:', err);
-      notify(t('Не удалось сохранить в папку: {0}', folder.lastError));
+      if (folder.failures === 1) notify(t('Не удалось сохранить в папку: {0}', folder.lastError));
     } finally {
       folder.busy -= 1;
     }
   }
 
   /** Вычитываем правки с другого устройства. Пришедшие файлы не считаем своими. */
-  async function pullChanges() {
+  async function pullChanges(force) {
     if (!folder.sync || !currentDir) return;
+    // Медленная связь: прошлый обход ещё идёт, новый не копим в очередь (иначе обходы накапливаются и «зависают»).
+    if (folder.busy > 0 && !force) return;
     folder.busy += 1;
     try {
       const run = () => folder.sync.sync();
-      const res = await (fs.unmute ? fs.unmute(run) : run());
-      folder.lastSync = Date.now();
-      folder.lastError = '';
+      const res = await withTimeout(fs.unmute ? fs.unmute(run) : run(), PASS_MAX_MS, 'Синхронизация не отвечает.');
+      passOk();
       if (res.conflicts.length) folder.conflict = true;
       if (res.conflicts.length) {
         notify(t('Этот текст изменили на другом устройстве. Ваша версия сохранится, чужая уйдёт в папку «Конфликты».'));
@@ -262,11 +300,22 @@ function createBackend(host, { session } = {}) {
       const touched = [...new Set([...res.pulled, ...res.conflicts])];
       if (touched.length) emit('sync:changed', touched);
     } catch (err) {
-      folder.lastError = String((err && err.message) || err);
+      passFailed(err);
       console.error('folder pull:', err);
     } finally {
       folder.busy -= 1;
     }
+  }
+
+  /** Скоро выполнить обмен: приложение вернулось на экран или появилась сеть. */
+  function syncSoon() {
+    if (!folder.sync) return;
+    clearTimeout(folder.soonTimer);
+    folder.soonTimer = setTimeout(async () => {
+      folder.soonTimer = null;
+      await pushChanged();
+      await pullChanges(true);
+    }, 1500);
   }
 
   /** Немедленно выгрузить накопленное (уход приложения в фон). */
@@ -347,7 +396,21 @@ function createBackend(host, { session } = {}) {
     return dir;
   }
 
-  handle('recents:list', () => recents.list(recentsFile()));
+  // Для проектов, связанных с папкой или облаком, стартовая страница показывает, куда они синхронизируются и как давно.
+  handle('recents:list', () => {
+    const links = loadLinks();
+    return recents.list(recentsFile()).map((it) => {
+      const link = links[it.path];
+      if (!link) return it;
+      const live = !!folder.sync && currentDir === it.path;
+      return { ...it, sync: {
+        name: link.name || '',
+        cloud: String(link.uri).startsWith('dav:'),
+        lastSync: (live && folder.lastSync) || link.lastSync || 0,
+        error: live ? folder.lastError : (link.lastError || ''),
+      } };
+    });
+  });
   handle('recents:remove', (p) => { recents.remove(recentsFile(), String(p)); return true; });
 
   handle('project:create', (name, mode) => {
@@ -599,7 +662,7 @@ function createBackend(host, { session } = {}) {
     if (!folder.sync) throw new Error(t('Проект не связан с папкой.'));
     folder.conflict = false;
     await pushChanged();
-    await pullChanges();
+    await pullChanges(true);
     return folderStatus();
   });
 
@@ -1012,6 +1075,7 @@ function createBackend(host, { session } = {}) {
     resume,
     folderStatus,
     flushFolder,
+    syncSoon,
     listCopies,
     restoreCopy,
     hasProject: () => !!currentDir,

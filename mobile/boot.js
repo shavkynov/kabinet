@@ -316,7 +316,7 @@ function showFatal(err) {
       const state = st.error ? 'err' : st.busy ? 'busy' : st.conflict ? 'conflict' : 'ok';
       dot.className = state;
       const text = {
-        err: i18n.t('Ошибка папки: {0}', st.error),
+        err: `${i18n.t('Ошибка папки: {0}', st.error)} ${i18n.t('Попробуем снова сами. Нажмите, чтобы повторить сейчас.')}`,
         busy: i18n.t('Идёт синхронизация…'),
         conflict: i18n.t('Был конфликт: чужая версия лежит в папке «Конфликты». Нажмите, чтобы синхронизировать.'),
         ok: i18n.t('Синхронизировано'),
@@ -330,6 +330,10 @@ function showFatal(err) {
       try { await be.call('folder:syncNow'); } catch (e) { toast(String((e && e.message) || e)); }
       paintDot();
     });
+
+    // Вернулись в приложение или появилась сеть: не ждём очередного обхода, обмениваемся сразу.
+    window.addEventListener('online', () => be.syncSoon());
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) be.syncSoon(); });
 
     wireShortcuts(be);
     wireContextMenu(be);
@@ -346,6 +350,7 @@ function showFatal(err) {
 
     if (native) {
       App.addListener('pause', save);
+      App.addListener('resume', () => be.syncSoon());
       App.addListener('backButton', () => {
         const handled = window.kabinetMobile && window.kabinetMobile.back();
         if (!handled) App.minimizeApp();
