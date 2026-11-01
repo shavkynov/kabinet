@@ -32,7 +32,8 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
       return raw && typeof raw === 'object' ? raw : {};
     } catch { return {}; }
   };
-  const saveLinks = (map) => { try { writeFileAtomic(linksFile, JSON.stringify(map, null, 2)); } catch (e) { console.error('dav links:', e); } };
+  // Ошибка записи должна дойти до вызывающего кода: подключение ещё не сохранено.
+  const saveLinks = (map) => writeFileAtomic(linksFile, JSON.stringify(map, null, 2));
 
   const davOf = (acc, root) => webdav.createWebDav({ url: acc.url, user: acc.user, pass: acc.pass, root: root == null ? acc.root : root, request });
   const stateFile = (dir, acc) => path.join(dataDir, `folder-state-${crypto.createHash('sha1').update(`${dir}|${acc.url}|${acc.user}|${acc.root}`).digest('hex').slice(0, 12)}.json`);
