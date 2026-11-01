@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { createTranslator } = require('../src/i18n');
-const EN = require('../src/i18n-en');
+const EN = require('../src/i18n-dictionary');
 const scan = require('../scripts/i18n-scan');
 
 const slots = (s) => [...s.matchAll(/\{(\d+)\}/g)].map((m) => m[1]).sort().join(',');

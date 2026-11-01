@@ -256,5 +256,20 @@ function wireDav() {
       setStatus('error', t('Синхронизация: {0}', tdom(e.message)));
     } else if (e.type === 'error') DAV.lastError = e.message;
   });
-  $('#btnOpenCloud').addEventListener('click', () => openSyncDialog('open'));
+  $('#btnOpenCloud').addEventListener('click', () => {
+    if (document.body.classList.contains('mob')) openCloudOnPhone();
+    else openSyncDialog('open');
+  });
+}
+
+// Android: проект из облака открывается мастером главного процесса (mobile/backend.js, канал folder:open): вход в Яндекс через
+// браузер, выбор папки, копия на телефон. Окно «Синхронизация» с компьютера здесь не работает, поэтому свой путь.
+async function openCloudOnPhone() {
+  await flush();
+  try {
+    const proj = await window.kabinetBackend.call('folder:open');
+    if (proj) enterProject(proj); // null: отказались на любом шаге
+  } catch (err) {
+    showError(err.message);
+  }
 }

@@ -1,3 +1,4 @@
+import { activateModal } from './modal-focus.js';
 // Окна выбора, подтверждения и меню для Android (на компьютере их рисовал Electron).
 
 function el(tag, cls, text) {
@@ -13,16 +14,19 @@ function openModal(build) {
     const sheet = el('div', 'mob-sheet');
     modal.append(sheet);
     let done = false;
+    let cleanup = () => {};
     const close = (value) => {
       if (done) return;
       done = true;
       modal.remove();
+      cleanup();
       resolve(value);
     };
     build(sheet, close);
     modal.addEventListener('mob-cancel', () => close(null));
     modal.addEventListener('click', (e) => { if (e.target === modal) close(null); });
     document.body.append(modal);
+    cleanup = activateModal(modal, sheet, () => close(null));
   });
 }
 
@@ -42,7 +46,7 @@ export function confirmBox({ message, detail, buttons = ['OK'], cancelId = butto
   }).then((v) => (v == null ? cancelId : v));
 }
 
-/** Список вариантов. Возвращает value выбранного пункта или null. */
+/** Список вариантов { label, value, disabled? }. Возвращает value выбранного пункта или null. */
 export function chooseBox({ title, message, options, cancel }) {
   return openModal((sheet, close) => {
     sheet.append(el('h2', '', title));
@@ -51,7 +55,9 @@ export function chooseBox({ title, message, options, cancel }) {
     for (const o of options) {
       const b = el('button', '', o.label);
       b.type = 'button';
-      b.addEventListener('click', () => close(o.value));
+      b.disabled = !!o.disabled;
+      if (b.disabled) b.style.opacity = '0.5';
+      b.addEventListener('click', () => { if (!b.disabled) close(o.value); });
       list.append(b);
     }
     sheet.append(list);
@@ -114,7 +120,10 @@ export function formBox({ title, hint, fields, submit, cancel, onSubmit }) {
     });
     sheet.append(form);
     const first = form.querySelector('input');
-    if (first) setTimeout(() => first.focus(), 50);
+    if (first) setTimeout(() => {
+      const modals = document.querySelectorAll('.mob-modal');
+      if (first.isConnected && sheet.parentNode === modals[modals.length - 1]) first.focus();
+    }, 50);
   });
 }
 

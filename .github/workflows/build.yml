@@ -68,9 +68,102 @@ jobs:
             dist/*.AppImage
           if-no-files-found: error
 
+  android:
+    # APK собирается вместе с установщиками: при выпуске версии или вручную
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # выпуск = метка версии или ручной запуск с указанной меткой
+      PUBLISH: ${{ (github.ref_type == 'tag' || inputs.tag != '') && 'true' || 'false' }}
+      # отпечаток SHA-256 рабочего ключа подписи (не секрет); при смене ключа обновите
+      EXPECTED_CERT_SHA256: 8703ed4e9f4cd67775750fa7ef56efee515b441aa279ce478d0ca73dd851bf96
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Зависимости (Electron для Android не нужен)
+        run: |
+          npm ci --ignore-scripts
+          cd mobile && npm install
+
+      - name: Проверка мобильной части
+        run: node mobile/test/run-smoke.js
+
+      - name: Сборка интерфейса для Android
+        run: node mobile/build.js
+
+      # Ключ хранится в Secrets репозитория: KABINET_KEYSTORE_BASE64, KABINET_KEYSTORE_PASSWORD,
+      # KABINET_KEY_ALIAS (по умолчанию kabinet), KABINET_KEY_PASSWORD (по умолчанию как пароль хранилища).
+      - name: Ключ подписи
+        env:
+          KS_B64: ${{ secrets.KABINET_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/kabinet-release.keystore"
+            echo "KABINET_KEYSTORE=$RUNNER_TEMP/kabinet-release.keystore" >> "$GITHUB_ENV"
+          elif [ "$PUBLISH" = "true" ]; then
+            echo "::error::Секрет KABINET_KEYSTORE_BASE64 не задан: выпуск с отладочной подписью запрещён."
+            exit 1
+          else
+            echo "::warning::Секрет KABINET_KEYSTORE_BASE64 не задан: APK будет подписан отладочным ключом."
+          fi
+
+      - name: Проект Android (значки, подпись, плагины)
+        env:
+          KABINET_KEYSTORE_PASSWORD: ${{ secrets.KABINET_KEYSTORE_PASSWORD }}
+          KABINET_KEY_ALIAS: ${{ secrets.KABINET_KEY_ALIAS }}
+          KABINET_KEY_PASSWORD: ${{ secrets.KABINET_KEY_PASSWORD }}
+        run: node mobile/android-setup.js
+
+      - name: APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Проверить подпись
+        run: |
+          set -euo pipefail
+          APK=$(ls mobile/android/app/build/outputs/apk/release/*.apk | head -n1)
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SIGNER=$(ls -d "$SDK"/build-tools/*/apksigner | sort -V | tail -n1)
+          "$SIGNER" verify --print-certs "$APK" > signer.txt
+          grep -v '^WARNING: META-INF' signer.txt || true
+          ACTUAL=$(grep -m1 'certificate SHA-256 digest:' signer.txt | sed 's/.*digest: *//' | tr -d '[:space:]' | tr 'A-F' 'a-f' || true)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::Не удалось прочитать отпечаток подписи APK."
+            exit 1
+          fi
+          echo "Отпечаток подписи APK: $ACTUAL"
+          if [ "$PUBLISH" = "true" ] && [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::APK подписан не рабочим ключом (ожидался $EXPECTED_CERT_SHA256). В выпуск он не попадёт."
+            exit 1
+          fi
+
+      - name: Переименовать
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          mkdir -p out
+          cp mobile/android/app/build/outputs/apk/release/*.apk "out/Kabinet-${VERSION}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-android
+          path: out/*.apk
+          if-no-files-found: error
+
   release:
     if: github.ref_type == 'tag' || inputs.tag != ''
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

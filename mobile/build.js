@@ -58,7 +58,7 @@ let html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
 html = replaceOnce(html, /<meta http-equiv="Content-Security-Policy"[\s\S]*?>/,
   '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\'; img-src \'self\' data: blob:; media-src \'self\' data: blob:; font-src \'self\' data: blob:; connect-src \'self\' https: http: data: blob:">', 'CSP');
 html = replaceOnce(html, '<meta name="viewport" content="width=device-width, initial-scale=1">',
-  '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">', 'viewport');
+  '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">', 'viewport');
 html = replaceOnce(html, '<link rel="stylesheet" href="style.css">', '<link rel="stylesheet" href="style.css">\n  <link rel="stylesheet" href="mobile.css">', 'style.css');
 html = replaceOnce(html, '<body>', '<body class="mob">', 'body');
 html = replaceOnce(html, '<script src="dist/app.js"></script>', '<script src="boot.js"></script>', 'script');

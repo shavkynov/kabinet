@@ -1,13 +1,20 @@
-// Сетевая папка по WebDAV на Android: мастер подключения (сервис → вход → папка) и адаптер для src/folder.js.
-// Запросы выполняет плагин Dav (OkHttp, android-src/DavPlugin.java). Входы хранятся в памяти приложения
-// (localStorage окна), в файлы проекта и в синхронизируемую папку они не попадают.
+// Сетевая папка на Android: мастер подключения (сервис → вход → папка) и адаптер для src/folder.js.
+// Запросы выполняет плагин Dav (OkHttp, android-src/DavPlugin.java). Яндекс Диск подключается через браузер (OAuth, как на
+// компьютере): токен лежит в защищённом хранилище телефона (плагин Secrets, Android Keystore), а в localStorage окна —
+// только служебные сведения. Остальные сохранённые входы по паролю продолжают работать; в файлы проекта и в
+// синхронизируемую папку входы не попадают.
 
 import { registerPlugin } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import { Browser } from '@capacitor/browser';
 import { chooseBox, formBox, toast } from './ui.js';
+import { waitBox } from './wait-box.js';
 import i18n from '../src/i18n.js';
 import webdav from '../src/webdav.js';
+import yandex from './yandex-auth.js';
 
 const Dav = registerPlugin('Dav');
+const Secrets = registerPlugin('Secrets');
 const t = i18n.t;
 const KEY = 'kabinet.dav';
 
@@ -36,7 +43,27 @@ function save(map) {
   try { localStorage.setItem(KEY, JSON.stringify(map)); } catch { /* память окна недоступна */ }
 }
 
-const davOf = (acc, root) => webdav.createWebDav({ url: acc.url, user: acc.user, pass: acc.pass, root: root == null ? acc.root : root, request });
+// ---------- токен Яндекса в защищённом хранилище ----------
+async function getSecret(key) {
+  try {
+    const res = await Secrets.get({ key });
+    return res && typeof res.value === 'string' ? res.value : null;
+  } catch { return null; }
+}
+const removeSecret = (key) => Secrets.remove({ key }).catch(() => {});
+const isOAuth = (acc) => !!acc && yandex.isOAuthUser(acc.user);
+const say = (e) => { const m = String((e && e.message) || e); return i18n.tdom(m) || m; };
+
+const davOf = (acc, root) => {
+  const at = root == null ? acc.root : root;
+  if (isOAuth(acc)) return yandex.createLazyDisk({ user: acc.user, root: at, getSecret, request });
+  return webdav.createWebDav({ url: acc.url, user: acc.user, pass: acc.pass, root: at, request });
+};
+
+/** Папки сервера для выбора: у входа через браузер свой способ, у остальных — WebDAV. */
+const browse = (acc, at) => (isOAuth(acc)
+  ? yandex.browseOAuthFolders({ user: acc.user, path: at || '', getSecret, request })
+  : webdav.browseFolders({ url: acc.url, user: acc.user, pass: acc.pass, path: at || '', request }));
 
 /** Адаптер для проекта, связанного с сетевой папкой. uri — «dav:…», как в folder-links.json. */
 export function createDavAdapter(uri) {
@@ -51,38 +78,63 @@ export function createDavAdapter(uri) {
 export const isDavUri = (uri) => typeof uri === 'string' && uri.startsWith('dav:');
 export function forgetDav(uri) {
   const map = load();
-  if (map[uri]) { delete map[uri]; save(map); }
+  const acc = map[uri];
+  if (!acc) return;
+  delete map[uri];
+  save(map);
+  // Токен убираем из защищённого хранилища, когда им больше никто не пользуется.
+  if (isOAuth(acc) && !Object.values(map).some((x) => x && x.user === acc.user)) removeSecret(acc.user);
 }
 
 const newId = () => `dav:${[...crypto.getRandomValues(new Uint8Array(6))].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
 
-/** Шаг «вход»: форма адрес/логин/пароль. Возвращает { url, user, pass, preset } или null. */
+/**
+ * Шаг «вход» для Яндекса: страница Яндекса открывается в браузере, пароль вводится только там. После подтверждения
+ * браузер возвращает в Кабинет (kabinet://oauth/yandex), токен кладётся в защищённое хранилище.
+ * Возвращает { url, user, pass, preset, label } (пароля нет) или null.
+ */
 async function askLogin(preset) {
-  const needUrl = !preset.url;
-  const res = await formBox({
-    title: t(preset.name),
-    hint: t(preset.hint),
-    fields: [
-      ...(needUrl ? [{ key: 'url', label: t('Адрес сервера'), type: 'url', placeholder: 'https://…' }] : []),
-      { key: 'user', label: t('Логин'), type: 'text' },
-      { key: 'pass', label: t('Пароль приложения'), type: 'password' },
-    ],
-    submit: t('Войти'),
+  const wait = waitBox({
+    title: t('Подключение Яндекс Диска'),
+    message: t('Завершите вход в браузере. Затем нажмите «Вернуться в Кабинет».'),
     cancel: t('Отмена'),
-    onSubmit: async (v) => {
-      if (!v.user || !v.pass) return t('Введите логин и пароль.');
-      try {
-        const url = webdav.normalizeUrl(needUrl ? v.url : preset.url);
-        await davOf({ url, user: v.user, pass: v.pass, root: '' }).check();
-      } catch (e) {
-        const msg = String((e && e.message) || e);
-        return msg;
-      }
-      return null;
+  });
+  const run = yandex.startSignIn({
+    request,
+    open: (url) => Browser.open({ url }),
+    close: () => Browser.close(),
+    listen: (cb) => {
+      const handle = App.addListener('appUrlOpen', (event) => cb(event && event.url));
+      return () => { Promise.resolve(handle).then((h) => h && h.remove && h.remove()).catch(() => {}); };
     },
   });
-  if (!res) return null;
-  return { url: webdav.normalizeUrl(needUrl ? res.url : preset.url), user: res.user, pass: res.pass, preset: preset.id, label: preset.name };
+  let cancelled = false;
+  wait.dismissed.then((byUser) => { if (byUser) { cancelled = true; run.cancel(); } });
+  let token;
+  try {
+    token = await run.promise;
+  } catch (e) {
+    wait.close();
+    if (!cancelled) toast(say(e));
+    return null;
+  }
+  wait.close();
+  const user = yandex.newUser();
+  try {
+    await Secrets.set({ key: user, value: yandex.credentialsOf(token) });
+  } catch {
+    toast(t('Защищённое хранилище системы недоступно. Подключение Яндекса не сохранено.'));
+    return null;
+  }
+  const acc = { url: preset.url, user, pass: '', preset: preset.id, label: preset.name };
+  try {
+    await davOf(acc, '').check();
+  } catch (e) {
+    await removeSecret(user);
+    toast(say(e));
+    return null;
+  }
+  return acc;
 }
 
 /** Просмотр папок сервера. Возвращает путь выбранной папки или null. */
@@ -91,7 +143,7 @@ async function pickFolder(acc, start) {
   for (;;) {
     let folders = [];
     try {
-      folders = await webdav.browseFolders({ url: acc.url, user: acc.user, pass: acc.pass, path: cur, request });
+      folders = await browse(acc, cur);
     } catch (e) {
       toast(String((e && e.message) || e));
       return null;
@@ -136,16 +188,35 @@ export async function chooseDavFolder(ctx = {}) {
   const logins = [];
   const seen = new Set();
   for (const acc of Object.values(saved)) {
+    // Остальные сохранённые связи остаются рабочими, но не предлагаются для новых подключений.
+    if (!acc || typeof acc !== 'object') continue;
+    let isYandex = acc.preset === 'yandex';
+    if (!isYandex) {
+      try { isYandex = webdav.normalizeUrl(acc.url) === 'https://webdav.yandex.ru'; } catch { /* некорректный адрес */ }
+    }
+    if (!isYandex) continue;
     const k = `${acc.url}|${acc.user}`;
     if (seen.has(k)) continue;
     seen.add(k);
     logins.push(acc);
   }
-  const options = logins.map((a) => ({ label: `${a.label || a.url}: ${a.user}`, value: { saved: a } }));
-  for (const p of webdav.PRESETS) options.push({ label: options.length ? `+ ${t(p.name)}` : t(p.name), value: { preset: p } });
+  const options = logins.map((a, i) => ({
+    label: isOAuth(a) ? `${t('Яндекс Диск — сохранённое подключение')} ${i + 1}` : `${a.label || a.url}: ${a.user}`,
+    value: { saved: a },
+  }));
+  for (const p of webdav.PRESETS) {
+    const available = p.id === 'yandex';
+    options.push({
+      label: available
+        ? (logins.length ? `+ ${t(p.name)}` : t(p.name))
+        : `${t(p.name)} — ${t('Временно недоступно')}`,
+      value: { preset: p },
+      disabled: !available,
+    });
+  }
   const first = await chooseBox({
     title: t('Сетевая папка'),
-    message: t('Выберите, где лежит папка. Нужен логин и пароль приложения: подсказка появится на следующем шаге.'),
+    message: t('Выберите сервис. Сейчас доступен только Яндекс Диск.'),
     options,
     cancel: t('Отмена'),
   });
@@ -153,8 +224,12 @@ export async function chooseDavFolder(ctx = {}) {
 
   let acc = first.saved || null;
   if (!acc) {
+    if (!first.preset || first.preset.id !== 'yandex') return null;
     acc = await askLogin(first.preset);
     if (!acc) return null;
+  } else if (isOAuth(acc)) {
+    // Сохранённое подключение: убеждаемся, что токен ещё в хранилище и действителен.
+    try { await davOf(acc, '').check(); } catch (e) { toast(say(e)); return null; }
   }
 
   let root = null;
@@ -177,7 +252,7 @@ export async function chooseDavFolder(ctx = {}) {
   }
   if (root == null) {
     let start = '/';
-    try { if ((await webdav.browseFolders({ ...acc, path: '/Кабинет', request })).length) start = '/Кабинет'; } catch { /* такой папки нет */ }
+    try { if ((await browse(acc, '/Кабинет')).length) start = '/Кабинет'; } catch { /* такой папки нет */ }
     root = await pickFolder(acc, start);
     if (!root) return null;
   }

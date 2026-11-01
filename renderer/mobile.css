@@ -97,6 +97,9 @@ body.mob.m-full #toolbar { padding-bottom: calc(6px + env(safe-area-inset-bottom
 body.mob.m-compact .mode-pick { flex-direction: column; align-items: stretch; }
 body.mob.m-compact .mode-card { width: auto; }
 body.mob .start-inner { padding-left: 18px; padding-right: 18px; }
+/* «Открыть папку…» и «Открыть из облака…»: на телефоне друг под другом и с крупной зоной нажатия */
+body.mob.m-compact .start-actions { flex-direction: column; align-items: stretch; }
+body.mob .start-actions button { min-height: 48px; }
 
 /* ---------- окна выбора, подтверждений и меню (mobile/ui.js) ---------- */
 .mob-modal {
@@ -147,7 +150,7 @@ body.mob .start-inner { padding-left: 18px; padding-right: 18px; }
   top: calc(env(safe-area-inset-top, 0px) + 12px);
   width: 14px; height: 14px; padding: 0; border-radius: 50%;
   border: 2px solid var(--bg); background: var(--muted);
-  box-sizing: content-box; /* зона касания больше самой точки */
+  box-sizing: content-box; /* decorative outline does not enlarge the hit area */
   outline: 10px solid transparent;
 }
 #syncDot[hidden] { display: none; }
@@ -181,5 +184,69 @@ body.mob:not(.m-kbd).m-typing #mobKeys {
 }
 .mob-form input:focus { outline: none; border-color: var(--accent); }
 .mob-form .mob-actions { padding: 6px 0 0; margin: 0 -8px; }
-.mob-err { color: #e5484d; font-size: 14px; line-height: 1.4; }
-body.mob #btnOpenCloud { display: none; }
+.mob-err { color: var(--danger); font-size: 14px; line-height: 1.4; }
+
+/* ---------- mobile touch targets and keyboard focus ---------- */
+body.mob .recent-remove,
+body.mob .cf-x {
+  opacity: 1;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+body.mob .panel button { min-height: 44px; }
+body.mob .side-plus { min-width: 44px; min-height: 44px; }
+body.mob .panel :is(button, input, select, textarea):focus-visible,
+body.mob .mob-sheet :is(button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+body.mob .mob-sheet:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Expand the real compact-phone button, not its decorative outline. */
+body.mob.m-compact #syncDot {
+  top: env(safe-area-inset-top, 0px);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-sizing: border-box;
+  outline: none;
+}
+body.mob.m-compact #syncDot::before {
+  content: "";
+  position: absolute;
+  inset: 13px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--muted);
+  pointer-events: none;
+}
+body.mob.m-compact #syncDot.busy::before { background: var(--accent); }
+body.mob.m-compact #syncDot.err::before { background: #e5484d; }
+body.mob.m-compact #syncDot.conflict::before { background: #f5a524; }
+body.mob.m-compact #syncDot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Selected text uses the foreground colour, not a low-contrast accent. */
+body.mob #chipProfile button.active,
+body.mob #chipAmbient button.active { background: var(--sel); color: var(--text); }
+body.mob .ch.selected .num { color: var(--text); opacity: 1; }
+
+/* Respect the device preference without changing the default mobile effects. */
+@media (prefers-reduced-motion: reduce) {
+  body.mob.m-dl #sidebar,
+  body.mob.m-dr #notesbar,
+  body.mob #mobScrim,
+  body.mob #status,
+  body.mob #goalBtn,
+  body.mob #goalBar i { transition: none; }
+  body.mob #syncDot.busy { animation: none; opacity: 1; }
+  body.mob #goal.hit #goalBtn { animation: none; }
+}
