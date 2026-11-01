@@ -1,7 +1,7 @@
 {
   "name": "kabinet",
   "productName": "Кабинет",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "description": "Редактор Александра Шавкунова для писателей",
   "main": "src/electron-entry.js",
   "private": true,
@@ -27,11 +27,11 @@
     "@tiptap/core": "^2.10.0",
     "@tiptap/pm": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
-    "electron": "^33.2.0",
-    "esbuild": "^0.24.0",
-    "tiptap-markdown": "^0.8.10",
+    "electron": "^45.2.1",
     "electron-builder": "^25.1.8",
-    "rcedit": "^3.1.0"
+    "esbuild": "^0.24.0",
+    "rcedit": "^3.1.0",
+    "tiptap-markdown": "^0.8.10"
   },
   "author": {
     "name": "Александр Шавкунов"
@@ -39,7 +39,14 @@
   "build": {
     "appId": "ru.kabinet.writer",
     "productName": "Кабинет",
-    "protocols": [{ "name": "Kabinet OAuth", "schemes": ["kabinet"] }],
+    "protocols": [
+      {
+        "name": "Kabinet OAuth",
+        "schemes": [
+          "kabinet"
+        ]
+      }
+    ],
     "afterPack": "scripts/after-pack.js",
     "artifactName": "Kabinet-${version}.${ext}",
     "directories": {
@@ -65,12 +72,26 @@
     },
     "win": {
       "icon": "build/icon.ico",
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "linux": {
       "icon": "build/icon-512.png",
       "category": "Office",
-      "target": [{ "target": "AppImage", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "artifactName": "Kabinet-${version}-linux-x64.${ext}"
     },
     "nsis": {
