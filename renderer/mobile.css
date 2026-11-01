@@ -184,7 +184,7 @@ body.mob:not(.m-kbd).m-typing #mobKeys {
 }
 .mob-form input:focus { outline: none; border-color: var(--accent); }
 .mob-form .mob-actions { padding: 6px 0 0; margin: 0 -8px; }
-.mob-err { color: #e5484d; font-size: 14px; line-height: 1.4; }
+.mob-err { color: var(--danger); font-size: 14px; line-height: 1.4; }
 
 /* ---------- mobile touch targets and keyboard focus ---------- */
 body.mob .recent-remove,
@@ -233,3 +233,8 @@ body.mob.m-compact #syncDot:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+/* Selected text uses the foreground colour, not a low-contrast accent. */
+body.mob #chipProfile button.active,
+body.mob #chipAmbient button.active { background: var(--sel); color: var(--text); }
+body.mob .ch.selected .num { color: var(--text); opacity: 1; }
