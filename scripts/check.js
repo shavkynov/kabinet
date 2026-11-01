@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { runTests } = require('./test');
 
 const root = path.join(__dirname, '..');
 require('./concat').buildApp();
@@ -57,12 +58,13 @@ for (const f of modules) {
   for (const m of code.matchAll(/\bapi\.([A-Za-z]+)\(/g)) if (!api.has(m[1])) fail(`${f}: в preload нет api.${m[1]}`);
 }
 
-const tests = fs.readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'test', f));
-const t = spawnSync(process.execPath, ['--test', ...tests], { encoding: 'utf8' });
-const pass = /# pass (\d+)/.exec(t.stdout);
-const bad = /# fail (\d+)/.exec(t.stdout);
-if (t.status !== 0 || (bad && bad[1] !== '0')) fail(`тесты не прошли\n${t.stdout.split('\n').filter((l) => /not ok|Error/.test(l)).join('\n')}`);
-else console.log(`тесты: ${pass ? pass[1] : '?'} пройдено`);
+const t = runTests({ encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+const stdout = t.stdout || '';
+const pass = /# pass (\d+)/.exec(stdout);
+const bad = /# fail (\d+)/.exec(stdout);
+if (t.error || t.status !== 0 || (bad && bad[1] !== '0')) {
+  fail(`тесты не прошли\n${[t.error && t.error.message, t.signal && `signal: ${t.signal}`, stdout, t.stderr].filter(Boolean).join('\n')}`);
+} else console.log(`тесты: ${pass ? pass[1] : '?'} пройдено`);
 
 if (failed) {
   console.error(`\nПроблем: ${failed}`);
