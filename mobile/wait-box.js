@@ -1,5 +1,9 @@
 import { activateModal } from './modal-focus.js';
+import syncDiag from '../src/sync-diag.js';
 // Окно ожидания с кнопкой «Отмена» (вход в Яндекс через браузер). Те же стили и закрытие кнопкой «назад», что у окон в ui.js.
+
+// Панель импорта остаётся доступной, служебная кнопка и отчёты отключены.
+if (typeof document !== 'undefined' && typeof window !== 'undefined') syncDiag.install({ overlay: true, diagnostics: false });
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);

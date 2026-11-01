@@ -66,7 +66,7 @@ function walkLocal(dir) {
  * Пока адаптер не сообщает size и mtime (или mtime нулевой), кэш не используется.
  */
 async function walkRemote(adapter, cache) {
-  const out = new Map();
+  const files = [];
   const walk = async (rel) => {
     const items = await adapter.list(rel);
     for (const it of items) {
@@ -74,13 +74,40 @@ async function walkRemote(adapter, cache) {
       if (it.dir) { await walk(r); continue; }
       if (!isSyncable(r)) continue;
       const sig = it.mtime > 0 && it.size >= 0 ? `${it.size}:${it.mtime}` : null;
-      const hit = sig && cache && cache.get(r);
-      if (hit && hit.sig === sig) { out.set(r, { hash: hit.hash, bytes: null, sig }); continue; }
-      const bytes = await adapter.read(r);
-      if (bytes) out.set(r, { hash: hashBytes(bytes), bytes, sig });
+      files.push({ rel: r, sig });
     }
   };
+  // Сначала получаем списки. Ошибка списка не запускает чтение неполного снимка.
   await walk('');
+  const entries = new Array(files.length);
+  let next = 0;
+  let failed = false;
+  let failure;
+  const worker = async () => {
+    while (!failed) {
+      const index = next++;
+      if (index >= files.length) return;
+      const { rel, sig } = files[index];
+      try {
+        const hit = sig && cache && cache.get(rel);
+        if (hit && hit.sig === sig) {
+          entries[index] = { hash: hit.hash, bytes: null, sig };
+        } else {
+          const bytes = await adapter.read(rel);
+          if (bytes) entries[index] = { hash: hashBytes(bytes), bytes, sig };
+        }
+      } catch (error) {
+        if (!failed) failure = error;
+        failed = true;
+      }
+    }
+  };
+  // После ошибки не берём новые файлы и ждём завершения всех уже начатых чтений.
+  await Promise.all(Array.from({ length: Math.min(3, files.length) }, () => worker()));
+  if (failed) throw failure;
+  const out = new Map();
+  // Порядок результата не зависит от того, какой запрос ответил первым.
+  for (let i = 0; i < files.length; i += 1) if (entries[i]) out.set(files[i].rel, entries[i]);
   return out;
 }
 
@@ -90,7 +117,9 @@ async function walkRemote(adapter, cache) {
  */
 function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = {}) {
   let state = load();
-  const sigCache = new Map(); // rel → { sig, hash } последнего прочитанного снаружи файла
+  // Отдельный файл сохраняет совместимость со старым форматом stateFile.
+  const cacheFile = stateFile ? `${stateFile}.cache` : null;
+  const sigCache = loadCache();
   // Все проходы идут строго по одному: выгрузка сразу после первого выбора папки и первый же
   // проход синхронизации иначе видят разные снимки папки и «удаляют» только что записанный проект.
   let queue = Promise.resolve();
@@ -108,8 +137,29 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     return {};
   }
 
+  function loadCache() {
+    const cache = new Map();
+    if (!cacheFile) return cache;
+    try {
+      const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      if (!raw || raw.version !== 1 || !raw.files || typeof raw.files !== 'object' || Array.isArray(raw.files)) return cache;
+      for (const [rel, entry] of Object.entries(raw.files)) {
+        if (!isSyncable(rel) || !entry || typeof entry.sig !== 'string' || !/^\d+:\d+$/.test(entry.sig)) continue;
+        if (typeof entry.hash !== 'string' || !/^[a-f0-9]{40}$/.test(entry.hash) || state[rel] !== entry.hash) continue;
+        cache.set(rel, { sig: entry.sig, hash: entry.hash });
+      }
+    } catch { /* отсутствующий или повреждённый кэш означает полное чтение */ }
+    return cache;
+  }
+
   function save() {
-    try { writeFileAtomic(stateFile, JSON.stringify(state, null, 2)); } catch (err) { console.error('folder state:', err); }
+    try {
+      writeFileAtomic(stateFile, JSON.stringify(state, null, 2));
+      if (cacheFile) {
+        const files = Object.fromEntries([...sigCache].filter(([rel, entry]) => state[rel] === entry.hash));
+        writeFileAtomic(cacheFile, JSON.stringify({ version: 1, files }, null, 2));
+      }
+    } catch (err) { console.error('folder state:', err); }
   }
 
   /** Содержимое внешнего файла: уже прочитанное или дочитанное по требованию. */
@@ -330,6 +380,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     const res = { pushed: [], conflicts: [], removed: [] };
     for (const rel of new Set(rels)) {
       if (!isSyncable(rel)) continue;
+      sigCache.delete(rel);
       const here = fs.existsSync(path.join(dir, rel));
       if (!here) { // удалили у нас: сравниваем с тем, что снаружи, и убираем там
         if (state[rel] === undefined) continue;
@@ -402,11 +453,13 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
   async function importAllOnce() {
     const remote = await walkRemote(adapter);
     state = {};
-    for (const [rel, { hash, bytes }] of remote) {
+    sigCache.clear();
+    for (const [rel, { hash, bytes, sig }] of remote) {
       const target = path.join(dir, rel);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       writeFileAtomic(target, Buffer.from(bytes));
       state[rel] = hash;
+      if (sig) sigCache.set(rel, { sig, hash });
     }
     save();
     return [...remote.keys()];
@@ -416,6 +469,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
   async function exportAllOnce() {
     const local = walkLocal(dir);
     state = {};
+    sigCache.clear();
     for (const [rel, hash] of local) {
       await adapter.mkdir(path.dirname(rel) === '.' ? '' : path.dirname(rel));
       await adapter.write(rel, readLocal(rel));
@@ -432,7 +486,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
   // и вычитываться одновременно.
   return {
     sync: () => serial(syncOnce),
-    push: (rels) => serial(async () => { sigCache.clear(); return pushOnce(rels); }),
+    push: (rels) => serial(() => pushOnce(rels)),
     replaceAll: () => serial(replaceAllOnce),
     importAll: () => serial(importAllOnce),
     exportAll: () => serial(exportAllOnce),

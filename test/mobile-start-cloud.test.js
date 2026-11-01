@@ -12,7 +12,20 @@ const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8');
 function setup({ mob, call }) {
   const log = { flushed: 0, entered: [], errors: [], desktopOpened: [], calls: [] };
   const buttons = new Map();
-  const button = (id) => { if (!buttons.has(id)) buttons.set(id, { listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; } }); return buttons.get(id); };
+  const button = (id) => {
+    if (!buttons.has(id)) {
+      const attrs = new Map();
+      buttons.set(id, {
+        textContent: 'Open cloud', disabled: false, listeners: {},
+        getAttribute(name) { return attrs.get(name) ?? null; },
+        setAttribute(name, value) { attrs.set(name, String(value)); },
+        removeAttribute(name) { attrs.delete(name); },
+        addEventListener(name, fn) { this.listeners[name] = fn; },
+      });
+    }
+    return buttons.get(id);
+  };
+  const frames = [];
   const sandbox = {
     document: { body: { classList: { contains: (name) => mob && name === 'mob' } } },
     $: (sel) => button(sel),
@@ -22,12 +35,28 @@ function setup({ mob, call }) {
     enterProject: (proj) => log.entered.push(proj),
     showError: (message) => log.errors.push(message),
     window: { kabinetBackend: { call: async (channel, ...args) => { log.calls.push([channel, ...args]); return call(channel); } } },
+    requestAnimationFrame: (fn) => { frames.push(fn); },
+    setTimeout: (fn) => { fn(); },
   };
   vm.createContext(sandbox);
   vm.runInContext(read('renderer', 'app', '36-dav.js'), sandbox, { filename: '36-dav.js' });
   sandbox.openSyncDialog = (mode) => log.desktopOpened.push(mode);
   sandbox.wireDav();
-  return { log, click: async () => { await button('#btnOpenCloud').listeners.click(); await new Promise((r) => setImmediate(r)); } };
+  return {
+    log,
+    button: button('#btnOpenCloud'),
+    click: async () => {
+      await button('#btnOpenCloud').listeners.click();
+      while (frames.length) frames.shift()();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+  };
+}
+
+function assertButtonRestored(x) {
+  assert.equal(x.button.textContent, 'Open cloud');
+  assert.equal(x.button.disabled, false);
+  assert.equal(x.button.getAttribute('aria-busy'), null);
 }
 
 test('on the phone the start-page cloud button opens the project through the backend wizard', async () => {
@@ -39,6 +68,7 @@ test('on the phone the start-page cloud button opens the project through the bac
   assert.deepEqual(x.log.entered, [proj]);
   assert.deepEqual(x.log.desktopOpened, []);
   assert.deepEqual(x.log.errors, []);
+  assertButtonRestored(x);
 });
 
 test('on the phone a cancelled wizard leaves the start page as it is', async () => {
@@ -46,6 +76,7 @@ test('on the phone a cancelled wizard leaves the start page as it is', async () 
   await x.click();
   assert.deepEqual(x.log.entered, []);
   assert.deepEqual(x.log.errors, []);
+  assertButtonRestored(x);
 });
 
 test('on the phone a wizard error is shown, not swallowed', async () => {
@@ -53,6 +84,7 @@ test('on the phone a wizard error is shown, not swallowed', async () => {
   await x.click();
   assert.deepEqual(x.log.entered, []);
   assert.deepEqual(x.log.errors, ['В выбранной папке нет проекта Кабинета.']);
+  assertButtonRestored(x);
 });
 
 test('on the computer the button still opens the sync dialog', async () => {
@@ -60,6 +92,7 @@ test('on the computer the button still opens the sync dialog', async () => {
   await x.click();
   assert.deepEqual(x.log.desktopOpened, ['open']);
   assert.deepEqual(x.log.calls, []);
+  assertButtonRestored(x);
 });
 
 test('phone styles no longer hide the cloud button and keep both start buttons easy to hit', () => {

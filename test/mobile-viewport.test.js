@@ -13,7 +13,7 @@ function runBuild(t, html = input) {
   for (const name of ['mobile', 'renderer/dist']) fs.mkdirSync(path.join(dir, name), { recursive: true });
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '0.35.0' }));
   fs.writeFileSync(path.join(dir, 'renderer/index.html'), html);
-  for (const name of ['style.css', 'mobile.css', 'dist/app.js']) fs.writeFileSync(path.join(dir, 'renderer', name), 'fixture');
+  for (const name of ['style.css', 'mobile.css', 'press-feedback.css', 'dist/app.js']) fs.writeFileSync(path.join(dir, 'renderer', name), 'fixture');
   const builds = [];
   vm.runInNewContext(source, {
     __dirname: path.join(dir, 'mobile'), process, console: { log() {} },
@@ -41,10 +41,12 @@ test('mobile page still loads boot, styles and cloud button without changing des
   assert.match(result.html, /<body class="mob">/);
   assert.match(result.html, /<script src="boot.js"><\/script>/);
   assert.match(result.html, /href="mobile.css"/);
+  assert.match(result.html, /href="press-feedback.css"/);
   assert.match(result.html, /id="btnOpenCloud"/);
   assert.match(result.html, /Content-Security-Policy/);
   assert.equal(fs.readFileSync(path.join(result.dir, 'renderer/index.html'), 'utf8'), input);
   assert.equal(fs.readFileSync(path.join(result.dir, 'mobile/www/dist/app.js'), 'utf8'), 'fixture');
+  assert.equal(fs.readFileSync(path.join(result.dir, 'mobile/www/press-feedback.css'), 'utf8'), 'fixture');
   assert.equal(result.builds.length, 1);
   assert.equal(result.builds[0].define.__APP_VERSION__, '"0.35.0"');
 });
