@@ -44,10 +44,14 @@ function setup() {
   document.body = new Element('body'); document.activeElement = document.body;
   document.createElement = (tag) => new Element(tag);
   document.querySelectorAll = (selector) => document.body.querySelectorAll(selector);
-  const context = vm.createContext({ document, window, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {} });
+  // Isolate the diagnostic overlay: these tests exercise modal focus, not sync metrics.
+  const context = vm.createContext({ document, window, syncDiag: { install() {} }, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout() {} });
   const load = (name, exports) => {
     let source = fs.readFileSync(path.join(__dirname, '../mobile', name), 'utf8');
-    source = source.replace(/^import \{ activateModal \} from '\.\/modal-focus\.js';\r?\n/, '').replace(/export function /g, 'function ');
+    source = source
+      .replace(/^import \{ activateModal \} from '\.\/modal-focus\.js';\r?\n/m, '')
+      .replace(/^import syncDiag from '\.\.\/src\/sync-diag\.js';\r?\n/m, '')
+      .replace(/export function /g, 'function ');
     return vm.runInContext(`(() => { ${source}\nreturn { ${exports} }; })()`, context);
   };
   context.activateModal = load('modal-focus.js', 'activateModal').activateModal;
