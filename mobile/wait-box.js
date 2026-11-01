@@ -1,3 +1,4 @@
+import { activateModal } from './modal-focus.js';
 // Окно ожидания с кнопкой «Отмена» (вход в Яндекс через браузер). Те же стили и закрытие кнопкой «назад», что у окон в ui.js.
 
 function el(tag, cls, text) {
@@ -17,12 +18,14 @@ export function waitBox({ title, message, cancel }) {
   const sheet = el('div', 'mob-sheet');
   modal.append(sheet);
   let done = false;
+  let cleanup = () => {};
   let finish = () => {};
   const dismissed = new Promise((resolve) => { finish = resolve; });
   const end = (byUser) => {
     if (done) return;
     done = true;
     modal.remove();
+    cleanup();
     finish(byUser);
   };
   sheet.append(el('h2', '', title));
@@ -35,5 +38,6 @@ export function waitBox({ title, message, cancel }) {
   sheet.append(acts);
   modal.addEventListener('mob-cancel', () => end(true));
   document.body.append(modal);
+  cleanup = activateModal(modal, sheet, () => end(true));
   return { dismissed, close: () => end(false) };
 }

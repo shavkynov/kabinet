@@ -1,3 +1,4 @@
+import { activateModal } from './modal-focus.js';
 // Окна выбора, подтверждения и меню для Android (на компьютере их рисовал Electron).
 
 function el(tag, cls, text) {
@@ -13,16 +14,19 @@ function openModal(build) {
     const sheet = el('div', 'mob-sheet');
     modal.append(sheet);
     let done = false;
+    let cleanup = () => {};
     const close = (value) => {
       if (done) return;
       done = true;
       modal.remove();
+      cleanup();
       resolve(value);
     };
     build(sheet, close);
     modal.addEventListener('mob-cancel', () => close(null));
     modal.addEventListener('click', (e) => { if (e.target === modal) close(null); });
     document.body.append(modal);
+    cleanup = activateModal(modal, sheet, () => close(null));
   });
 }
 
@@ -116,7 +120,10 @@ export function formBox({ title, hint, fields, submit, cancel, onSubmit }) {
     });
     sheet.append(form);
     const first = form.querySelector('input');
-    if (first) setTimeout(() => first.focus(), 50);
+    if (first) setTimeout(() => {
+      const modals = document.querySelectorAll('.mob-modal');
+      if (first.isConnected && sheet.parentNode === modals[modals.length - 1]) first.focus();
+    }, 50);
   });
 }
 
