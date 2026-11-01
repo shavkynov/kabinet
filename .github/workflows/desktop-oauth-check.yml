@@ -1,46 +1,93 @@
-name: Desktop OAuth verification
+name: Repository audit
 
 'on':
   push:
-    branches: [ui/yandex-only-sync]
-    paths:
-      - '.github/workflows/desktop-oauth-check.yml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'main.js'
-      - 'preload.js'
-      - 'src/**'
-      - 'renderer/**'
-      - 'scripts/**'
-      - 'test/**'
-      - 'build/**'
-      - 'sounds/**'
+    branches: [main]
+    paths: ['.github/workflows/desktop-oauth-check.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-oauth-${{ github.ref }}
+  group: repository-audit-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify-and-package:
-    name: Verify and package (${{ matrix.name }})
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Inventory every tracked file and inspect references
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const cp = require('node:child_process');
+          const files = cp.execFileSync('git', ['ls-files', '-z'], {encoding:'utf8'}).split('\0').filter(Boolean);
+          const tracked = new Set(files);
+          const groups = new Map();
+          const incoming = new Map(files.map(f => [f, []]));
+          const edges = [];
+          const unresolved = [];
+          const inventory = [];
+          const suspicious = [];
+          for (const f of files) {
+            const stat = fs.lstatSync(f);
+            if (!stat.isFile()) { inventory.push({path:f, type:stat.isSymbolicLink() ? 'symlink' : 'other'}); continue; }
+            const data = fs.readFileSync(f);
+            const hash = crypto.createHash('sha256').update(data).digest('hex');
+            inventory.push({path:f, bytes:data.length, sha256:hash});
+            if (data.length) { if (!groups.has(hash)) groups.set(hash, []); groups.get(hash).push(f); }
+            if (/(^|\/)(node_modules|dist|www|\.gradle|\.idea)(\/|$)|(^|\/)\.DS_Store$|\.(tmp|bak|orig|rej|log|apk|dmg|exe|AppImage|keystore|jks)$/i.test(f) || f.startsWith('mobile/android/') || f === 'renderer/app.gen.js') suspicious.push(f);
+            if (!/\.[cm]?js$/.test(f)) continue;
+            const text = data.toString('utf8');
+            const re = /(?:require\s*\(\s*|import\s*\(\s*|(?:import|export)[^;\n]*?\bfrom\s*|import\s*)['"](\.[^'"]+)['"]/g;
+            for (const m of text.matchAll(re)) {
+              const base = path.posix.normalize(path.posix.join(path.posix.dirname(f), m[1]));
+              const resolved = [base, base+'.js', base+'.cjs', base+'.mjs', base+'.json', base+'/index.js'].find(p => tracked.has(p));
+              if (resolved) { incoming.get(resolved).push(f); edges.push({from:f, to:resolved}); }
+              else unresolved.push({from:f, specifier:m[1]});
+            }
+          }
+          const noStaticIncoming = files.filter(f => /\.[cm]?js$/.test(f) && incoming.get(f).length === 0);
+          const report = {commit:cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(), trackedFiles:files.length, inventory, exactDuplicates:[...groups.values()].filter(g => g.length > 1), suspiciousPaths:suspicious, staticImportEdges:edges, unresolvedRelativeImports:unresolved, noStaticIncoming, limitations:'Static imports are heuristic. Entrypoints, concatenated renderer parts, aliases, dynamic imports, scripts and fixtures may have no incoming edges. No files are automatically deleted. No runtime UI or cloud synchronization test is performed.'};
+          fs.mkdirSync('audit-output', {recursive:true});
+          fs.writeFileSync('audit-output/report.json', JSON.stringify(report,null,2)+'\n');
+          const md = '# Repository inventory audit\n\nCommit: '+report.commit+'\n\nTracked files: '+files.length+'\n\nExact duplicate groups: '+report.exactDuplicates.length+'\n\nSuspicious paths: '+suspicious.length+'\n\n## Limitations\n'+report.limitations+'\n\nSee report.json for the full inventory, hashes, duplicates and reference candidates.\n';
+          fs.writeFileSync('audit-output/report.md', md);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repository-inventory-${{ github.sha }}
+          path: audit-output/
+          retention-days: 14
+
+  verify:
+    name: Tests and packaging (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            name: windows-x64
-            command: npx electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
           - os: ubuntu-latest
-            name: linux-x64
+            name: linux
             command: npx electron-builder --linux AppImage --x64 --publish never
+          - os: windows-latest
+            name: windows
+            command: npx electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
           - os: macos-latest
-            name: mac-arm64-and-intel
+            name: macos
             command: |
               npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
               npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
@@ -58,26 +105,33 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Install locked dependencies
+      - name: Install locked desktop dependencies
         run: |
           set -euo pipefail
           mkdir -p ci-logs
           npm ci 2>&1 | tee ci-logs/install.log
-      - name: Full project checks and all tests
+      - name: Full checks and all root test files
         run: |
           set -euo pipefail
           npm run check 2>&1 | tee ci-logs/check.log
-      - name: Build renderer
+      - name: Build desktop renderer
         run: |
           set -euo pipefail
           npm run build 2>&1 | tee ci-logs/renderer.log
-      - name: Package test installers
+      - name: Android smoke tests and web bundle (not APK packaging)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          npm install --prefix mobile --package-lock=false 2>&1 | tee ci-logs/mobile-install.log
+          node mobile/test/run-smoke.js 2>&1 | tee ci-logs/mobile-smoke.log
+          node mobile/build.js 2>&1 | tee ci-logs/mobile-build.log
+      - name: Package desktop installers without publishing
         run: |
           set -euo pipefail
           {
             ${{ matrix.command }}
           } 2>&1 | tee ci-logs/package.log
-      - name: Verify macOS signatures
+      - name: Verify both macOS app signatures
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
@@ -87,26 +141,12 @@ jobs:
               /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
               found=$((found + 1))
             done < <(find dist -type d -name '*.app' -prune -print0)
-            if [ "$found" -ne 2 ]; then
-              echo "Expected two signed macOS app bundles; found $found" >&2
-              exit 1
-            fi
+            test "$found" -eq 2
           } 2>&1 | tee ci-logs/mac-signatures.log
-      - name: Upload test installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: kabinet-oauth-${{ matrix.name }}-${{ github.sha }}
-          path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
-          if-no-files-found: error
-          retention-days: 7
-      - name: Upload verification logs
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: kabinet-oauth-logs-${{ matrix.name }}-${{ github.sha }}
+          name: repository-audit-logs-${{ matrix.name }}-${{ github.sha }}
           path: ci-logs/*.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
