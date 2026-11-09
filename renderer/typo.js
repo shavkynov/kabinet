@@ -40,7 +40,7 @@ export function fixDocTypography(editor, o) {
     node.forEach((c) => { if (!c.isText || /\S/.test(c.text)) only = false; });
     return only;
   };
-  // Пустые абзацы между абзацами (о.dropEmpty): отступ между абзацами дают поля или красная строка, а не лишние пустые строки.
+  // Пустые абзацы между абзацами (o.dropEmpty): расстояние между абзацами дают поля или красная строка, а не лишние пустые строки.
   const empties = new Set();
   if (o.dropEmpty) {
     state.doc.forEach((node, offset) => { if (node.type.name === 'paragraph' && blank(node)) empties.add(offset); });
