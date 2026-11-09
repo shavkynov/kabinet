@@ -8,8 +8,9 @@ on:
       - '.github/workflows/tauri-experiment.yml'
       - 'package.json'
       - 'package-lock.json'
-      - 'src/paste.js'
-      - 'test/paste.test.js'
+      - 'renderer/**'
+      - 'src/**'
+      - 'test/**'
 
 permissions:
   contents: read
@@ -46,8 +47,10 @@ jobs:
           node-version: '22'
       - name: Install locked frontend dependencies
         run: npm ci
-      - name: Test existing office paste normalization
-        run: node --test test/paste.test.js
+      - name: Test existing editor text helpers
+        run: node --test test/paste.test.js test/typo.test.js test/marks.test.js test/nbsp.test.js
+      - name: Test actual decoration plugins without a browser
+        run: node experiments/tauri/run-tests.cjs
       - name: Build isolated frontend
         run: node experiments/tauri/build.cjs
       - name: Set up stable Rust
