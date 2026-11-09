@@ -1,7 +1,9 @@
 import { Typography } from '../../renderer/typo.js';
 import { HiddenMarks, refreshMarks } from '../../renderer/marks.js';
 import { Comments } from '../../renderer/comments.js';
+import { NameLinks } from '../../renderer/links.js';
 import { installCommentsLab } from './comments-lab.js';
+import { installNameLinksLab } from './name-links-lab.js';
 
 const options = { typography: true, marks: false };
 
@@ -9,6 +11,7 @@ export const labExtensions = [
   Typography.configure({ getOptions: () => ({ enabled: options.typography, quotes: true, dashes: true, nbsp: true, lang: 'ru' }) }),
   HiddenMarks.configure({ getOptions: () => ({ on: options.marks, spaces: true }) }),
   Comments,
+  NameLinks,
 ];
 
 export function installLabControls(editor, toolbar, report) {
@@ -22,6 +25,9 @@ export function installLabControls(editor, toolbar, report) {
     .mk-shy, .mk-zw { border-left: 1px dotted #b77800; }
     .mk-br::before { content: '↵'; color: #648bc5; }
     .cmt { background: #d8a60044; border-bottom: 2px solid #b77800; }
+    .name-link { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+    .name-link.kind-character { text-decoration-color: #648bc5; }
+    .name-link.kind-place { text-decoration-color: #53946b; }
     #lab-comment-text { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; font: inherit; }
   `;
   document.head.append(style);
@@ -61,4 +67,5 @@ export function installLabControls(editor, toolbar, report) {
     report('Скрытые символы переключены; Markdown не изменился.');
   });
   installCommentsLab(editor, toolbar, report);
+  installNameLinksLab(editor, toolbar, report);
 }
