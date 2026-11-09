@@ -82,7 +82,8 @@ function showNothing() {
   updateAllSelections();
 }
 
-async function openDoc(kind, id) {
+// keepView: перечитать уже открытый документ, не сбрасывая лист и курсор (см. setEditorContent).
+async function openDoc(kind, id, keepView) {
   if (id === currentId && kind === currentKind) return;
   const token = ++openToken;
   await flush(); // сохраняем предыдущий документ
@@ -100,7 +101,7 @@ async function openDoc(kind, id) {
     lastSelected[kind] = id;
     closeGoalPop();
     if (isTextKind(kind)) {
-      setEditorContent(text, true);
+      setEditorContent(text, true, keepView);
     } else {
       setEditorContent('', false);
       const item = itemsOf(kind).find((c) => c.id === id);

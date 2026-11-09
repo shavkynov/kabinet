@@ -60,7 +60,7 @@ async function applyExternal(files) {
       const id = currentId;
       currentKind = null;
       currentId = null;
-      await openDoc(kind, id);
+      await openDoc(kind, id, true); // чужая правка не должна выбрасывать в начало главы
       reloaded = true;
     }
   }
@@ -70,7 +70,7 @@ async function applyExternal(files) {
     } else {
       const id = p2.id;
       p2.id = null;
-      await openPane2(id);
+      await openPane2(id, true);
       reloaded = true;
     }
   }

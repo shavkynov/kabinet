@@ -234,11 +234,11 @@ async function reloadOpenDocs() {
   if (id) {
     currentKind = null;
     currentId = null;
-    await openDoc(kind, id);
+    await openDoc(kind, id, true);
   }
   if (other) {
     p2.id = null;
-    await openPane2(other);
+    await openPane2(other, true);
   }
 }
 

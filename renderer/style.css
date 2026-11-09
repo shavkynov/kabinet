@@ -292,7 +292,8 @@ body.mode-stories .stories-only.block { display: block !important; }
   caret-color: var(--accent);
 }
 .ProseMirror p { margin: 0 0 .85em; }
-:root[data-para="indent"] .ProseMirror p { margin: 0; text-indent: 1.5em; }
+/* красная строка: отступ заметный (2em), и между абзацами небольшой просвет; вплотную текст сливается в сплошной брусок, особенно в диалогах */
+:root[data-para="indent"] .ProseMirror p { margin: 0 0 .35em; text-indent: 2em; }
 :root[data-para="indent"] .ProseMirror h1 + p,
 :root[data-para="indent"] .ProseMirror h2 + p,
 :root[data-para="indent"] .ProseMirror h3 + p,

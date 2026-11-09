@@ -82,7 +82,8 @@ function showPane2(on) {
   refreshBar();
 }
 
-async function openPane2(id) {
+// keepView: перечитать ту же главу, не сбрасывая лист в начало.
+async function openPane2(id, keepView) {
   if (!project || !id) return;
   if (id === currentId && currentKind === 'chapter') {
     setStatus('ok', 'Эта глава уже открыта слева');
@@ -95,6 +96,8 @@ async function openPane2(id) {
   try {
     const text = await api.readChapter(id);
     if (token !== p2.token) return;
+    const top = $('#p2Scroll').scrollTop;
+    const sel = keepView ? editor2.state.selection : null;
     p2.id = id;
     p2.loading = true;
     try {
@@ -104,12 +107,13 @@ async function openPane2(id) {
         .setContent(text, false)
         .run();
       editor2.setEditable(true, false);
+      if (sel) editor2.commands.setTextSelection({ from: sel.from, to: sel.to });
     } finally {
       p2.loading = false;
     }
     showPane2(true);
     fillP2Select();
-    $('#p2Scroll').scrollTop = 0;
+    $('#p2Scroll').scrollTop = keepView ? top : 0;
   } catch (err) {
     showError(err.message);
   }

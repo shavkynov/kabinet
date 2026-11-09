@@ -235,7 +235,12 @@ function getMarkdown() {
 }
 
 // Подставляет текст главы так, чтобы он не считался правкой и не попадал в историю отмены.
-function setEditorContent(markdown, editable) {
+// keepView: тот же документ перечитан с диска (синхронизация, замена по проекту): положение листа и курсор остаются на месте,
+// иначе каждое такое обновление выбрасывало бы читателя в начало главы.
+function setEditorContent(markdown, editable, keepView) {
+  const area = $('#paper-area');
+  const top = area.scrollTop;
+  const sel = keepView ? editor.state.selection : null;
   loading = true;
   try {
     editor
@@ -247,10 +252,12 @@ function setEditorContent(markdown, editable) {
       .setContent(markdown, false)
       .run();
     editor.setEditable(editable, false);
+    if (sel) editor.commands.setTextSelection({ from: sel.from, to: sel.to }); // за пределы нового текста не выйдет
   } finally {
     loading = false;
   }
-  $('#paper-area').scrollTop = 0;
+  area.scrollTop = keepView ? top : 0;
+  if (keepView) twTarget = area.scrollTop; // «Машинка» не должна потом доезжать до старой цели
   updateToolbar();
   updateCounts(false); // новый текст: пересчёт без сигнала о цели
 }
