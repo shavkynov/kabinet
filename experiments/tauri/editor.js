@@ -3,10 +3,12 @@ import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from 'tiptap-markdown';
 import { Slice, Fragment } from '@tiptap/pm/model';
 import { isOfficeHtml, officeTextToParagraphs } from '../../src/paste.js';
+import { labExtensions, installLabControls } from './editor-extensions.js';
 
-const sample = '# Тестовая глава\n\nЭто **жирный** и *курсивный* текст.\n\n— Реплика с тире.\n\nПроверьте ввод, выделение, вставку из Word, отмену и повтор.\n';
+const sample = '# Тестовая глава\n\nЭто **жирный** и *курсивный* текст.\n\n— Реплика с тире.\n\nНеразрывный\u00a0пробел и обычный пробел.\n\nПроверьте ввод, выделение, вставку из Word, отмену и повтор.\n';
 const status = document.querySelector('#status');
 const markdown = document.querySelector('#markdown');
+const report = (message) => { status.textContent = `${message} Только в памяти, на диск не записано.`; };
 
 function handleOfficePaste(view, event) {
   const cd = event.clipboardData;
@@ -21,12 +23,12 @@ function handleOfficePaste(view, event) {
 
 function updatePreview(instance) {
   markdown.textContent = instance.storage.markdown.getMarkdown();
-  status.textContent = 'Изменения только в памяти. Записи на диск нет.';
+  report('Тестовый текст изменён.');
 }
 
 const editor = new Editor({
   element: document.querySelector('#editor'),
-  extensions: [StarterKit, Markdown.configure({ html: false, tightLists: true, breaks: false, transformPastedText: true })],
+  extensions: [StarterKit, ...labExtensions, Markdown.configure({ html: false, tightLists: true, breaks: false, transformPastedText: true })],
   content: sample,
   editorProps: {
     handlePaste: handleOfficePaste,
@@ -45,4 +47,5 @@ for (const button of document.querySelectorAll('[data-command]')) {
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', () => commands[button.dataset.command]());
 }
+installLabControls(editor, document.querySelector('#toolbar'), report);
 updatePreview(editor);
