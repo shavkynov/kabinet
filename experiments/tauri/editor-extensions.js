@@ -1,11 +1,14 @@
 import { Typography } from '../../renderer/typo.js';
 import { HiddenMarks, refreshMarks } from '../../renderer/marks.js';
+import { Comments } from '../../renderer/comments.js';
+import { installCommentsLab } from './comments-lab.js';
 
 const options = { typography: true, marks: false };
 
 export const labExtensions = [
   Typography.configure({ getOptions: () => ({ enabled: options.typography, quotes: true, dashes: true, nbsp: true, lang: 'ru' }) }),
   HiddenMarks.configure({ getOptions: () => ({ on: options.marks, spaces: true }) }),
+  Comments,
 ];
 
 export function installLabControls(editor, toolbar, report) {
@@ -18,6 +21,8 @@ export function installLabControls(editor, toolbar, report) {
     .mk-tab { background: #b7780033; }
     .mk-shy, .mk-zw { border-left: 1px dotted #b77800; }
     .mk-br::before { content: '↵'; color: #648bc5; }
+    .cmt { background: #d8a60044; border-bottom: 2px solid #b77800; }
+    #lab-comment-text { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; font: inherit; }
   `;
   document.head.append(style);
 
@@ -55,4 +60,5 @@ export function installLabControls(editor, toolbar, report) {
     }
     report('Скрытые символы переключены; Markdown не изменился.');
   });
+  installCommentsLab(editor, toolbar, report);
 }
