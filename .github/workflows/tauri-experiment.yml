@@ -1,0 +1,79 @@
+name: Tauri experiment compilation
+
+on:
+  push:
+    branches: [experiment/tauri-rust]
+    paths:
+      - 'experiments/tauri/**'
+      - '.github/workflows/tauri-experiment.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/paste.js'
+      - 'test/paste.test.js'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    if: github.ref == 'refs/heads/experiment/tauri-rust'
+    name: Compile (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            binary: experiments/tauri/src-tauri/target/release/kabinet-tauri-experiment
+          - os: windows-latest
+            binary: experiments/tauri/src-tauri/target/release/kabinet-tauri-experiment.exe
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out experimental revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked frontend dependencies
+        run: npm ci
+      - name: Test existing office paste normalization
+        run: node --test test/paste.test.js
+      - name: Build isolated frontend
+        run: node experiments/tauri/build.cjs
+      - name: Set up stable Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Record toolchain and architecture
+        run: |
+          node --version
+          npm --version
+          rustc -Vv
+          cargo --version
+      - name: Compile embedded desktop application
+        run: cargo build --release --features tauri/custom-protocol --manifest-path experiments/tauri/src-tauri/Cargo.toml
+      - name: Retain resolved Cargo dependencies for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-dependencies-${{ matrix.os }}-${{ github.sha }}
+          path: experiments/tauri/src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain experimental binary (not an installer)
+        uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-test-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7
