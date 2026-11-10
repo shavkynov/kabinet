@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('kabinet', {
   runCheck: (paragraphs, extraWords) => call('check:run', paragraphs, extraWords),
   cancelCheck: () => call('check:cancel'),
   addCheckWord: (w) => call('check:addWord', w),
+  getDictionary: () => call('check:getDictionary'),
+  setDictionary: (words) => call('check:setDictionary', words),
   ignoreCheckRule: (id) => call('check:ignoreRule', id),
   onCheckProgress: (cb) => onData('check:progress', cb),
   onContextMenu: (cb) => onData('ui:contextMenu', cb),

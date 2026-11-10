@@ -1193,6 +1193,11 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 :root[data-theme="dark"][data-paper="warm"] { --paper: #2a251d; }
 
 /* ---------- окно «Синхронизация» (WebDAV) ---------- */
+.dict-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.dict-list .dict-empty { font-size: 13px; color: var(--muted); }
+.dict-list .dict-word { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border: 1px solid rgba(128, 128, 128, .35); border-radius: 999px; font-size: 13px; }
+.dict-list .dict-word button { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; border-radius: 50%; cursor: pointer; }
+.dict-list .dict-word button:hover { color: var(--text); background: rgba(128, 128, 128, .18); }
 #syncDialog { width: 460px; }
 #syncDialog .sync-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 #syncDialog .sync-head h2 { margin: 0; }

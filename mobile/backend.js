@@ -29,6 +29,7 @@ const { withTimeout } = require('../src/net-retry');
 const folderSync = require('../src/folder');
 const cloud = require('../src/cloud');
 const langcheck = require('../src/langcheck');
+const dict = require('../src/dict');
 const i18n = require('../src/i18n');
 const themes = require('../src/themes');
 const searchEngines = require('../src/searchengines');
@@ -886,7 +887,7 @@ function createBackend(host, { session } = {}) {
         lang: cfg.lang,
         disabledRules: cfg.disabledRules,
         hiddenKinds: langcheck.cleanKinds(cfg.hiddenKinds),
-        words: [...cfg.words, ...strList(extraWords)],
+        words: [...dict.effective(projectWordsNow(), cfg.words), ...strList(extraWords)],
         fetchImpl: (u, init) => fetch(u, init),
         signal: ctl.signal,
         onProgress: (done, total) => emit('check:progress', { done, total }),
@@ -896,12 +897,27 @@ function createBackend(host, { session } = {}) {
     }
   });
   handle('check:cancel', () => { if (checkCtl) checkCtl.abort(); return true; });
+  // Словарь: у проекта свой список в project.json (переезжает вместе с проектом), общий список остаётся запасным.
+  function projectWordsNow() {
+    try { return currentDir ? project.projectWords(currentDir) : null; } catch { return null; }
+  }
   handle('check:addWord', (word) => {
     const w = String(word || '').trim();
-    if (!w) return false;
+    if (!w || w.length > dict.MAX_LEN) return false;
     const cfg = loadCheck();
     if (!cfg.words.includes(w)) { cfg.words.push(w); saveCheck(cfg); }
+    if (currentDir) project.setProjectWords(currentDir, dict.withWord(projectWordsNow(), cfg.words, w));
     return true;
+  });
+  handle('check:getDictionary', () => dict.effective(projectWordsNow(), loadCheck().words));
+  handle('check:setDictionary', (list) => {
+    const cfg = loadCheck();
+    const before = dict.effective(projectWordsNow(), cfg.words);
+    const next = dict.cleanWords(list);
+    if (currentDir) project.setProjectWords(currentDir, next);
+    cfg.words = dict.mergeShared(cfg.words, before, next);
+    saveCheck(cfg);
+    return next;
   });
   handle('check:ignoreRule', (ruleId) => {
     const id = String(ruleId || '').trim();
@@ -976,6 +992,8 @@ function createBackend(host, { session } = {}) {
     runCheck: (paragraphs, extraWords) => call('check:run', paragraphs, extraWords),
     cancelCheck: () => call('check:cancel'),
     addCheckWord: (w) => call('check:addWord', w),
+    getDictionary: () => call('check:getDictionary'),
+    setDictionary: (words) => call('check:setDictionary', words),
     ignoreCheckRule: (id) => call('check:ignoreRule', id),
     onCheckProgress: on('check:progress'),
     onContextMenu: on('ui:contextMenu'),

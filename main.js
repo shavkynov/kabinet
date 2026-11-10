@@ -24,6 +24,7 @@ const exporter = require('./src/export');
 const importer = require('./src/import');
 const { writeFileAtomic } = require('./src/fsutil');
 const langcheck = require('./src/langcheck');
+const dict = require('./src/dict');
 const i18n = require('./src/i18n');
 const themes = require('./src/themes');
 const searchEngines = require('./src/searchengines');
@@ -252,10 +253,20 @@ function requireDir() {
   return currentDir;
 }
 
+// Слова из словаря проекта добавляются в словарь системной проверки орфографии (слова, убранные на другом устройстве, остаются
+// в нём до явного удаления здесь: лишнего подчёркивания это не создаёт).
+function applyProjectDictionary() {
+  const ses = spellSession();
+  const words = projectWordsNow();
+  if (!ses || !words) return;
+  try { for (const w of words) ses.addWordToSpellCheckerDictionary(w); } catch (err) { console.error('dictionary:', err.message); }
+}
+
 async function openAt(dir) {
   const proj = project.openProject(dir);
   if (!(await confirmLock(dir))) return null; // автор передумал: проект открыт на другом устройстве
   currentDir = dir;
+  applyProjectDictionary();
   projectMode = proj.mode;
   recents.add(recentsFile(), { path: dir, name: proj.name });
   autoBackup();
@@ -932,7 +943,7 @@ handle('check:run', async (paragraphs, extraWords) => {
       lang: cfg.lang,
       disabledRules: cfg.disabledRules,
       hiddenKinds: langcheck.cleanKinds(cfg.hiddenKinds),
-      words: [...cfg.words, ...strList(extraWords)],
+      words: [...dict.effective(projectWordsNow(), cfg.words), ...strList(extraWords)],
       fetchImpl: (u, init) => net.fetch(u, init),
       signal: ctl.signal,
       onProgress: (done, total) => send('check:progress', { done, total }),
@@ -944,13 +955,39 @@ handle('check:run', async (paragraphs, extraWords) => {
 
 handle('check:cancel', () => { if (checkCtl) checkCtl.abort(); return true; });
 
+// Словарь: у проекта свой список в project.json (он переезжает вместе с проектом), общий список в check.json остаётся запасным.
+function projectWordsNow() {
+  try { return currentDir ? project.projectWords(currentDir) : null; } catch { return null; }
+}
+
+function spellSession() { return win && !win.isDestroyed() ? win.webContents.session : null; }
+
 handle('check:addWord', (word) => {
   const w = String(word || '').trim();
-  if (!w) return false;
+  if (!w || w.length > dict.MAX_LEN) return false;
   const cfg = loadCheck();
   if (!cfg.words.includes(w)) { cfg.words.push(w); saveCheck(cfg); }
-  if (win && !win.isDestroyed()) win.webContents.session.addWordToSpellCheckerDictionary(w);
+  if (currentDir) project.setProjectWords(currentDir, dict.withWord(projectWordsNow(), cfg.words, w));
+  const ses = spellSession();
+  if (ses) ses.addWordToSpellCheckerDictionary(w);
   return true;
+});
+
+handle('check:getDictionary', () => dict.effective(projectWordsNow(), loadCheck().words));
+
+handle('check:setDictionary', (list) => {
+  const cfg = loadCheck();
+  const before = dict.effective(projectWordsNow(), cfg.words);
+  const next = dict.cleanWords(list);
+  if (currentDir) project.setProjectWords(currentDir, next);
+  cfg.words = dict.mergeShared(cfg.words, before, next);
+  saveCheck(cfg);
+  const ses = spellSession();
+  if (ses) {
+    for (const w of before) if (!next.includes(w)) ses.removeWordFromSpellCheckerDictionary(w);
+    for (const w of next) ses.addWordToSpellCheckerDictionary(w);
+  }
+  return next;
 });
 
 handle('check:ignoreRule', (ruleId) => {

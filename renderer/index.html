@@ -700,6 +700,12 @@
             <label for="setCheckServer">Свой сервер</label>
             <input id="setCheckServer" class="text" type="text" placeholder="по умолчанию languagetool.org" autocomplete="off" spellcheck="false" translate="no">
           </div>
+          <p class="hint">Мой словарь: слова, которые проверка не считает ошибками. Они хранятся вместе с проектом и появятся на других устройствах после синхронизации.</p>
+          <div id="dictList" class="dict-list"></div>
+          <div class="row">
+            <input id="dictInput" class="text" type="text" maxlength="80" placeholder="Добавить слово" autocomplete="off" spellcheck="false" aria-label="Добавить слово в словарь">
+            <button id="btnDictAdd" type="button" class="secondary small">Добавить</button>
+          </div>
           <div class="row">
             <button id="btnCheckReset" type="button" class="secondary small">Сбросить исключения и согласие</button>
           </div>
