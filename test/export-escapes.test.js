@@ -1,8 +1,12 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const zlib = require('zlib');
-const { mdToHtml, mdToText, chapterTitle } = require('../src/export');
+const project = require('../src/project');
+const { buildExport, mdToHtml, mdToText, chapterTitle } = require('../src/export');
 const { buildDocx, runs } = require('../src/docx');
 const { buildRtf } = require('../src/rtf');
 
@@ -39,16 +43,25 @@ test('экспорт: docx и rtf без обратной косой', () => {
   assert.ok(String(rtf).includes('~1~') && !String(rtf).includes('\\\\~'));
 });
 
-test('экспорт: номер перед названием главы не дублируется', () => {
-  assert.equal(chapterTitle('Начало', 0), '1. Начало');
+test('экспорт: номер перед названием главы по умолчанию не добавляется', () => {
+  assert.equal(chapterTitle('Начало', 0), 'Начало');
   assert.equal(chapterTitle('Глава 1', 0), 'Глава 1');
-  assert.equal(chapterTitle('Глава первая', 1), 'Глава первая');
-  assert.equal(chapterTitle('~1~', 0), '~1~');
-  assert.equal(chapterTitle('2. Ночь', 1), '2. Ночь');
   assert.equal(chapterTitle('Пролог', 0), 'Пролог');
-  assert.equal(chapterTitle('Chapter 3', 2), 'Chapter 3');
-  assert.equal(chapterTitle('Главный герой', 4), '5. Главный герой'); // «Глава…» только целым словом
-  assert.equal(chapterTitle('Часовщик', 0), '1. Часовщик');
+});
+
+test('экспорт: номер добавляется, если автор включил нумерацию', () => {
+  assert.equal(chapterTitle('Начало', 0, true), '1. Начало');
+  assert.equal(chapterTitle('Ночь', 4, true), '5. Ночь');
+});
+
+test('экспорт проекта: номера глав включаются параметром chapterNumbers', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kab-num-')), 'Роман');
+  const created = project.createProject(dir, 'Роман', { mode: 'novel' });
+  project.renameChapter(dir, created.chapters[0].id, 'Начало');
+  const plain = buildExport(dir, 'md', 'ru');
+  assert.ok(plain.includes('## Начало') && !plain.includes('1. Начало'));
+  const numbered = buildExport(dir, 'md', 'ru', { chapterNumbers: true });
+  assert.ok(numbered.includes('## 1. Начало'));
 });
 
 // Выравнивание абзаца: «-> текст <-» по центру, «-> текст ->» по правому краю.

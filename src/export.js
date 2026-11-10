@@ -9,9 +9,9 @@ const { t: tr } = require('./i18n');
 const { INDENT } = require('./clip');
 const { splitAlign, stripAlign } = require('./align');
 
-// Номер перед названием главы не добавляется, если в названии он уже есть: «Глава 1», «1. Начало», «~1~», «Пролог».
-const NUMBERED = /^[^\p{L}\d]*\d|^\s*(глава|часть|chapter|part|пролог|эпилог|prologue|epilogue)(?![\p{L}\d])/iu;
-const chapterTitle = (title, i) => (NUMBERED.test(title) ? title : `${i + 1}. ${title}`);
+// Порядковый номер нужен программе для учёта порядка глав. В готовый файл он попадает только по настройке
+// «Нумеровать главы при экспорте» (opts.chapterNumbers); в режиме «Рассказы» номеров нет.
+const chapterTitle = (title, i, numbered = false) => (numbered ? `${i + 1}. ${title}` : title);
 
 const escapeHtml = (s) => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -135,14 +135,14 @@ const INDENT_CSS = `
 
 /**
  * Собирает документ из всех глав. format: 'md' | 'txt' | 'html' | 'rtf' | 'docx' (Buffer). PDF печатается из html.
- * Заголовок главы: номер по порядку и название.
+ * Заголовок главы: название; с opts.chapterNumbers перед ним ставится номер по порядку.
  */
 function buildExport(dir, format, lang, opts = {}) {
   const view = project.openProject(dir);
   const stories = view.mode === 'stories';
   // Рассказы: название без номера; в сборнике из двух и более рассказов после титула идёт «Содержание».
   const chapters = view.chapters.map((c, i) => ({
-    title: stories ? c.title : chapterTitle(c.title, i),
+    title: stories ? c.title : chapterTitle(c.title, i, !!opts.chapterNumbers),
     text: project.readChapter(dir, c.id, { track: false }).trim(),
   }));
   const tocHeading = tr('Содержание');
