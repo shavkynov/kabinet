@@ -8,7 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, '../renderer/app/36-dav.js')
 function setup(result = { linked: true, lastSync: 1 }) {
   const calls = [], messages = [];
   const ctx = vm.createContext({
-    project: {}, dirty: false, noteDirty: false, cmtDirty: false, cmDirty: false, p2: { dirty: false },
+    project: {}, dirty: false, failedWrite: null, noteDirty: false, cmtDirty: false, cmDirty: false, p2: { dirty: false },
     t: (s, v) => s.replace('{0}', v), tdom: (s) => s,
     setStatus: (kind, text) => messages.push({ kind, text }),
     showError: (text) => messages.push({ kind: 'error', text }),

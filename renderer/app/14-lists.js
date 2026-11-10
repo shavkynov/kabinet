@@ -86,13 +86,16 @@ function showNothing() {
 async function openDoc(kind, id, keepView) {
   if (id === currentId && kind === currentKind) return;
   const token = ++openToken;
-  await flush(); // сохраняем предыдущий документ
+  if (!(await flush())) { // предыдущий документ не записался: остаёмся в нём, текст не потеряется
+    setStatus('error', 'Не удалось сохранить главу. Переход отменён, текст остался на экране');
+    return;
+  }
   if (token !== openToken) return;
   try {
     const text = kind === 'chapter' ? await api.readChapter(id) : await api.readItem(kind, id);
     if (token !== openToken) return;
     if (dirty) {
-      await flush(); // пока читали, в старом документе успели напечатать
+      if (!(await flush())) return; // пока читали, в старом документе успели напечатать
       if (token !== openToken) return;
     }
     if (kind === 'chapter' && id === p2.id) await closePane2(); // одна глава не может быть открыта в двух местах
@@ -157,6 +160,7 @@ async function deleteDoc(kind, id) {
     project = updated;
     if (lastSelected[kind] === id) lastSelected[kind] = null;
     if (kind !== 'chapter') refreshIndex();
+    if (failedWrite && failedWrite.id === id && failedWrite.kind === kind) failedWrite = null; // удалённый документ не воскрешаем повтором записи
     const wasOpen = currentId === id && currentKind === kind;
     if (wasOpen) {
       currentId = null;

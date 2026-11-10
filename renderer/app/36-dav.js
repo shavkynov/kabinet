@@ -105,7 +105,7 @@ function davBackdropClose(ev) {
 // F5 и пункт меню: проверяем состояние обмена, а не только успешный ответ IPC.
 let davQuickBusy = false;
 function davHasUnsavedChanges() {
-  return dirty || noteDirty || cmtDirty || cmDirty || p2.dirty;
+  return dirty || !!failedWrite || noteDirty || cmtDirty || cmDirty || p2.dirty;
 }
 async function davQuickSync() {
   if (davQuickBusy) return;

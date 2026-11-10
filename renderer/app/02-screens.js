@@ -105,7 +105,7 @@ async function openRecent(it) {
 }
 
 async function openProjectFromDialog() {
-  await flush();
+  if (!(await flush())) return;
   try {
     const proj = await api.openProjectDialog();
     if (proj) enterProject(proj);
@@ -125,7 +125,7 @@ function askNewProject(mode) {
 }
 
 async function createProjectFromName(name, mode) {
-  await flush();
+  if (!(await flush())) return;
   try {
     const proj = await api.createProject(name, mode);
     if (proj) enterProject(proj);
@@ -135,7 +135,7 @@ async function createProjectFromName(name, mode) {
 }
 
 async function leaveProject() {
-  await flush();
+  if (!(await flush())) { setStatus('error', 'Не удалось сохранить главу. Проект не закрыт, текст остался на экране'); return; }
   try {
     await api.closeProject();
   } catch (err) {

@@ -229,6 +229,8 @@ module.exports = {
   "Синхронизация включена": "Sync turned on",
   "Мой словарь: слова, которые проверка не считает ошибками. Они хранятся вместе с проектом и появятся на других устройствах после синхронизации.": "My dictionary: words the check does not treat as mistakes. They are stored with the project and appear on other devices after syncing.",
   "Абзац по центру": "Center paragraph",
+  "Не удалось сохранить главу. Проект не закрыт, текст остался на экране": "Could not save the chapter. The project was not closed; your text is still on screen",
+  "Не удалось сохранить главу. Переход отменён, текст остался на экране": "Could not save the chapter. Switching was cancelled; your text is still on screen",
   "Абзац по правому краю": "Right-align paragraph",
   "Добавить слово": "Add a word",
   "Добавить слово в словарь": "Add a word to the dictionary",
