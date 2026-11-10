@@ -102,20 +102,43 @@ function davBackdropClose(ev) {
   if (outside) davClose();
 }
 
-// F5 и пункт меню «Синхронизировать сейчас»: без окна, результат в строке состояния. Если облако не подключено, открывается окно.
+// F5 и пункт меню: проверяем состояние обмена, а не только успешный ответ IPC.
 let davQuickBusy = false;
+function davHasUnsavedChanges() {
+  return dirty || noteDirty || cmtDirty || cmDirty || p2.dirty;
+}
 async function davQuickSync() {
   if (davQuickBusy) return;
-  let st = { linked: false };
-  try { st = await api.dav('status'); } catch { /* покажем окно */ }
-  if (!st.linked) { openSyncDialog(); return; }
   davQuickBusy = true;
+  const activeProject = project;
   try {
+    const st = await api.dav('status');
+    if (project !== activeProject) return;
+    if (!st || !st.linked) { await openSyncDialog(); return; }
     await flush();
-    await api.dav('syncNow');
-    setStatus('ok', t('Синхронизировано'));
+    if (project !== activeProject) return;
+    if (davHasUnsavedChanges()) {
+      setStatus('error', t('Не удалось сохранить! Повтор через 3 с…'));
+      return;
+    }
+    if (st.busy) { setStatus('ok', t('Идёт обмен…')); return; }
+    const result = await api.dav('syncNow');
+    if (project !== activeProject) return;
+    if (!result || !result.linked) {
+      setStatus('error', t('Проект не связан с сетевой папкой.'));
+    } else if (result.error) {
+      setStatus('error', t('Синхронизация: {0}', tdom(result.error)));
+    } else if (result.busy) {
+      setStatus('ok', t('Идёт обмен…'));
+    } else if (result.conflict) {
+      setStatus('error', t('Был конфликт: чужая версия текста лежит в папке «Конфликты» проекта.'));
+    } else if (result.lastSync > 0 && !davHasUnsavedChanges()) {
+      setStatus('ok', t('Синхронизировано'));
+    } else if (!result.lastSync) {
+      setStatus('error', t('Ещё не обновлялось.'));
+    }
   } catch (e) {
-    showError(e.message);
+    if (project === activeProject) showError(e.message);
   } finally {
     davQuickBusy = false;
   }
