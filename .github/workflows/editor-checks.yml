@@ -18,7 +18,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs || true
+      - run: timeout 300 xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs || true
       - name: Result
         run: |
           node -e "
