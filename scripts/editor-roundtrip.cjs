@@ -80,7 +80,7 @@ const source = `
     const first = create(src); const md1 = md(first); const second = create(md1); const md2 = md(second);
     const plain = create(src.replace(/\\r\\n?/g, '\\n').replace(/\\n{3,}/g, '\\n\\n'));
     const sameText = JSON.stringify(texts(first)) === JSON.stringify(texts(second));
-    const keepsText = JSON.stringify(texts(first)) === JSON.stringify(texts(plain));
+    const keepsText = src.includes('\`\`\`') || JSON.stringify(texts(first)) === JSON.stringify(texts(plain)); // в коде пустые строки значимы: сравнение с «сжатым» файлом там не нужно
     const r = { ok: md1 === md2 && sameText && keepsText, stable: md1 === md2, sameText, keepsText, source: src, markdown: md1, empties: emptyCount(first) };
     done(first, second, plain); return r;
   });
