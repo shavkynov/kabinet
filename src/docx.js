@@ -1,5 +1,7 @@
 'use strict';
 
+const { exportLines } = require('./export-spacing');
+
 // Экспорт в DOCX без сторонних пакетов: минимальный OOXML-документ, упакованный своим ZIP.
 // Из Markdown редактора берутся абзацы, заголовки, цитаты, списки, разделитель, жирный и курсив.
 
@@ -112,7 +114,7 @@ function para(style, lines, opts = {}) {
 }
 
 function mdToBody(md) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  const lines = exportLines(md);
   const out = [];
   let buf = [];
   let kind = null; // 'p' | 'q'
@@ -125,6 +127,7 @@ function mdToBody(md) {
     kind = null;
   };
   for (const line of lines) {
+    if (line === null) { flush(); out.push(para(null, [])); continue; }
     let m;
     if (/^\s*$/.test(line)) flush();
     else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); out.push(para('Heading2', [m[2]])); }

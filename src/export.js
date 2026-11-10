@@ -1,5 +1,7 @@
 'use strict';
 
+const { exportLines } = require('./export-spacing');
+
 // Экспорт глав проекта одним файлом: Markdown, обычный текст, RTF, HTML (из него же печатается PDF).
 
 const project = require('./project');
@@ -27,7 +29,7 @@ function inline(text) {
 
 /** Небольшой преобразователь Markdown редактора (абзацы, заголовки, цитаты, списки, разделитель). */
 function mdToHtml(md) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  const lines = exportLines(md);
   const out = [];
   let para = [];
   let list = null; // 'ul' | 'ol'
@@ -52,6 +54,7 @@ function mdToHtml(md) {
   const flushAll = () => { flushPara(); flushList(); flushQuote(); };
 
   for (const line of lines) {
+    if (line === null) { flushAll(); out.push('<p class="empty-line" style="margin:0;text-indent:0"><br></p>'); continue; }
     let m;
     if (/^\s*$/.test(line)) {
       flushAll();
