@@ -1,4 +1,4 @@
-name: Verify empty paragraph fix and build preview
+name: Verify editor and build test preview
 on:
   push:
     branches: [claude/bugreport-fixes]
@@ -10,82 +10,24 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    outputs:
-      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: claude/bugreport-fixes
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Add boundary regression cases
-        shell: python
-        run: |
-          from pathlib import Path
-          p = Path('scripts/editor-roundtrip.cjs')
-          text = p.read_text(encoding='utf-8')
-          anchor = '      return results;'
-          if text.count(anchor) != 1 or 'empty-boundary-' in text:
-              raise RuntimeError('Unexpected editor harness; refusing overwrite')
-          extra = """      for (const edge of ['leading', 'trailing', 'only']) {
-                  for (let count = 1; count <= 3; count++) {
-                    const blanks = Array.from({ length: count }, () => paragraph());
-                    const content = edge === 'leading' ? [...blanks, paragraph('B')] : edge === 'trailing' ? [paragraph('A'), ...blanks] : blanks;
-                    const e = create({ type: 'doc', content });
-                    const markdown = e.storage.markdown.getMarkdown();
-                    const reopened = create(markdown);
-                    const actual = emptyCount(reopened);
-                    results.push({ name: 'empty-boundary-' + edge + '-' + count, ok: actual === count, expected: count, actual, markdown });
-                    reopened.destroy(); e.destroy();
-                  }
-                }
-          """
-          p.write_text(text.replace(anchor, extra + anchor), encoding='utf-8')
       - run: npm ci
       - run: npm test
       - run: node --test test/export-blank-lines.test.js test/export-target.test.js test/preview-export.test.js
       - run: npm run check
       - run: npm run build
-      - name: Run real editor and preserve diagnostic failures
-        shell: bash
-        run: |
-          rm -f ci-diagnostics/editor-roundtrip.json
-          set +e
-          xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs > /tmp/kab-editor.log 2>&1
-          code=$?
-          set -e
-          cat /tmp/kab-editor.log
-          EDITOR_EXIT="$code" python - <<'PY'
-          import json, os
-          from pathlib import Path
-          p = Path('ci-diagnostics/editor-roundtrip.json')
-          try:
-              report = json.loads(p.read_text())
-          except (OSError, ValueError):
-              report = {'status': 'error', 'error': 'Electron did not produce a valid report', 'results': []}
-          report['processExitCode'] = int(os.environ['EDITOR_EXIT'])
-          if report['processExitCode'] != 0 or report.get('status') != 'complete':
-              report['status'] = 'error'
-              report['launchLog'] = Path('/tmp/kab-editor.log').read_text(errors='replace')[-12000:]
-          p.parent.mkdir(parents=True, exist_ok=True)
-          p.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          PY
-      - name: Publish regression harness and report
-        id: commit
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add scripts/editor-roundtrip.cjs ci-diagnostics/editor-roundtrip.json
-          git commit -m 'test: cover empty paragraph boundaries and record roundtrip verification'
-          git push origin HEAD:claude/bugreport-fixes
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs
       - name: Require all eighteen editor checks to pass
-        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); if(r.status!=='complete'||r.processExitCode!==0||!Array.isArray(r.results)||r.results.length!==18||r.results.some(x=>x.ok!==true)){console.error(JSON.stringify(r,null,2));process.exit(1)}"
+        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); if(r.status!=='complete'||!Array.isArray(r.results)||r.results.length!==18||r.results.some(x=>x.ok!==true)){console.error(JSON.stringify(r,null,2));process.exit(1)}"
   build:
     needs: verify
     timeout-minutes: 35
@@ -95,18 +37,22 @@ jobs:
         include:
           - os: windows-latest
             name: windows-x64
-            cmd: npx electron-builder --win portable --x64 --publish never -c.win.signAndEditExecutable=false -c.artifactName='Kabinet-Test-${version}-win-x64.${ext}'
+            ext: exe
+            cmd: npx electron-builder --win portable --x64 --publish never -c.win.signAndEditExecutable=false -c.directories.output=preview-dist -c.artifactName='Kabinet-Test-${version}-win-x64.${ext}' -c.portable.artifactName='Kabinet-Test-${version}-win-x64.${ext}'
           - os: macos-15
             name: mac-arm64
-            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-arm64.${ext}'
+            ext: dmg
+            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.directories.output=preview-dist -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-arm64.${ext}'
           - os: macos-15
             name: mac-intel
-            cmd: npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-intel.${ext}'
+            ext: dmg
+            cmd: npx electron-builder --mac dmg --x64 --publish never -c.directories.output=preview-dist -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-intel.${ext}'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.sha }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -117,10 +63,28 @@ jobs:
         env:
           KABINET_ADHOC: '1'
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify binary and record source hash
+        shell: python
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          BUILD_PLATFORM: ${{ matrix.name }}
+          EXPECTED_EXT: ${{ matrix.ext }}
+        run: |
+          import hashlib, json, os
+          from pathlib import Path
+          folder = Path('preview-dist')
+          files = sorted(folder.glob('*.' + os.environ['EXPECTED_EXT']))
+          if len(files) != 1 or files[0].stat().st_size == 0:
+              found = [str(p) for p in folder.rglob('*') if p.is_file()]
+              raise RuntimeError('Expected one nonempty preview binary; found: ' + repr(found))
+          binary = files[0]
+          manifest = {'sourceCommit': os.environ['SOURCE_SHA'], 'platform': os.environ['BUILD_PLATFORM'], 'file': binary.name, 'bytes': binary.stat().st_size, 'sha256': hashlib.file_digest(binary.open('rb'), 'sha256').hexdigest(), 'releasePublished': False, 'isolatedUserData': False}
+          (folder / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
       - uses: actions/upload-artifact@v4
         with:
-          name: kabinet-test-${{ matrix.name }}-${{ needs.verify.outputs.sha }}
+          name: kabinet-test-${{ matrix.name }}-${{ github.sha }}
           path: |
-            dist/Kabinet-Test-*.exe
-            dist/Kabinet-Test-*.dmg
+            preview-dist/*.exe
+            preview-dist/*.dmg
+            preview-dist/build-manifest.json
           if-no-files-found: error
