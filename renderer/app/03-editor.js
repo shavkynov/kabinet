@@ -37,7 +37,8 @@ function initEditor() {
   editor = new Editor({
     element: $('#editor'),
     extensions: [
-      StarterKit,
+      StarterKit.configure({ paragraph: false }),
+      AlignParagraph,
       NameLinks,
       Comments,
       TypeAnim.configure({ isEnabled: () => settings.typeAnim }),

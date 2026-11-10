@@ -5,6 +5,7 @@
 // Всё, что не ASCII, пишется как \uN? (Word, LibreOffice, TextEdit читают так без кодовых страниц). Чтение RTF находится в src/import.js.
 
 const { runs } = require('./docx');
+const { splitAlign } = require('./align');
 
 /** Текст → безопасная для RTF строка: служебные знаки экранируются, не-ASCII превращается в \uN?. */
 function esc(text) {
@@ -44,7 +45,9 @@ function mdToRtf(md) {
   const flush = () => {
     if (buf.length) {
       const text = buf.map(inline).join('\\line ');
-      out.push(kind === 'q' ? para('\\s4\\li709\\fi0\\sl360\\slmult1\\i', text) : para(BODY, text));
+      const al = kind === 'p' ? splitAlign(buf) : null;
+      if (al) out.push(para(`${al.align === 'right' ? '\\qr' : '\\qc'}\\fi0\\sl360\\slmult1\\sa0`, al.lines.map(inline).join('\\line ')));
+      else out.push(kind === 'q' ? para('\\s4\\li709\\fi0\\sl360\\slmult1\\i', text) : para(BODY, text));
     }
     buf = [];
     kind = null;

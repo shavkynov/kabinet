@@ -8,6 +8,8 @@ const TOOLBAR = {
   quote: { active: () => editor.isActive('blockquote'), run: (c) => c.toggleBlockquote() },
   bullet: { active: () => editor.isActive('bulletList'), run: (c) => c.toggleBulletList() },
   ordered: { active: () => editor.isActive('orderedList'), run: (c) => c.toggleOrderedList() },
+  alignC: { active: () => editor.getAttributes('paragraph').textAlign === 'center', run: (c) => toggleAlign(editor, c, 'center') },
+  alignR: { active: () => editor.getAttributes('paragraph').textAlign === 'right', run: (c) => toggleAlign(editor, c, 'right') },
   rule: { active: () => false, run: (c) => c.setHorizontalRule() },
 };
 

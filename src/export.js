@@ -7,6 +7,7 @@ const { buildDocx } = require('./docx');
 const { buildRtf } = require('./rtf');
 const { t: tr } = require('./i18n');
 const { INDENT } = require('./clip');
+const { splitAlign, stripAlign } = require('./align');
 
 // Номер перед названием главы не добавляется, если в названии он уже есть: «Глава 1», «1. Начало», «~1~», «Пролог».
 const NUMBERED = /^[^\p{L}\d]*\d|^\s*(глава|часть|chapter|part|пролог|эпилог|prologue|epilogue)(?![\p{L}\d])/iu;
@@ -33,7 +34,11 @@ function mdToHtml(md) {
   let quote = [];
 
   const flushPara = () => {
-    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    if (para.length) {
+      const al = splitAlign(para);
+      if (al) out.push(`<p class="${al.align}" style="text-align:${al.align === 'center' ? 'center' : 'right'};text-indent:0">${al.lines.map(inline).join('<br>')}</p>`);
+      else out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    }
     para = [];
   };
   const flushList = () => {
@@ -80,10 +85,11 @@ function mdToHtml(md) {
 function mdToText(md, o = {}) {
   let start = true; // строка начинает новый блок
   let skip = false; // предыдущий блок: заголовок или цитата, красной строки после них нет
-  return String(md).replace(/\r\n?/g, '\n').split('\n').map((line) => {
+  return stripAlign(String(md).replace(/\r\n?/g, '\n').split('\n')).map((line) => {
     if (/^\s*$/.test(line)) { start = true; return line; }
     const first = start;
     start = false;
+
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { skip = false; return '***'; }
     const heading = /^#{1,6}\s/.test(line);
     const quote = /^>/.test(line);

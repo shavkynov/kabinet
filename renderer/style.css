@@ -305,6 +305,8 @@ body.mode-stories .stories-only.block { display: block !important; }
 .ProseMirror blockquote { margin: 0 0 .85em; padding-left: 1em; border-left: 3px solid var(--line); color: var(--muted); }
 .ProseMirror ul, .ProseMirror ol { padding-left: 1.5em; margin: 0 0 .85em; }
 /* разделитель выглядит как «***» (так же он копируется в текст, см. clipboardText в 03-editor.js), а не как полоса */
+.ProseMirror p[data-align="center"] { text-align: center; text-indent: 0; }
+.ProseMirror p[data-align="right"] { text-align: right; text-indent: 0; }
 .ProseMirror hr { border: none; height: auto; overflow: visible; margin: 1.2em 0; text-align: center; color: var(--muted); }
 .ProseMirror hr::before { content: "***"; letter-spacing: .3em; padding-left: .3em; }
 .ProseMirror hr.ProseMirror-selectednode { background: var(--sel); border-radius: 4px; }

@@ -14,6 +14,7 @@ import { HiddenMarks, refreshMarks } from './marks.js';
 import { Comments, commentRanges, setCommentRanges, addCommentRange, removeCommentRange, setActiveComment } from './comments.js';
 import { TextAnalysis, refreshAnalysis, scanTense, scanRhythm, analysisRanges, analysisAt, stepIndex, AN_CATS, AN_NAV_CATS } from './analysis.js';
 import { Typography, fixDocTypography } from './typo.js';
+import { AlignParagraph, toggleAlign } from './align.js';
 import { Slice, Fragment } from '@tiptap/pm/model';
 import { isOfficeHtml, officeTextToParagraphs } from '../src/paste.js';
 import { clipboardPlain } from '../src/clip.js';

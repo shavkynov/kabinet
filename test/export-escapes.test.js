@@ -50,3 +50,31 @@ test('экспорт: номер перед названием главы не �
   assert.equal(chapterTitle('Главный герой', 4), '5. Главный герой'); // «Глава…» только целым словом
   assert.equal(chapterTitle('Часовщик', 0), '1. Часовщик');
 });
+
+// Выравнивание абзаца: «-> текст <-» по центру, «-> текст ->» по правому краю.
+const { splitAlign, stripAlign } = require('../src/align');
+
+test('выравнивание: метки распознаются только в начале и в конце абзаца', () => {
+  assert.deepEqual(splitAlign(['-> Глава <-']), { align: 'center', lines: ['Глава'] });
+  assert.deepEqual(splitAlign(['-> Эпиграф ->']), { align: 'right', lines: ['Эпиграф'] });
+  assert.deepEqual(splitAlign(['-> строка 1', 'строка 2 <-']), { align: 'center', lines: ['строка 1', 'строка 2'] });
+  assert.equal(splitAlign(['-> без конца']), null);
+  assert.equal(splitAlign(['обычный текст']), null);
+  assert.equal(splitAlign(['->  <-']), null);
+});
+
+test('выравнивание: html, txt, docx и rtf', () => {
+  const md = 'Обычный.\n\n-> По центру <-\n\n-> Справа ->';
+  const html = mdToHtml(md);
+  assert.ok(html.includes('text-align:center') && html.includes('>По центру</p>'));
+  assert.ok(html.includes('text-align:right') && html.includes('>Справа</p>'));
+  assert.ok(!/-&gt;|&lt;-/.test(html));
+  assert.equal(mdToText(md), 'Обычный.\n\nПо центру\n\nСправа');
+  assert.deepEqual(stripAlign(['-> а <-', '', 'б']), ['а', '', 'б']);
+  const rtf = buildRtf('Книга', [{ title: 'Глава', text: md }]);
+  assert.ok(rtf.includes('\\qc\\fi0') && rtf.includes('\\qr\\fi0'));
+  assert.ok(!rtf.includes('<-'));
+  const body = require('../src/docx').mdToBody(md);
+  assert.ok(body.includes('<w:jc w:val="center"/>') && body.includes('<w:jc w:val="right"/>'));
+  assert.ok(!body.includes('&lt;-') && !body.includes('-&gt;'));
+});
