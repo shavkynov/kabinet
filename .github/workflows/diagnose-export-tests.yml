@@ -60,7 +60,7 @@ jobs:
                       lines.append('JUnit parsing failed: ' + str(error))
               else:
                   lines.append('JUnit report was not produced. No raw process output or environment variables are published.')
-          report = Path('docs/ci/export-test-diagnostics.md')
+          report = Path('ci-diagnostics/export-test-diagnostics.md')
           report.parent.mkdir(parents=True, exist_ok=True)
           report.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           Path('/tmp/kabinet-diagnostic-exit-code').write_text(str(code))
@@ -68,7 +68,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/ci/export-test-diagnostics.md
+          git add ci-diagnostics/export-test-diagnostics.md
           if ! git diff --cached --quiet; then
             git commit -m 'ci: record export integration test failures'
             git push origin HEAD:claude/bugreport-fixes
