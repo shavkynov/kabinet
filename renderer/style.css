@@ -1194,6 +1194,10 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 
 /* ---------- окно «Синхронизация» (WebDAV) ---------- */
 #syncDialog { width: 460px; }
+#syncDialog .sync-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+#syncDialog .sync-head h2 { margin: 0; }
+#syncDialog button.sync-x { flex: none; width: 28px; height: 28px; padding: 0; margin: -4px -6px 0 0; font-size: 20px; line-height: 1; border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
+#syncDialog button.sync-x:hover { color: var(--text, inherit); background: rgba(128, 128, 128, .15); }
 #syncDialog .sync-line { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
 #syncDialog .sync-line.muted { color: var(--muted); }
 #syncDialog .sync-line.err { color: #e5484d; }

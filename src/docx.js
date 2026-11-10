@@ -85,7 +85,7 @@ function runs(text) {
   const s = String(text);
   for (let k = 0; k < s.length; k += 1) {
     const ch = s[k];
-    if (ch === '\\' && /[*_#>\-\\]/.test(s[k + 1] || '')) { buf += s[k + 1]; k += 1; continue; }
+    if (ch === '\\' && /[!-\/:-@\[-`{-~]/.test(s[k + 1] || '')) { buf += s[k + 1]; k += 1; continue; } // экранирование Markdown: \~ \[ \] \` \* \_ \\ и т.п.
     if (ch === '*' && s[k + 1] === '*') { push(); b = !b; k += 1; continue; }
     if (ch === '*' || (ch === '_' && !/\w/.test(s[k - 1] || '') !== !/\w/.test(s[k + 1] || ''))) { push(); i = !i; continue; }
     buf += ch;

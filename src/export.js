@@ -8,15 +8,20 @@ const { buildRtf } = require('./rtf');
 const { t: tr } = require('./i18n');
 const { INDENT } = require('./clip');
 
+// Номер перед названием главы не добавляется, если в названии он уже есть: «Глава 1», «1. Начало», «~1~», «Пролог».
+const NUMBERED = /^[^\p{L}\d]*\d|^\s*(глава|часть|chapter|part|пролог|эпилог|prologue|epilogue)(?![\p{L}\d])/iu;
+const chapterTitle = (title, i) => (NUMBERED.test(title) ? title : `${i + 1}. ${title}`);
+
 const escapeHtml = (s) => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function inline(text) {
   let t = escapeHtml(text);
-  t = t.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
+  t = t.replace(/(?<!\\)\*\*([^*\n]+?)(?<!\\)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^*\w\\])\*([^*\n]+?)(?<!\\)\*(?!\*)/g, '$1<em>$2</em>');
   t = t.replace(/(^|[^\w])_([^_\n]+?)_(?!\w)/g, '$1<em>$2</em>');
-  return t.replace(/\\([*_#>\-\\])/g, '$1');
+  // экранирование Markdown (редактор пишет \~ \[ \] \` \* \_ \\ …); &, <, > и " уже превращены в сущности
+  return t.replace(/\\(&(?:amp|lt|gt|quot);|[!#$%'()*+,\-./:;=?@[\\\]^_`{|}~])/g, '$1');
 }
 
 /** Небольшой преобразователь Markdown редактора (абзацы, заголовки, цитаты, списки, разделитель). */
@@ -87,10 +92,10 @@ function mdToText(md, o = {}) {
       .replace(/^#{1,6}\s+/, '')
       .replace(/^>\s?/, '    ')
       .replace(/^\s*[-*+]\s+/, '— ')
-      .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
-      .replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, '$1$2')
+      .replace(/(?<!\\)\*\*([^*\n]+?)(?<!\\)\*\*/g, '$1')
+      .replace(/(^|[^*\w\\])\*([^*\n]+?)(?<!\\)\*(?!\*)/g, '$1$2')
       .replace(/(^|[^\w])_([^_\n]+?)_(?!\w)/g, '$1$2')
-      .replace(/\\([*_#>\-\\])/g, '$1');
+      .replace(/\\([!-\/:-@[-`{-~])/g, '$1'); // экранирование Markdown: \~ \[ \] \` и т.п.
     if (first && !heading && !quote && !list) {
       if (o.indent && !skip && /^\S/.test(text)) text = INDENT + text; // красная строка при режиме «Красная строка»
       skip = false;
@@ -131,7 +136,7 @@ function buildExport(dir, format, lang, opts = {}) {
   const stories = view.mode === 'stories';
   // Рассказы: название без номера; в сборнике из двух и более рассказов после титула идёт «Содержание».
   const chapters = view.chapters.map((c, i) => ({
-    title: stories ? c.title : `${i + 1}. ${c.title}`,
+    title: stories ? c.title : chapterTitle(c.title, i),
     text: project.readChapter(dir, c.id, { track: false }).trim(),
   }));
   const tocHeading = tr('Содержание');
@@ -164,4 +169,4 @@ function buildExport(dir, format, lang, opts = {}) {
   throw new Error('Неизвестный формат экспорта.');
 }
 
-module.exports = { buildExport, mdToHtml, mdToText };
+module.exports = { buildExport, mdToHtml, mdToText, chapterTitle };

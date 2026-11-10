@@ -18,6 +18,7 @@ function davBtn(text, onClick, cls = 'secondary') {
 
 function davShow(...nodes) {
   const body = $('#syncBody');
+  delete $('#syncDialog').dataset.home; // «закрыть щелчком снаружи» включает только главная страница (davHome)
   body.textContent = '';
   body.append(...nodes);
   const first = body.querySelector('input, button.primary');
@@ -45,7 +46,12 @@ async function openSyncDialog(mode) {
 async function davHome() {
   let st = { linked: false };
   try { st = await api.dav('status'); } catch { /* покажем как «не подключено» */ }
-  const nodes = [davEl('h2', '', t('Синхронизация'))];
+  const head = davEl('div', 'sync-head');
+  const x = davBtn('×', davClose, 'sync-x');
+  x.setAttribute('aria-label', t('Закрыть'));
+  x.title = t('Закрыть');
+  head.append(davEl('h2', '', t('Синхронизация')), x);
+  const nodes = [head];
   const actions = davEl('div', 'dialog-actions');
   if (st.linked) {
     nodes.push(davEl('p', 'sync-line', t('Проект синхронизируется с «{0}», папка {1}.', st.label, st.root)));
@@ -83,6 +89,36 @@ async function davHome() {
   }
   nodes.push(actions);
   davShow(...nodes);
+  $('#syncDialog').dataset.home = '1';
+}
+
+// Щелчок за пределами окна закрывает только главную страницу (статус): на шагах с логином и паролем окно
+// не закрывается случайным щелчком, чтобы не потерять набранное.
+function davBackdropClose(ev) {
+  const dlg = $('#syncDialog');
+  if (ev.target !== dlg || !dlg.dataset.home) return;
+  const r = dlg.getBoundingClientRect();
+  const outside = ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+  if (outside) davClose();
+}
+
+// F5 и пункт меню «Синхронизировать сейчас»: без окна, результат в строке состояния. Если облако не подключено, открывается окно.
+let davQuickBusy = false;
+async function davQuickSync() {
+  if (davQuickBusy) return;
+  let st = { linked: false };
+  try { st = await api.dav('status'); } catch { /* покажем окно */ }
+  if (!st.linked) { openSyncDialog(); return; }
+  davQuickBusy = true;
+  try {
+    await flush();
+    await api.dav('syncNow');
+    setStatus('ok', t('Синхронизировано'));
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    davQuickBusy = false;
+  }
 }
 
 // ----- шаг 1: сервис -----
@@ -248,6 +284,8 @@ async function davOpen(root) {
 
 function wireDav() {
   api.onOpenSync(() => openSyncDialog());
+  if (api.onSyncNow) api.onSyncNow(() => davQuickSync()); // в Android-оболочке события нет
+  $('#syncDialog').addEventListener('click', davBackdropClose);
   api.onDavEvent((e) => {
     if (!e) return;
     if (e.type === 'conflict') setStatus('error', t('Этот текст изменили на другом устройстве. Чужая версия сохранена в папке «Конфликты».'));

@@ -227,6 +227,7 @@ module.exports = {
   "В этой папке уже есть проект": "This folder already has a project",
   "«Соединить»: правки с обеих сторон сохранятся, спорные тексты уйдут в папку «Конфликты». «Заменить папку»: в облако запишется проект с этого компьютера, а то, что там лежало, попадёт в «Конфликты» и не пропадёт.": "“Merge”: changes from both sides are kept, disputed texts go to the “Конфликты” folder. “Replace folder”: the project from this computer is written to the cloud, and what was there goes to “Конфликты” and is not lost.",
   "Синхронизация включена": "Sync turned on",
+  "Синхронизировано": "Synced",
   "Синхронизация: {0}": "Sync: {0}",
   "Проект, который лежит в облаке (Яндекс Диск, Nextcloud и другие по WebDAV)": "A project stored in the cloud (Yandex Disk, Nextcloud and others via WebDAV)",
   "Компьютер": "Computer",
