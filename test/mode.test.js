@@ -37,7 +37,7 @@ test('режим «Рассказы»: создание, названия по �
   assert.equal(project.setProjectMode(dir, 'что угодно').mode, 'novel');
 });
 
-test('экспорт рассказов: названия без номеров и содержание; роман: нумерация как раньше', () => {
+test('экспорт: рассказы без номеров; роман без номеров по умолчанию, с номерами по явному выбору', () => {
   const dir = tmp();
   const p = project.createProject(dir, 'Сборник', { mode: 'stories' });
   project.writeChapter(dir, p.chapters[0].id, 'Первый текст.');
@@ -51,6 +51,9 @@ test('экспорт рассказов: названия без номеров 
   assert.match(md, /- Лисья нора/);
   assert.match(md, /## Лисья нора/);
   assert.doesNotMatch(md, /## 2\./);
+  const numberedStories = buildExport(dir, 'md', 'ru', { chapterNumbers: true });
+  assert.match(numberedStories, /^## Лисья нора$/m);
+  assert.doesNotMatch(numberedStories, /^## 2\. Лисья нора$/m);
   const html = buildExport(dir, 'html');
   assert.match(html, /<body class="stories">/);
   assert.match(html, /<nav class="toc">/);
@@ -58,7 +61,10 @@ test('экспорт рассказов: названия без номеров 
 
   project.setProjectMode(dir, 'novel');
   const novel = buildExport(dir, 'md');
-  assert.match(novel, /## 2\. Лисья нора/);
+  assert.match(novel, /^## Лисья нора$/m);
+  assert.doesNotMatch(novel, /^## 2\. Лисья нора$/m);
+  const numbered = buildExport(dir, 'md', 'ru', { chapterNumbers: true });
+  assert.match(numbered, /^## 2\. Лисья нора$/m);
   assert.doesNotMatch(novel, /Содержание/);
 });
 

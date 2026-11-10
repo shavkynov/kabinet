@@ -21,6 +21,7 @@ const { retrying } = require('./src/net-retry');
 const syncguard = require('./src/syncguard');
 const { createWatcher } = require('./src/watcher');
 const exporter = require('./src/export');
+const exportTarget = require('./src/export-target');
 const importer = require('./src/import');
 const { writeFileAtomic } = require('./src/fsutil');
 const langcheck = require('./src/langcheck');
@@ -454,9 +455,16 @@ handle('project:replace', (find, repl, dry) => {
 handle('project:export', async (opts) => {
   const dir = requireDir();
   const exportOpts = { indent: !!(opts && opts.indent) }; // красная строка: решает режим «Абзацы» в окне
+  let defaultPath = path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`);
+  try {
+    defaultPath = exportTarget.defaultPath(app.getPath('userData'), dir, app.getPath('documents'));
+  } catch (err) {
+    console.error('export destination read:', err);
+    dialog.showErrorBox(t('Экспорт проекта'), t('Не удалось прочитать настройки места экспорта. Будет предложена папка «Документы».') + '\n' + String(err.message || err));
+  }
   const res = await dialog.showSaveDialog(win, {
     title: t('Экспорт проекта'),
-    defaultPath: path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`),
+    defaultPath,
     filters: [
       { name: 'PDF', extensions: ['pdf'] },
       { name: 'Word (DOCX)', extensions: ['docx'] },
@@ -493,6 +501,12 @@ handle('project:export', async (opts) => {
     fs.writeFileSync(file, exporter.buildExport(dir, 'docx', i18n.getLang()));
   } else {
     fs.writeFileSync(file, exporter.buildExport(dir, ext, i18n.getLang(), exportOpts), 'utf8');
+  }
+  try {
+    exportTarget.remember(app.getPath('userData'), dir, file);
+  } catch (err) {
+    console.error('export destination write:', err);
+    dialog.showErrorBox(t('Экспорт проекта'), t('Файл экспортирован, но запомнить папку и формат не удалось.') + '\n' + String(err.message || err));
   }
   shell.showItemInFolder(file);
   return file;
