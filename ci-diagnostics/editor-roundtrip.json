@@ -4,24 +4,24 @@
   "results": [
     {
       "name": "empty-paragraph-roundtrip-1",
-      "ok": false,
+      "ok": true,
       "expected": 1,
-      "actual": 0,
-      "markdown": "A\n\nB"
+      "actual": 1,
+      "markdown": "A\n\n\nB"
     },
     {
       "name": "empty-paragraph-roundtrip-2",
-      "ok": false,
+      "ok": true,
       "expected": 2,
-      "actual": 0,
-      "markdown": "A\n\nB"
+      "actual": 2,
+      "markdown": "A\n\n\n\nB"
     },
     {
       "name": "empty-paragraph-roundtrip-3",
-      "ok": false,
+      "ok": true,
       "expected": 3,
-      "actual": 0,
-      "markdown": "A\n\nB"
+      "actual": 3,
+      "markdown": "A\n\n\n\n\nB"
     },
     {
       "name": "typography-and-single-undo-0",
@@ -64,6 +64,69 @@
       "expected": "right",
       "actual": "right",
       "markdown": "-> Text ->"
+    },
+    {
+      "name": "empty-boundary-leading-1",
+      "ok": true,
+      "expected": 1,
+      "actual": 1,
+      "markdown": "\nB"
+    },
+    {
+      "name": "empty-boundary-leading-2",
+      "ok": true,
+      "expected": 2,
+      "actual": 2,
+      "markdown": "\n\nB"
+    },
+    {
+      "name": "empty-boundary-leading-3",
+      "ok": true,
+      "expected": 3,
+      "actual": 3,
+      "markdown": "\n\n\nB"
+    },
+    {
+      "name": "empty-boundary-trailing-1",
+      "ok": true,
+      "expected": 1,
+      "actual": 1,
+      "markdown": "A\n\n\n"
+    },
+    {
+      "name": "empty-boundary-trailing-2",
+      "ok": true,
+      "expected": 2,
+      "actual": 2,
+      "markdown": "A\n\n\n\n"
+    },
+    {
+      "name": "empty-boundary-trailing-3",
+      "ok": true,
+      "expected": 3,
+      "actual": 3,
+      "markdown": "A\n\n\n\n\n"
+    },
+    {
+      "name": "empty-boundary-only-1",
+      "ok": true,
+      "expected": 1,
+      "actual": 1,
+      "markdown": "\n"
+    },
+    {
+      "name": "empty-boundary-only-2",
+      "ok": true,
+      "expected": 2,
+      "actual": 2,
+      "markdown": "\n\n"
+    },
+    {
+      "name": "empty-boundary-only-3",
+      "ok": true,
+      "expected": 3,
+      "actual": 3,
+      "markdown": "\n\n\n"
     }
   ],
   "processExitCode": 0

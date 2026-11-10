@@ -54,6 +54,18 @@ app.whenReady().then(async () => {
         results.push({ name: 'alignment-roundtrip-' + align, ok: actual === align, expected: align, actual, markdown });
         reopened.destroy(); e.destroy();
       }
+      for (const edge of ['leading', 'trailing', 'only']) {
+        for (let count = 1; count <= 3; count++) {
+          const blanks = Array.from({ length: count }, () => paragraph());
+          const content = edge === 'leading' ? [...blanks, paragraph('B')] : edge === 'trailing' ? [paragraph('A'), ...blanks] : blanks;
+          const e = create({ type: 'doc', content });
+          const markdown = e.storage.markdown.getMarkdown();
+          const reopened = create(markdown);
+          const actual = emptyCount(reopened);
+          results.push({ name: 'empty-boundary-' + edge + '-' + count, ok: actual === count, expected: count, actual, markdown });
+          reopened.destroy(); e.destroy();
+        }
+      }
       return results;
     };
   `;
