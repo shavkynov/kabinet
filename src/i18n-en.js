@@ -885,6 +885,7 @@ module.exports = {
   "Открыть проект из папки? Текущий проект останется на этом устройстве.": "Open the project from the folder? The current one stays on this device.",
   "Открыть из папки": "Open from Folder",
   "Файл в папке недоступен. Синхронизация остановлена, ничего не удалено.": "A file in the folder is unavailable. Syncing stopped; nothing was deleted.",
+  "Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.": "Most of the project files vanished from the folder. This looks like an incomplete reply from the cloud, so syncing stopped and nothing was deleted on your side.",
   "В папке не видно файлов проекта (облако не отвечает или папка пуста). Синхронизация остановлена, ничего не удалено.": "No project files are visible in the folder (the cloud is not responding or the folder is empty). Syncing stopped; nothing was deleted.",
   "Папка не отвечает. Попробуйте позже.": "The folder is not responding. Try again later.",
   // ---------- Android: перенос проекта и служебные сообщения ----------

@@ -25,6 +25,8 @@ const { CONFLICT_DIR, stamp, safeName } = require('./syncguard');
 // на другом устройстве они только мешают. Замок kabinet.lock не входит: телефон пишет его
 // в папку сам (через adapter) и иначе он вечно конфликтовал бы с компьютерным замком.
 const FOLDERS = ['Главы', 'Персонажи', 'Места', 'Предметы', 'Заметки', 'Изображения', 'Корзина', CONFLICT_DIR];
+// Сколько файлов должно пропасть снаружи за один проход (и не меньше половины отслеживаемых), чтобы счесть ответ неполным.
+const MASS_DELETE_MIN = 5;
 const ROOT_FILES = /^project.*\.json$|^stats\.json$/;
 
 function isSyncable(rel) {
@@ -311,6 +313,14 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     const rels = [...new Set([...remote.keys(), ...local.keys(), ...Object.keys(state)])]
       .filter((rel) => isSyncable(rel))
       .sort();
+
+    // Второй вид неполного ответа: корень на месте, но часть файлов не перечислена (обрыв, лимит страниц).
+    // Одна-две удалённые главы — обычное дело; массовое исчезновение нельзя принимать за удаление на другом устройстве.
+    const vanished = rels.filter((rel) => state[rel] !== undefined && !remote.has(rel) && local.get(rel) === state[rel]);
+    const tracked = Object.keys(state).filter((rel) => isSyncable(rel)).length;
+    if (vanished.length >= MASS_DELETE_MIN && vanished.length * 2 >= tracked) {
+      throw new Error('Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.');
+    }
 
     for (const rel of rels) {
       const r = remote.has(rel) ? remote.get(rel).hash : undefined;

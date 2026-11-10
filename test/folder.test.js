@@ -260,3 +260,34 @@ test('файл, не изменившийся по размеру и дате, �
   assert.ok(res.pulled.includes(`Главы/${id}.md`));
   assert.ok(project.readChapter(local, id).includes('Версия два'));
 });
+
+test('массовое исчезновение файлов снаружи (неполный ответ облака) ничего не удаляет у нас', async () => {
+  const a = tmp('mass');
+  const proj = make(a);
+  const ids = [proj.chapters[0].id];
+  for (let i = 0; i < 6; i += 1) ids.push(project.addChapter(a, null).id);
+  for (const id of ids) project.writeChapter(a, id, `Текст ${id}`);
+  const ext = fakeFolder();
+  const sync = folder.createFolderSync(a, ext, { stateFile: path.join(a, '..', 'mass.json') });
+  await sync.exportAll();
+  for (const id of ids) ext.nodes.delete(`Главы/${id}.md`); // project.json на месте, главы «не перечислены»
+  await assert.rejects(() => sync.sync(), /неполный ответ/);
+  for (const id of ids) assert.ok(fs.existsSync(path.join(a, 'Главы', `${id}.md`)), 'глава осталась у нас');
+});
+
+test('одна-две главы, удалённые снаружи, по-прежнему убираются у нас', async () => {
+  const a = tmp('few');
+  const proj = make(a);
+  const ids = [proj.chapters[0].id];
+  for (let i = 0; i < 6; i += 1) ids.push(project.addChapter(a, null).id);
+  for (const id of ids) project.writeChapter(a, id, `Текст ${id}`);
+  const ext = fakeFolder();
+  const sync = folder.createFolderSync(a, ext, { stateFile: path.join(a, '..', 'few.json') });
+  await sync.exportAll();
+  ext.nodes.delete(`Главы/${ids[1]}.md`);
+  ext.nodes.delete(`Главы/${ids[2]}.md`);
+  const res = await sync.sync();
+  assert.ok(res.pulled.includes(`Главы/${ids[1]}.md`));
+  assert.ok(!fs.existsSync(path.join(a, 'Главы', `${ids[1]}.md`)));
+  assert.ok(fs.existsSync(path.join(a, 'Главы', `${ids[0]}.md`)));
+});
