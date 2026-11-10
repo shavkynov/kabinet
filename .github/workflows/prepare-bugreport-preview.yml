@@ -1,0 +1,82 @@
+name: Prepare and build bugreport preview
+on:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/prepare-bugreport-preview.yml']
+permissions:
+  contents: read
+concurrency:
+  group: prepare-bugreport-preview
+  cancel-in-progress: false
+jobs:
+  prepare:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/bugreport-fixes
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python scripts/prepare-bugreport-preview.py
+      - run: npm ci
+      - run: npm test
+      - run: node --test test/export-blank-lines.test.js test/export-target.test.js test/preview-export.test.js
+      - run: npm run check
+      - run: npm run build
+      - name: Real editor checks on synthetic documents only
+        run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs ci-diagnostics/editor-roundtrip.json
+      - name: Save tested UI changes and editor report
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add main.js mobile/backend.js renderer/index.html renderer/app src/i18n-dictionary.js package.json ci-diagnostics/editor-roundtrip.json
+          git commit -m 'feat: complete opt-in export numbering UI and record real editor checks'
+          git push origin HEAD:claude/bugreport-fixes
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Block preview when editor checks fail
+        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); const failed=r.results.filter(x=>!x.ok); if(failed.length){console.error(JSON.stringify(failed,null,2));process.exit(1)}"
+  build:
+    needs: prepare
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+            cmd: npx electron-builder --win portable --x64 --publish never -c.win.signAndEditExecutable=false -c.artifactName='Kabinet-Test-${version}-win-x64.${ext}'
+          - os: macos-15
+            name: mac-arm64
+            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-arm64.${ext}'
+          - os: macos-15
+            name: mac-intel
+            cmd: npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-intel.${ext}'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run build
+      - run: ${{ matrix.cmd }}
+        shell: bash
+        env:
+          KABINET_ADHOC: '1'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-test-${{ matrix.name }}-${{ needs.prepare.outputs.sha }}
+          path: |
+            dist/Kabinet-Test-*.exe
+            dist/Kabinet-Test-*.dmg
+          if-no-files-found: error
