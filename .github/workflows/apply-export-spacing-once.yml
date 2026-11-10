@@ -1,0 +1,158 @@
+name: Apply export spacing fix once
+on:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/apply-export-spacing-once.yml']
+permissions:
+  contents: write
+concurrency:
+  group: apply-export-spacing-once
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/bugreport-fixes
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply guarded patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          expected = {'src/export.js': '6edfca5b07a3ab3a9745dffd5584e218f5ec4bc2', 'src/docx.js': '4be8814f60bddc99fc72ccd91e5501da47b0c889', 'src/rtf.js': 'a682fe4700cad653869fc559c1772f6de09c7e84'}
+          texts = {}
+          for name, sha in expected.items():
+              raw = Path(name).read_bytes()
+              actual = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+              if actual != sha:
+                  raise RuntimeError('Source changed; refusing to overwrite: ' + name)
+              texts[name] = raw.decode('utf-8')
+          helper = Path('src/export-spacing.js')
+          if helper.exists():
+              raise RuntimeError('Helper already exists; refusing to overwrite')
+          def once(text, old, new):
+              if text.count(old) != 1:
+                  raise RuntimeError('Patch anchor not unique: ' + repr(old))
+              return text.replace(old, new, 1)
+          for name in expected:
+              text = texts[name]
+              text = once(text, "'use strict';", "'use strict';\n\nconst { exportLines } = require('./export-spacing');")
+              text = once(text, "const lines = String(md).replace(/\\r\\n?/g, '\\n').split('\\n');", 'const lines = exportLines(md);')
+              if name == 'src/export.js':
+                  empty = "    if (line === null) { flushAll(); out.push('<p class=\"empty-line\" style=\"margin:0;text-indent:0\"><br></p>'); continue; }"
+              elif name == 'src/docx.js':
+                  empty = "    if (line === null) { flush(); out.push(para(null, [])); continue; }"
+              else:
+                  empty = "    if (line === null) { flush(); out.push(para(BODY, '')); continue; }"
+              text = once(text, '  for (const line of lines) {\n    let m;', '  for (const line of lines) {\n' + empty + '\n    let m;')
+              texts[name] = text
+          helper.write_text("""'use strict';
+          // One blank Markdown line separates blocks. Each additional interior blank
+          // line becomes one empty paragraph. null is internal only, never stored.
+          function exportLines(md) {
+            const lines = String(md).replace(/\\r\\n?/g, '\\n').split('\\n');
+            const out = [];
+            let blanks = 0;
+            let seen = false;
+            for (const line of lines) {
+              if (/^\\s*$/.test(line)) { blanks += 1; continue; }
+              if (seen && blanks) {
+                out.push('');
+                for (let i = 1; i < blanks; i += 1) out.push(null);
+              }
+              out.push(line);
+              blanks = 0;
+              seen = true;
+            }
+            return out;
+          }
+          module.exports = { exportLines };
+          """, encoding='utf-8')
+          for name, text in texts.items():
+              Path(name).write_text(text, encoding='utf-8')
+          tests = Path('test/export-blank-lines.test.js')
+          tests.write_text(tests.read_text(encoding='utf-8') + r'''
+          
+          {
+            const { mdToHtml } = require('../src/export');
+            const { mdToBody, buildDocx } = require('../src/docx');
+            const { mdToRtf, buildRtf } = require('../src/rtf');
+            const { exportLines } = require('../src/export-spacing');
+            const zlib = require('node:zlib');
+            const emptyHtml = '<p class="empty-line" style="margin:0;text-indent:0"><br></p>';
+            const emptyRtf = mdToRtf('A\n\n\nB').split('\n')[1] + '\n';
+            const occurrences = (text, needle) => text.split(needle).length - 1;
+            const docXml = (zip) => {
+              let pos = 0;
+              while (zip.readUInt32LE(pos) === 0x04034b50) {
+                const size = zip.readUInt32LE(pos + 18);
+                const n = zip.readUInt16LE(pos + 26);
+                const extra = zip.readUInt16LE(pos + 28);
+                const name = zip.subarray(pos + 30, pos + 30 + n).toString();
+                const start = pos + 30 + n + extra;
+                if (name === 'word/document.xml') return zlib.inflateRawSync(zip.subarray(start, start + size)).toString();
+                pos = start + size;
+              }
+              throw new Error('word/document.xml not found');
+            };
+            test('spacing helper distinguishes separators from extra blank lines', () => {
+              assert.deepEqual(exportLines('A\n\nB'), ['A', '', 'B']);
+              assert.deepEqual(exportLines('\nA\n\n\nB\n\n'), ['A', '', null, 'B']);
+              assert.deepEqual(exportLines('  \n\n'), []);
+            });
+            for (const count of [0, 1, 2, 3]) {
+              test(`HTML DOCX RTF preserve ${count} extra empty paragraphs`, () => {
+                const md = 'A' + '\n'.repeat(count + 2) + 'B';
+                assert.equal(occurrences(mdToHtml(md), emptyHtml), count);
+                assert.equal(occurrences(mdToBody(md), '<w:p></w:p>'), count);
+                assert.equal(occurrences(mdToRtf(md), emptyRtf), count);
+                assert.equal(occurrences(docXml(buildDocx('Book', [{ title: 'Chapter', text: md }])), '<w:p></w:p>'), count);
+                assert.equal(occurrences(buildRtf('Book', [{ title: 'Chapter', text: md }]), emptyRtf), count);
+              });
+            }
+            test('extra blanks around headings quotes lists rules and alignment; CRLF', () => {
+              for (const block of ['# Heading', '> Quote', '- Item', '1. Item', '***', '-> Center <-', '-> Right ->']) {
+                const md = block + '\r\n\r\n \t\r\n\r\nB';
+                assert.equal(occurrences(mdToHtml(md), emptyHtml), 2, block);
+                assert.equal(occurrences(mdToBody(md), '<w:p></w:p>'), 2, block);
+                assert.equal(occurrences(mdToRtf(md), emptyRtf), 2, block);
+              }
+              assert.equal(mdToHtml('A\n\nB'), '<p>A</p>\n<p>B</p>');
+              assert.equal(mdToBody('A\n\nB'), mdToBody('\n\nA\n\nB\n\n'));
+              assert.equal(mdToRtf('A\n\nB'), mdToRtf('\n\nA\n\nB\n\n'));
+              assert.equal(mdToHtml('A\nB'), '<p>A<br>B</p>');
+            });
+            test('whole project HTML and Markdown preserve internal spacing; source untouched', () => {
+              const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kab-spacing-'));
+              try {
+                const p = project.createProject(root, 'Book');
+                const id = p.chapters[0].id;
+                project.writeChapter(root, id, 'A\n\n\n\n\nB');
+                const before = project.readChapter(root, id);
+                assert.equal(occurrences(buildExport(root, 'html', 'ru'), emptyHtml), 3);
+                assert.ok(buildExport(root, 'md', 'ru').includes('A\n\n\n\n\nB'));
+                assert.equal(project.readChapter(root, id), before);
+              } finally { fs.rmSync(root, { recursive: true, force: true }); }
+            });
+          }
+          ''', encoding='utf-8')
+      - name: Check syntax and regression tests
+        run: |
+          node --check src/export-spacing.js
+          node --check src/export.js
+          node --check src/docx.js
+          node --check src/rtf.js
+          node --test test/export-blank-lines.test.js test/export-escapes.test.js test/docx.test.js test/import.test.js
+      - name: Commit only after passing tests
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/export-spacing.js src/export.js src/docx.js src/rtf.js test/export-blank-lines.test.js
+          git commit -m 'fix: preserve extra blank lines in DOCX RTF and HTML exports'
+          git push origin HEAD:claude/bugreport-fixes
