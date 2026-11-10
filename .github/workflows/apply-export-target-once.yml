@@ -1,0 +1,33 @@
+name: Apply export destination memory once
+on:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/apply-export-target-once.yml']
+permissions:
+  contents: write
+concurrency:
+  group: apply-export-target-once
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/bugreport-fixes
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/apply-export-target.cjs
+      - run: node --check main.js && node --test test/export-target.test.js
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - name: Commit tested integration
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add main.js package.json
+          git commit -m 'fix: remember successful export folder and format per project'
+          git push origin HEAD:claude/bugreport-fixes
