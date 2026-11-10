@@ -69,3 +69,15 @@ test('first attachment preserves local word additions before accepting remote di
 test('first attachment preserves explicit empty dictionary without resurrecting removed words', () => scenario([], ['Remote']));
 test('first attachment preserves local dictionary when remote metadata has no words field', () => scenario(['Local'], null));
 test('failed local backup stops dictionary replacement', () => scenario(['Local'], ['Remote'], true));
+
+test('слова из двух одновременно изменённых project.json объединяются, остальное берётся у нас', () => {
+  const { mergeMetaWords } = require('../src/dict');
+  const local = JSON.stringify({ name: 'Наш', words: ['Аня', 'Боря'] });
+  const remote = JSON.stringify({ name: 'Чужой', words: ['Аня', 'Вика'] });
+  const out = JSON.parse(mergeMetaWords(local, remote).toString('utf8'));
+  assert.equal(out.name, 'Наш');
+  assert.deepEqual(out.words, ['Аня', 'Боря', 'Вика']);
+  assert.equal(mergeMetaWords(local, JSON.stringify({ words: ['Аня'] })), null, 'у нас уже всё есть: сливать нечего');
+  assert.equal(mergeMetaWords(local, JSON.stringify({ name: 'без слов' })), null);
+  assert.equal(mergeMetaWords(local, 'не json'), null);
+});

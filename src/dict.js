@@ -39,4 +39,22 @@ function mergeShared(sharedWords, before, next) {
   return cleanWords([...cleanWords(sharedWords).filter((w) => !gone.has(w)), ...fresh]);
 }
 
-module.exports = { cleanWords, effective, withWord, mergeShared, MAX_WORDS, MAX_LEN };
+/**
+ * Правки словаря на двух устройствах сразу: файлы project.json разошлись, побеждает наш, но добавленные слова
+ * не теряем. Возвращает новый текст нашего project.json со словами обеих сторон или null, если сливать нечего.
+ * Слово, убранное на одной стороне, при таком слиянии может вернуться: потерять добавленное хуже, убрать ещё раз легко.
+ */
+function mergeMetaWords(localText, remoteText) {
+  let local;
+  let remote;
+  try {
+    local = JSON.parse(Buffer.from(localText).toString('utf8'));
+    remote = JSON.parse(Buffer.from(remoteText).toString('utf8'));
+  } catch { return null; }
+  if (!local || !remote || !Array.isArray(local.words) || !Array.isArray(remote.words)) return null;
+  const words = cleanWords([...local.words, ...remote.words]);
+  if (words.length === cleanWords(local.words).length && words.every((w) => local.words.includes(w))) return null;
+  return Buffer.from(JSON.stringify({ ...local, words }, null, 2), 'utf8');
+}
+
+module.exports = { cleanWords, effective, withWord, mergeShared, mergeMetaWords, MAX_WORDS, MAX_LEN };

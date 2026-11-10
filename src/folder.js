@@ -20,6 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { writeFileAtomic } = require('./fsutil');
 const { CONFLICT_DIR, stamp, safeName } = require('./syncguard');
+const dictLib = require('./dict');
 
 // Что переносим в папку и обратно. «Копии» (резервные) и временные файлы не нужны:
 // на другом устройстве они только мешают. Замок kabinet.lock не входит: телефон пишет его
@@ -337,9 +338,12 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
           res.pulled.push(rel);
           continue;
         }
-        await keepForeign(rel, await remoteBytes(remote.get(rel), rel), labelOf(rel));
+        const foreign = await remoteBytes(remote.get(rel), rel);
+        await keepForeign(rel, foreign, labelOf(rel));
+        const withWords = rel === 'project.json' ? dictLib.mergeMetaWords(readLocal(rel), foreign) : null; // слова, добавленные на другом устройстве, не теряем
+        if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
         await adapter.write(rel, readLocal(rel));
-        state[rel] = l;
+        state[rel] = withWords ? hashBytes(withWords) : l;
         res.pushed.push(rel);
         res.conflicts.push(rel);
         continue;
