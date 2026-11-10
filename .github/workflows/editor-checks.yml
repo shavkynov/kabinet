@@ -1,0 +1,30 @@
+name: Проверка редактора
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['scripts/editor-roundtrip.cjs', 'renderer/**', 'src/**', '.github/workflows/editor-checks.yml']
+permissions:
+  contents: read
+jobs:
+  editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs || true
+      - name: Result
+        run: |
+          node -e "
+          const r=require('./ci-diagnostics/editor-roundtrip.json');
+          const bad=(r.results||[]).filter(x=>x.ok!==true);
+          console.log('status', r.status, 'checks', (r.results||[]).length, 'failed', bad.length);
+          for (const b of bad) console.log(JSON.stringify(b));
+          if(r.status!=='complete'||!(r.results||[]).length||bad.length) process.exit(1);
+          "
