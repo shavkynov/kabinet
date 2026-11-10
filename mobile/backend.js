@@ -997,6 +997,7 @@ function createBackend(host, { session } = {}) {
     ignoreCheckRule: (id) => call('check:ignoreRule', id),
     onCheckProgress: on('check:progress'),
     onContextMenu: on('ui:contextMenu'),
+    onSyncNow: on('ui:syncNow'),
     editCommand: (cmd) => call('ctx:edit', cmd),
     replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
     webSearch: (text, engine) => call('ctx:webSearch', text, engine),
