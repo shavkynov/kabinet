@@ -256,6 +256,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
 
     const metaDiffers = JSON.stringify(remoteMeta) !== JSON.stringify(localMeta);
     const hasLocalContent = added.length > 0 || trashExtra.length > 0
+      || Object.hasOwn(localMeta, 'words')
       || (Array.isArray(localMeta.chapters) && localMeta.chapters.some((c) => {
         if (!c || typeof c.id !== 'string') return false;
         try { return !!asText(readLocal(`Главы/${c.id}.md`)).trim(); } catch { return false; }
