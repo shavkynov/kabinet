@@ -1075,7 +1075,7 @@ function buildMenu() {
           ],
         },
         { label: t('Синхронизация…'), click: () => send('ui:openSync') },
-        { label: t('Синхронизировать сейчас'), accelerator: 'F5', click: () => send('ui:syncNow') },
+        { label: t('Синхронизировать сейчас'), accelerator: isMac ? 'Cmd+Shift+S' : 'F5', click: () => send('ui:syncNow') },
         sep,
         { label: t('Закрыть проект'), accelerator: 'CmdOrCtrl+Shift+W', click: () => send('ui:closeProject') },
         { label: t('Закрыть окно'), role: 'close' },
