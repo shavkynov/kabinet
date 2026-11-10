@@ -232,6 +232,8 @@ module.exports = {
   "Добавить слово": "Add a word",
   "Добавить слово в словарь": "Add a word to the dictionary",
   "Пока пусто": "Nothing here yet",
+  "Оставлять пустых строк подряд, не более": "Keep at most this many empty lines in a row",
+  "0 (убрать все)": "0 (remove all)",
   "Убрать «{0}»": "Remove “{0}”",
   "Синхронизация: {0}": "Sync: {0}",
   "Проект, который лежит в облаке (Яндекс Диск, Nextcloud и другие по WebDAV)": "A project stored in the cloud (Yandex Disk, Nextcloud and others via WebDAV)",

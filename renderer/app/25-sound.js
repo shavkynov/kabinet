@@ -123,6 +123,7 @@ function wireChrome() {
   bindSetting('#setTypo', 'typo', (el) => el.checked);
   bindSetting('#setTypoNbsp', 'typoNbsp', (el) => el.checked);
   bindSetting('#setTypoLayout', 'typoLayout', (el) => el.checked);
+  bindSetting('#setTypoKeep', 'typoKeep', (el) => Number(el.value));
   bindSetting('#setTypeAnim', 'typeAnim', (el) => el.checked);
   bindSetting('#setSearchEngine', 'searchEngine', (el) => el.value);
   bindSetting('#setMarks', 'marks', (el) => el.checked);

@@ -186,4 +186,27 @@ function applyEdits(text, edits) {
   return s;
 }
 
-module.exports = { NB, SHORT, typeChar, fixText, applyEdits };
+/**
+ * Какие пустые абзацы убрать при наведении порядка. flags[i] — абзац i пустой.
+ * Пустые в начале и в конце документа убираются все; между абзацами из каждой серии пустых остаются первые `keep`
+ * (0 — убрать все). Если пусты все абзацы, ничего не убираем: документ не трогаем.
+ * Возвращает Set индексов.
+ */
+function emptyToDrop(flags, keep = 0) {
+  const k = Math.max(0, Math.min(3, Math.trunc(Number(keep)) || 0));
+  const drop = new Set();
+  if (!flags.length || flags.every(Boolean)) return drop;
+  let i = 0;
+  while (i < flags.length) {
+    if (!flags[i]) { i += 1; continue; }
+    let j = i;
+    while (j < flags.length && flags[j]) j += 1; // серия [i, j)
+    const edge = i === 0 || j === flags.length;
+    for (let n = i; n < j; n += 1) if (edge || n - i >= k) drop.add(n);
+    i = j;
+  }
+  return drop;
+}
+
+module.exports = {
+  emptyToDrop, NB, SHORT, typeChar, fixText, applyEdits };
