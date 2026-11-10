@@ -227,7 +227,6 @@ module.exports = {
   "В этой папке уже есть проект": "This folder already has a project",
   "«Соединить»: правки с обеих сторон сохранятся, спорные тексты уйдут в папку «Конфликты». «Заменить папку»: в облако запишется проект с этого компьютера, а то, что там лежало, попадёт в «Конфликты» и не пропадёт.": "“Merge”: changes from both sides are kept, disputed texts go to the “Конфликты” folder. “Replace folder”: the project from this computer is written to the cloud, and what was there goes to “Конфликты” and is not lost.",
   "Синхронизация включена": "Sync turned on",
-  "Синхронизировано": "Synced",
   "Мой словарь: слова, которые проверка не считает ошибками. Они хранятся вместе с проектом и появятся на других устройствах после синхронизации.": "My dictionary: words the check does not treat as mistakes. They are stored with the project and appear on other devices after syncing.",
   "Абзац по центру": "Center paragraph",
   "Абзац по правому краю": "Right-align paragraph",
