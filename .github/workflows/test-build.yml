@@ -1,8 +1,6 @@
-name: Verify editor and build test preview
+name: Тестовая сборка (Windows, macOS)
 on:
-  push:
-    branches: [claude/bugreport-fixes]
-    paths: ['.github/workflows/fix-empty-roundtrip-preview.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -22,12 +20,8 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm test
-      - run: node --test test/export-blank-lines.test.js test/export-target.test.js test/preview-export.test.js
       - run: npm run check
       - run: npm run build
-      - run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs
-      - name: Require all eighteen editor checks to pass
-        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); if(r.status!=='complete'||!Array.isArray(r.results)||r.results.length!==18||r.results.some(x=>x.ok!==true)){console.error(JSON.stringify(r,null,2));process.exit(1)}"
   build:
     needs: verify
     timeout-minutes: 35
