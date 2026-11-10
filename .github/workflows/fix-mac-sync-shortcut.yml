@@ -1,0 +1,44 @@
+name: Apply Mac sync shortcut once
+on:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/fix-mac-sync-shortcut.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.ref == 'refs/heads/claude/bugreport-fixes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Verify original file and replace only sync accelerator
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib
+          p = Path('main.js')
+          raw = p.read_bytes()
+          sha = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+          assert sha == '26bed66f620bca1d3aaa761dc77c5e9e86f8d611', 'main.js changed; refusing to overwrite'
+          old = b"accelerator: 'F5', click: () => send('ui:syncNow')"
+          new = b"accelerator: isMac ? 'Cmd+Shift+S' : 'F5', click: () => send('ui:syncNow')"
+          assert raw.count(old) == 1, 'Expected exactly one sync menu item'
+          p.write_bytes(raw.replace(old, new))
+      - name: Check JavaScript syntax and F5 regression tests
+        run: |
+          node --check main.js
+          node --test test/dav-quick-sync.test.js
+          git diff --check
+      - name: Commit only main.js to the approved branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- main.js
+          git commit -m 'fix: use Cmd+Shift+S for quick sync on macOS; retain F5 elsewhere'
+          git push origin HEAD:refs/heads/claude/bugreport-fixes
