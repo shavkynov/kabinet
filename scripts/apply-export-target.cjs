@@ -20,7 +20,7 @@ main = once(main, anchor, `  let defaultPath = path.join(app.getPath('documents'
     defaultPath = exportTarget.defaultPath(app.getPath('userData'), dir, app.getPath('documents'));
   } catch (err) {
     console.error('export destination read:', err);
-    dialog.showErrorBox(t('Экспорт проекта'), 'Не удалось прочитать настройки места экспорта. Будет предложена папка «Документы».\\n' + String(err.message || err));
+    dialog.showErrorBox(t('Экспорт проекта'), t('Не удалось прочитать настройки места экспорта. Будет предложена папка «Документы».') + '\\n' + String(err.message || err));
   }
 ${anchor}`);
 main = once(main, "    defaultPath: path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`),", '    defaultPath,');
@@ -28,7 +28,7 @@ main = once(main, '  shell.showItemInFolder(file);\n  return file;', `  try {
     exportTarget.remember(app.getPath('userData'), dir, file);
   } catch (err) {
     console.error('export destination write:', err);
-    dialog.showErrorBox(t('Экспорт проекта'), 'Файл экспортирован, но запомнить папку и формат не удалось.\\n' + String(err.message || err));
+    dialog.showErrorBox(t('Экспорт проекта'), t('Файл экспортирован, но запомнить папку и формат не удалось.') + '\\n' + String(err.message || err));
   }
   shell.showItemInFolder(file);
   return file;`);

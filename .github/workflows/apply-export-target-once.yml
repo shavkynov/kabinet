@@ -20,9 +20,20 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/apply-export-target.cjs
-      - run: node --check main.js && node --test test/export-target.test.js
+      - run: node --check main.js && node --test test/export-target.test.js test/i18n.test.js
       - run: npm ci
-      - run: npm test
+      - name: Full test suite
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/kabinet-tests.log
+      - name: Failed test summary
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f /tmp/kabinet-tests.log ]; then
+            { echo '## Failed tests'; grep -A 35 '^not ok' /tmp/kabinet-tests.log || true; } | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - run: npm run check
       - name: Commit tested integration
         run: |
