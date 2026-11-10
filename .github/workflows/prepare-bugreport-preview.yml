@@ -30,7 +30,29 @@ jobs:
       - run: npm run check
       - run: npm run build
       - name: Real editor checks on synthetic documents only
-        run: xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs ci-diagnostics/editor-roundtrip.json
+        shell: bash
+        run: |
+          rm -f ci-diagnostics/editor-roundtrip.json
+          set +e
+          xvfb-run -a npx electron --no-sandbox scripts/editor-roundtrip.cjs > /tmp/kab-editor.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/kab-editor.log
+          EDITOR_EXIT="$code" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = Path('ci-diagnostics/editor-roundtrip.json')
+          try:
+              report = json.loads(p.read_text())
+          except (OSError, ValueError):
+              report = {'status': 'error', 'error': 'Electron did not produce a valid report', 'results': []}
+          report['processExitCode'] = int(os.environ['EDITOR_EXIT'])
+          if report['processExitCode'] != 0 or report.get('status') != 'complete':
+              report['status'] = 'error'
+              report['launchLog'] = Path('/tmp/kab-editor.log').read_text(errors='replace')[-12000:]
+          p.parent.mkdir(parents=True, exist_ok=True)
+          p.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
       - name: Save tested UI changes and editor report
         id: commit
         run: |
@@ -40,8 +62,8 @@ jobs:
           git commit -m 'feat: complete opt-in export numbering UI and record real editor checks'
           git push origin HEAD:claude/bugreport-fixes
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Block preview when editor checks fail
-        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); const failed=r.results.filter(x=>!x.ok); if(failed.length){console.error(JSON.stringify(failed,null,2));process.exit(1)}"
+      - name: Block preview when editor checks fail or report is incomplete
+        run: node -e "const r=require('./ci-diagnostics/editor-roundtrip.json'); if(r.status!=='complete'||r.processExitCode!==0||!Array.isArray(r.results)||r.results.length!==9||r.results.some(x=>x.ok!==true)){console.error(JSON.stringify(r,null,2));process.exit(1)}"
   build:
     needs: prepare
     timeout-minutes: 35

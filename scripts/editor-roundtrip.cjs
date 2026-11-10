@@ -4,10 +4,18 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const esbuild = require('esbuild');
-const output = path.resolve(process.argv[2] || 'ci-diagnostics/editor-roundtrip.json');
+const output = path.resolve('ci-diagnostics/editor-roundtrip.json');
 let window;
 let temp;
-const timeout = setTimeout(() => app.exit(2), 60000);
+function report(value) {
+  fs.mkdirSync(path.dirname(output), { recursive: true });
+  fs.writeFileSync(output, JSON.stringify(value, null, 2) + '\n');
+}
+app.on('window-all-closed', () => {});
+const timeout = setTimeout(() => {
+  report({ status: 'error', error: 'Editor check timed out', results: [] });
+  app.exit(2);
+}, 60000);
 app.whenReady().then(async () => {
   temp = fs.mkdtempSync(path.join(os.tmpdir(), 'kab-editor-check-'));
   const source = `
@@ -54,13 +62,13 @@ app.whenReady().then(async () => {
   window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   await window.loadFile(path.join(temp, 'index.html'));
   const results = await window.webContents.executeJavaScript('collectEditorChecks()');
-  fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, JSON.stringify({ electron: process.versions.electron, results }, null, 2) + '\n');
+  report({ status: 'complete', electron: process.versions.electron, results });
   window.destroy(); clearTimeout(timeout);
   fs.rmSync(temp, { recursive: true, force: true });
   app.exit(0);
 }).catch((error) => {
   console.error(error);
+  report({ status: 'error', error: String(error.stack || error), results: [] });
   if (window && !window.isDestroyed()) window.destroy();
   if (temp) fs.rmSync(temp, { recursive: true, force: true });
   app.exit(2);
