@@ -81,7 +81,7 @@ function mdToHtml(md) {
   return out.join('\n');
 }
 
-/** Markdown без разметки: заголовки и абзацы через пустую строку. */
+/** Markdown без разметки: внутренние пустые строки сохраняются; края главы очищаются как прежде. */
 function mdToText(md, o = {}) {
   let start = true; // строка начинает новый блок
   let skip = false; // предыдущий блок: заголовок или цитата, красной строки после них нет
@@ -109,7 +109,7 @@ function mdToText(md, o = {}) {
       skip = heading || quote;
     }
     return text;
-  }).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^[ \t\n]+/, '').replace(/\s+$/, ''); // не trim(): он съел бы красную строку первого абзаца
+  }).join('\n').replace(/^[ \t\n]+/, '').replace(/\s+$/, ''); // не trim(): он съел бы красную строку первого абзаца
 }
 
 const CSS = `
