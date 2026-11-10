@@ -1,6 +1,9 @@
 name: Тестовая сборка (Windows, macOS)
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/test-build.yml']  # запуск: правка этого файла в ветке (ручной запуск доступен, когда файл есть в main)
 permissions:
   contents: read
 concurrency:
