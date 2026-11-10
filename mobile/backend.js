@@ -496,7 +496,7 @@ function createBackend(host, { session } = {}) {
 
   handle('project:export', async (opts) => {
     const dir = requireDir();
-    const exportOpts = { indent: !!(opts && opts.indent) };
+    const exportOpts = { indent: !!(opts && opts.indent), chapterNumbers: !!(opts && opts.chapterNumbers === true) };
     const fmt = await host.choose({
       title: t('Экспорт проекта'),
       message: t('Формат файла'),
@@ -505,7 +505,7 @@ function createBackend(host, { session } = {}) {
     });
     if (!fmt) return null;
     const def = EXPORT_FORMATS.find((f) => f.value === fmt);
-    const out = exporter.buildExport(dir, fmt, i18n.getLang(), fmt === 'docx' ? undefined : exportOpts);
+    const out = exporter.buildExport(dir, fmt, i18n.getLang(), exportOpts);
     const data = typeof out === 'string' ? new TextEncoder().encode(out) : new Uint8Array(out);
     const name = `${path.basename(dir)}.${fmt}`;
     await host.deliver({ name, mime: def.mime, data });

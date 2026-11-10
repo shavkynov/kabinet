@@ -454,7 +454,7 @@ handle('project:replace', (find, repl, dry) => {
 // Экспорт всех глав одним файлом: PDF, DOCX, Markdown, текст или HTML (формат по расширению).
 handle('project:export', async (opts) => {
   const dir = requireDir();
-  const exportOpts = { indent: !!(opts && opts.indent) }; // красная строка: решает режим «Абзацы» в окне
+  const exportOpts = { indent: !!(opts && opts.indent), chapterNumbers: !!(opts && opts.chapterNumbers === true) }; // красная строка: решает режим «Абзацы» в окне
   let defaultPath = path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`);
   try {
     defaultPath = exportTarget.defaultPath(app.getPath('userData'), dir, app.getPath('documents'));
@@ -498,7 +498,7 @@ handle('project:export', async (opts) => {
       try { fs.unlinkSync(tmpHtml); } catch { /* временный файл не критичен */ }
     }
   } else if (ext === 'docx') {
-    fs.writeFileSync(file, exporter.buildExport(dir, 'docx', i18n.getLang()));
+    fs.writeFileSync(file, exporter.buildExport(dir, 'docx', i18n.getLang(), exportOpts));
   } else {
     fs.writeFileSync(file, exporter.buildExport(dir, ext, i18n.getLang(), exportOpts), 'utf8');
   }

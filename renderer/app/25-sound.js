@@ -141,6 +141,7 @@ function wireChrome() {
   bindSetting('#setFont', 'font', (el) => el.value);
   bindSetting('#setFontName', 'fontName', (el) => cleanFontName(el.value));
   bindSetting('#setPara', 'para', (el) => el.value);
+  bindSetting('#setExportNumbers', 'exportNumbers', (el) => el.checked);
   bindSetting('#setSoundOn', 'soundOn', (el) => el.checked);
   bindSetting('#setAmbientOn', 'ambientOn', (el) => el.checked);
   bindSetting('#setProjectGoalOn', 'projectGoalOn', (el) => el.checked);

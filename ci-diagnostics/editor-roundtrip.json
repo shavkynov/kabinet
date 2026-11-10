@@ -1,0 +1,70 @@
+{
+  "status": "complete",
+  "electron": "45.2.1",
+  "results": [
+    {
+      "name": "empty-paragraph-roundtrip-1",
+      "ok": false,
+      "expected": 1,
+      "actual": 0,
+      "markdown": "A\n\nB"
+    },
+    {
+      "name": "empty-paragraph-roundtrip-2",
+      "ok": false,
+      "expected": 2,
+      "actual": 0,
+      "markdown": "A\n\nB"
+    },
+    {
+      "name": "empty-paragraph-roundtrip-3",
+      "ok": false,
+      "expected": 3,
+      "actual": 0,
+      "markdown": "A\n\nB"
+    },
+    {
+      "name": "typography-and-single-undo-0",
+      "ok": true,
+      "expected": 0,
+      "actual": 0,
+      "undone": true
+    },
+    {
+      "name": "typography-and-single-undo-1",
+      "ok": true,
+      "expected": 1,
+      "actual": 1,
+      "undone": true
+    },
+    {
+      "name": "typography-and-single-undo-2",
+      "ok": true,
+      "expected": 2,
+      "actual": 2,
+      "undone": true
+    },
+    {
+      "name": "typography-and-single-undo-3",
+      "ok": true,
+      "expected": 3,
+      "actual": 3,
+      "undone": true
+    },
+    {
+      "name": "alignment-roundtrip-center",
+      "ok": true,
+      "expected": "center",
+      "actual": "center",
+      "markdown": "-> Text <-"
+    },
+    {
+      "name": "alignment-roundtrip-right",
+      "ok": true,
+      "expected": "right",
+      "actual": "right",
+      "markdown": "-> Text ->"
+    }
+  ],
+  "processExitCode": 0
+}
