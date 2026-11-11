@@ -842,3 +842,310 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+// ---------- карточки персонажей, мест, предметов и заметки ----------
+
+const FIELD_MAX: usize = 500_000;
+const SHORT_MAX: usize = 50_000;
+
+fn is_image_name(s: &str) -> bool {
+    match s.rsplit_once('.') {
+        Some((stem, ext)) => valid_id(stem) && ["png", "jpg", "jpeg", "webp", "gif"].contains(&ext),
+        None => false,
+    }
+}
+
+fn str_cut(v: Option<&Value>, max: usize) -> String {
+    let s = match v {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Bool(b)) => b.to_string(),
+        _ => String::new(),
+    };
+    s.chars().take(max).collect()
+}
+
+fn unique_strings(v: Option<&Value>, max_len: usize, max_count: usize) -> Vec<Value> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    if let Some(Value::Array(arr)) = v {
+        for a in arr {
+            let s = str_cut(Some(a), max_len).trim().to_string();
+            if !s.is_empty() && seen.insert(s.clone()) { out.push(Value::String(s)); }
+        }
+    }
+    out.truncate(max_count);
+    out
+}
+
+pub fn sanitize_card(raw: &Value) -> R<Value> {
+    let o = raw.as_object().ok_or_else(|| "Неверный формат карточки.".to_string())?;
+    let fields: Vec<Value> = match o.get("fields") {
+        Some(Value::Array(arr)) => arr.iter().take(80).map(|f| {
+            let name = str_cut(f.get("name"), 100).trim().to_string();
+            json!({ "name": if name.is_empty() { "Поле".to_string() } else { name }, "value": str_cut(f.get("value"), FIELD_MAX) })
+        }).collect(),
+        _ => Vec::new(),
+    };
+    let image = match o.get("image") { Some(Value::String(s)) if is_image_name(s) => s.clone(), _ => String::new() };
+    let mut card = Map::new();
+    card.insert("short".into(), json!(str_cut(o.get("short"), SHORT_MAX)));
+    card.insert("aliases".into(), Value::Array(unique_strings(o.get("aliases"), 80, 100)));
+    card.insert("ignore".into(), Value::Array(unique_strings(o.get("ignore"), 80, 100)));
+    card.insert("image".into(), json!(image));
+    card.insert("fields".into(), Value::Array(fields));
+    card.insert("protagonist".into(), json!(o.get("protagonist") == Some(&Value::Bool(true))));
+    if o.get("inflect") == Some(&Value::Bool(false)) { card.insert("inflect".into(), json!(false)); }
+    Ok(Value::Object(card))
+}
+
+fn card_text(card: &Value) -> R<String> { serde_json::to_string_pretty(card).map_err(|e| e.to_string()) }
+
+fn empty_card_for(meta: &Map<String, Value>, kind: &str) -> R<Value> {
+    let fields: Vec<Value> = meta["templates"].get(kind).and_then(|t| t.as_array()).map(|a| a.iter().map(|n| json!({ "name": n, "value": "" })).collect()).unwrap_or_default();
+    sanitize_card(&json!({ "short": "", "aliases": [], "fields": fields }))
+}
+
+fn item_index(meta: &Map<String, Value>, kind: &str, id: &str) -> R<usize> {
+    let list = kind_info(kind)?.0;
+    meta[list].as_array().and_then(|a| a.iter().position(|c| c["id"] == id)).ok_or_else(|| "Запись не найдена в проекте.".to_string())
+}
+
+fn list_mut<'a>(meta: &'a mut Map<String, Value>, list: &str) -> &'a mut Vec<Value> {
+    meta.get_mut(list).and_then(|c| c.as_array_mut()).expect("списки проверены при чтении")
+}
+
+pub fn add_item(dir: &Path, kind: &str, after: Option<&str>) -> R<Value> {
+    let (list, _, ext) = kind_info(kind)?;
+    let mut meta = load_meta(dir)?;
+    let taken: HashSet<String> = meta[list].as_array().map(|a| a.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let id = new_id(&taken);
+    let content = if ext == "json" { card_text(&empty_card_for(&meta, kind)?)? } else { String::new() };
+    write_atomic(&item_file(dir, kind, &id)?, &content)?;
+    let mut at = list_mut(&mut meta, list).len();
+    if let Some(a) = after.filter(|a| !a.is_empty()) {
+        if let Some(i) = list_mut(&mut meta, list).iter().position(|c| c["id"] == a) { at = i + 1; }
+    }
+    let title = match kind { "character" => "Новый персонаж", "place" => "Новое место", "item" => "Новый предмет", _ => "Новая заметка" };
+    list_mut(&mut meta, list).insert(at, json!({ "id": id, "title": title }));
+    save_meta(dir, &meta)?;
+    Ok(json!({ "project": view(dir, &meta), "id": id }))
+}
+
+pub fn rename_item(dir: &Path, kind: &str, id: &str, title: &str) -> R<Value> {
+    let list = kind_info(kind)?.0;
+    let mut meta = load_meta(dir)?;
+    let i = item_index(&meta, kind, id)?;
+    let t = clean_title(Some(&json!(title)));
+    if !t.is_empty() { list_mut(&mut meta, list)[i]["title"] = json!(t); }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn move_item(dir: &Path, kind: &str, id: &str, new_index: f64) -> R<Value> {
+    let list = kind_info(kind)?.0;
+    let mut meta = load_meta(dir)?;
+    let from = item_index(&meta, kind, id)?;
+    let item = list_mut(&mut meta, list).remove(from);
+    let n = if new_index.is_finite() { new_index.trunc() as i64 } else { 0 };
+    let to = n.clamp(0, list_mut(&mut meta, list).len() as i64) as usize;
+    list_mut(&mut meta, list).insert(to, item);
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_item_icon(dir: &Path, kind: &str, id: &str, icon: Option<&Value>) -> R<Value> {
+    let list = kind_info(kind)?.0;
+    let mut meta = load_meta(dir)?;
+    let i = item_index(&meta, kind, id)?;
+    match clean_icon(icon) {
+        Some(c) => { list_mut(&mut meta, list)[i]["icon"] = json!(c); }
+        None => { if let Some(o) = list_mut(&mut meta, list)[i].as_object_mut() { o.remove("icon"); } }
+    }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn delete_item(dir: &Path, kind: &str, id: &str) -> R<Value> {
+    let (list, _, ext) = kind_info(kind)?;
+    let mut meta = load_meta(dir)?;
+    let i = item_index(&meta, kind, id)?;
+    let removed = list_mut(&mut meta, list).remove(i);
+    let title = removed["title"].as_str().unwrap_or("").to_string();
+    let file = move_to_trash(dir, &item_file(dir, kind, id)?, &title, id, ext)?;
+    push_trash(&mut meta, kind, &removed, i, &file);
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn read_item(dir: &Path, kind: &str, id: &str) -> R<String> {
+    let (_, _, ext) = kind_info(kind)?;
+    match fs::read_to_string(item_file(dir, kind, id)?) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if ext == "json" { card_text(&sanitize_card(&json!({}))?) } else { Ok(String::new()) }
+        }
+        Err(e) => Err(format!("Не удалось прочитать запись: {}", e)),
+    }
+}
+
+pub fn write_item(dir: &Path, kind: &str, id: &str, text: &str) -> R<Value> {
+    let (list, _, ext) = kind_info(kind)?;
+    let meta = load_meta(dir)?;
+    let _ = meta[list].as_array().and_then(|a| a.iter().position(|c| c["id"] == id)).ok_or_else(|| "Запись не найдена в проекте.".to_string())?;
+    let out = if ext == "json" {
+        let parsed: Value = serde_json::from_str(text).map_err(|_| "Карточка имеет неверный формат.".to_string())?;
+        card_text(&sanitize_card(&parsed)?)?
+    } else { text.to_string() };
+    write_atomic(&item_file(dir, kind, id)?, &out)?;
+    Ok(json!({ "conflict": null }))
+}
+
+pub fn set_template(dir: &Path, kind: &str, names: Option<&Value>) -> R<Value> {
+    if kind != "character" && kind != "place" { return Err("Неизвестный шаблон.".into()); }
+    let mut meta = load_meta(dir)?;
+    let clean = clean_template(names).ok_or_else(|| "Шаблон должен быть списком названий полей.".to_string())?;
+    meta["templates"].as_object().ok_or("Внутренняя ошибка шаблонов.")?;
+    if let Some(Value::Object(t)) = meta.get_mut("templates") { t.insert(kind.to_string(), Value::Array(clean)); }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+/// Индекс карточек для подсветки имён в тексте. Падежные формы (`forms`) добавляет окно: склонение остаётся на JS.
+pub fn card_index(dir: &Path) -> R<Value> {
+    let meta = load_meta(dir)?;
+    let mut out = Vec::new();
+    for kind in ["character", "place", "item"] {
+        let list = kind_info(kind)?.0;
+        for item in meta[list].as_array().cloned().unwrap_or_default() {
+            let id = item["id"].as_str().unwrap_or("");
+            let card = read_item(dir, kind, id).ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                .and_then(|v| sanitize_card(&v).ok())
+                .unwrap_or_else(|| sanitize_card(&json!({})).unwrap_or(Value::Null));
+            let mut short = card["short"].as_str().unwrap_or("").trim().to_string();
+            if short.is_empty() {
+                for f in card["fields"].as_array().cloned().unwrap_or_default() {
+                    let n = f["name"].as_str().unwrap_or("").trim().to_lowercase();
+                    let v = f["value"].as_str().unwrap_or("").trim().to_string();
+                    if (n == "общее описание" || n == "general description") && !v.is_empty() { short = v; break; }
+                }
+            }
+            out.push(json!({
+                "kind": kind, "id": id, "title": item["title"], "icon": item.get("icon").cloned().unwrap_or_else(|| json!("")),
+                "short": short.chars().take(400).collect::<String>(),
+                "aliases": card["aliases"], "ignore": card["ignore"], "image": card["image"],
+                "protagonist": card["protagonist"], "inflect": card.get("inflect") != Some(&Value::Bool(false)),
+            }));
+        }
+    }
+    Ok(Value::Array(out))
+}
+
+// ---------- настройки проекта и данные главы ----------
+
+pub fn set_project_goal(dir: &Path, goal: Option<&Value>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    match clean_goal(goal) { Some(g) => { meta.insert("projectGoal".into(), json!(g)); } None => { meta.remove("projectGoal"); } }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_project_deadline(dir: &Path, date: Option<&Value>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    match clean_deadline(date) { Some(d) => { meta.insert("deadline".into(), json!(d)); } None => { meta.remove("deadline"); } }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_project_mode(dir: &Path, mode: Option<&str>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    if mode == Some("stories") { meta.insert("mode".into(), json!("stories")); } else { meta.remove("mode"); }
+    renumber(&mut meta);
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_goal_unit(dir: &Path, unit: Option<&str>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    if meta.get("mode").and_then(|m| m.as_str()) == Some("stories") {
+        meta.insert("goalUnit".into(), json!(if unit == Some("words") { "words" } else { "chars" }));
+    }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_char_limit(dir: &Path, limit: Option<&Value>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    if meta.get("mode").and_then(|m| m.as_str()) == Some("stories") {
+        match clean_goal(limit) { Some(g) => { meta.insert("charLimit".into(), json!(g)); } None => { meta.remove("charLimit"); } }
+        save_meta(dir, &meta)?;
+    }
+    Ok(view(dir, &meta))
+}
+
+pub fn read_chapter_meta(dir: &Path, id: &str) -> R<Value> {
+    let meta = load_meta(dir)?;
+    let c = &meta["chapters"][find_index(&meta, id)?];
+    let mut out = Map::new();
+    out.insert("synopsis".into(), json!(c.get("synopsis").and_then(|s| s.as_str()).unwrap_or("")));
+    out.insert("notes".into(), json!(c.get("notes").and_then(|s| s.as_str()).unwrap_or("")));
+    if let Some(cm) = c.get("comments") { out.insert("comments".into(), cm.clone()); }
+    Ok(Value::Object(out))
+}
+
+pub fn write_chapter_meta(dir: &Path, id: &str, data: &Value) -> R<Value> {
+    let d = data.as_object().ok_or_else(|| "Неверные данные главы.".to_string())?;
+    let mut meta = load_meta(dir)?;
+    let i = find_index(&meta, id)?;
+    let has_comments = d.get("comments").map(|c| c.is_array()).unwrap_or(false);
+    let c = chapters_mut(&mut meta)[i].as_object_mut().ok_or("Внутренняя ошибка главы.")?;
+    if d.contains_key("synopsis") || d.contains_key("notes") || !has_comments {
+        let synopsis = str_cut(d.get("synopsis"), SYNOPSIS_MAX);
+        let notes = str_cut(d.get("notes"), NOTES_MAX);
+        if synopsis.is_empty() { c.remove("synopsis"); } else { c.insert("synopsis".into(), json!(synopsis)); }
+        if notes.is_empty() { c.remove("notes"); } else { c.insert("notes".into(), json!(notes)); }
+    }
+    if has_comments {
+        let comments = clean_comments(d.get("comments"));
+        if comments.is_empty() { c.remove("comments"); } else { c.insert("comments".into(), Value::Array(comments)); }
+    }
+    save_meta(dir, &meta)?;
+    Ok(json!(true))
+}
+
+pub fn board_data(dir: &Path) -> R<Value> {
+    let meta = load_meta(dir)?;
+    let mut out = Vec::new();
+    for c in meta["chapters"].as_array().cloned().unwrap_or_default() {
+        let words = count_words(&read_chapter(dir, c["id"].as_str().unwrap_or(""))?);
+        out.push(json!({
+            "id": c["id"], "title": c["title"], "marker": c.get("marker").cloned().unwrap_or(Value::Null),
+            "synopsis": c.get("synopsis").cloned().unwrap_or_else(|| json!("")), "words": words,
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+/// Картинка карточки в виде data: URL (окно показывает её без доступа к файлам).
+pub fn read_image(dir: &Path, file: &str) -> R<Value> {
+    if !is_image_name(file) { return Err("Неверное имя картинки.".into()); }
+    let bytes = fs::read(dir.join("Картинки").join(file)).map_err(|_| "Картинка не найдена.".to_string())?;
+    let ext = file.rsplit('.').next().unwrap_or("png");
+    let mime = match ext { "jpg" | "jpeg" => "image/jpeg", "webp" => "image/webp", "gif" => "image/gif", _ => "image/png" };
+    Ok(json!(format!("data:{};base64,{}", mime, base64(&bytes))))
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}

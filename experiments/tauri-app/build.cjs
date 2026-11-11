@@ -26,5 +26,5 @@ html = replaceOnce(html, '<script src="dist/app.js"></script>', '<script src="br
 fs.writeFileSync(path.join(out, 'index.html'), html);
 fs.copyFileSync(path.join(root, 'renderer', 'style.css'), path.join(out, 'style.css'));
 fs.copyFileSync(path.join(root, 'renderer', 'dist', 'app.js'), path.join(out, 'dist', 'app.js'));
-fs.copyFileSync(path.join(__dirname, 'bridge.js'), path.join(out, 'bridge.js'));
+require('esbuild').buildSync({ entryPoints: [path.join(__dirname, 'bridge.src.js')], bundle: true, outfile: path.join(out, 'bridge.js'), format: 'iife', platform: 'browser', target: 'chrome120', logLevel: 'info' });
 console.log('experiments/tauri-app/dist готов.');

@@ -1,4 +1,5 @@
 'use strict';
+const declension = require('../../src/declension');
 // Мост окна к Rust: тот же набор функций window.kabinet, что давал preload.js в Electron.
 // Каждый вызов уходит в одну команду Rust `call(channel, args)`. Что ещё не перенесено, отвечает понятной ошибкой.
 (function () {
@@ -79,7 +80,13 @@
     readSound: (s, f) => call('sounds:read', s, f),
     addSounds: (s) => call('sounds:add', s),
     removeSound: (s, f) => call('sounds:remove', s, f),
-    cardIndex: () => call('cards:index'),
+    cardIndex: async () => {
+      const list = await call('cards:index');
+      return list.map((c) => ({
+        ...c,
+        forms: c.inflect ? declension.nameForms(c.title, c.aliases, { kind: c.kind === 'item' ? 'place' : c.kind }) : [], // склонение остаётся на JS, как в Electron
+      }));
+    },
     cardMentions: (k, id) => call('cards:mentions', k, id),
     readImage: (f) => call('image:read', f),
     pickImage: () => call('image:pick'),
