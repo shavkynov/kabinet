@@ -1,10 +1,13 @@
 'use strict';
 
+const { exportLines } = require('./export-spacing');
+
 // Экспорт в RTF без сторонних пакетов. Из Markdown главы берутся абзацы, заголовки, цитаты, списки, разделитель,
 // жирный и курсив; вёрстка как в DOCX: Times New Roman 14, полуторный интервал, красная строка, каждая глава с новой страницы.
 // Всё, что не ASCII, пишется как \uN? (Word, LibreOffice, TextEdit читают так без кодовых страниц). Чтение RTF находится в src/import.js.
 
 const { runs } = require('./docx');
+const { splitAlign } = require('./align');
 
 /** Текст → безопасная для RTF строка: служебные знаки экранируются, не-ASCII превращается в \uN?. */
 function esc(text) {
@@ -37,19 +40,22 @@ const H2 = '\\s2\\outlinelevel1\\keepn\\sb240\\sa160\\fi0\\sl0\\slmult0\\b\\fs32
 
 /** Markdown главы → абзацы RTF. */
 function mdToRtf(md) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  const lines = exportLines(md);
   const out = [];
   let buf = [];
   let kind = null;
   const flush = () => {
     if (buf.length) {
       const text = buf.map(inline).join('\\line ');
-      out.push(kind === 'q' ? para('\\s4\\li709\\fi0\\sl360\\slmult1\\i', text) : para(BODY, text));
+      const al = kind === 'p' ? splitAlign(buf) : null;
+      if (al) out.push(para(`${al.align === 'right' ? '\\qr' : '\\qc'}\\fi0\\sl360\\slmult1\\sa0`, al.lines.map(inline).join('\\line ')));
+      else out.push(kind === 'q' ? para('\\s4\\li709\\fi0\\sl360\\slmult1\\i', text) : para(BODY, text));
     }
     buf = [];
     kind = null;
   };
   for (const line of lines) {
+    if (line === null) { flush(); out.push(para(BODY, '')); continue; }
     let m;
     if (/^\s*$/.test(line)) flush();
     else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); out.push(para(H2, esc(m[2]))); }

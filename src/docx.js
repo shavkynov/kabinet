@@ -1,9 +1,12 @@
 'use strict';
 
+const { exportLines } = require('./export-spacing');
+
 // Экспорт в DOCX без сторонних пакетов: минимальный OOXML-документ, упакованный своим ZIP.
 // Из Markdown редактора берутся абзацы, заголовки, цитаты, списки, разделитель, жирный и курсив.
 
 const zlib = require('zlib');
+const { splitAlign } = require('./align');
 
 const xmlEsc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
   // символы, недопустимые в XML 1.0
@@ -85,7 +88,7 @@ function runs(text) {
   const s = String(text);
   for (let k = 0; k < s.length; k += 1) {
     const ch = s[k];
-    if (ch === '\\' && /[*_#>\-\\]/.test(s[k + 1] || '')) { buf += s[k + 1]; k += 1; continue; }
+    if (ch === '\\' && /[!-\/:-@\[-`{-~]/.test(s[k + 1] || '')) { buf += s[k + 1]; k += 1; continue; } // экранирование Markdown: \~ \[ \] \` \* \_ \\ и т.п.
     if (ch === '*' && s[k + 1] === '*') { push(); b = !b; k += 1; continue; }
     if (ch === '*' || (ch === '_' && !/\w/.test(s[k - 1] || '') !== !/\w/.test(s[k + 1] || ''))) { push(); i = !i; continue; }
     buf += ch;
@@ -105,21 +108,26 @@ function para(style, lines, opts = {}) {
     if (idx) inner.push('<w:r><w:br/></w:r>');
     for (const r of runs(ln)) inner.push(runXml(r));
   });
-  const ppr = `${style ? `<w:pStyle w:val="${style}"/>` : ''}${opts.pageBreak ? '<w:pageBreakBefore/>' : ''}${opts.center ? '<w:jc w:val="center"/>' : ''}`;
+  const jc = opts.center ? 'center' : opts.align || null;
+  const ppr = `${style ? `<w:pStyle w:val="${style}"/>` : ''}${opts.pageBreak ? '<w:pageBreakBefore/>' : ''}${opts.align ? '<w:ind w:firstLine="0"/>' : ''}${jc ? `<w:jc w:val="${jc === 'right' ? 'right' : 'center'}"/>` : ''}`;
   return `<w:p>${ppr ? `<w:pPr>${ppr}</w:pPr>` : ''}${inner.join('')}</w:p>`;
 }
 
 function mdToBody(md) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  const lines = exportLines(md);
   const out = [];
   let buf = [];
   let kind = null; // 'p' | 'q'
   const flush = () => {
-    if (buf.length) out.push(para(kind === 'q' ? 'Quote' : null, buf));
+    if (buf.length) {
+      const al = kind === 'p' ? splitAlign(buf) : null;
+      out.push(al ? para(null, al.lines, { align: al.align }) : para(kind === 'q' ? 'Quote' : null, buf));
+    }
     buf = [];
     kind = null;
   };
   for (const line of lines) {
+    if (line === null) { flush(); out.push(para(null, [])); continue; }
     let m;
     if (/^\s*$/.test(line)) flush();
     else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); out.push(para('Heading2', [m[2]])); }

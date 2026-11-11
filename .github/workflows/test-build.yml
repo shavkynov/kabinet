@@ -1,0 +1,87 @@
+name: Тестовая сборка (Windows, macOS)
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/bugreport-fixes]
+    paths: ['.github/workflows/test-build.yml']  # запуск: правка этого файла в ветке (ручной запуск доступен, когда файл есть в main)
+permissions:
+  contents: read
+concurrency:
+  group: prepare-bugreport-preview
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+  build:
+    needs: verify
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x64
+            ext: exe
+            cmd: npx electron-builder --win portable --x64 --publish never -c.win.signAndEditExecutable=false -c.directories.output=preview-dist -c.artifactName='Kabinet-Test-${version}-win-x64.${ext}' -c.portable.artifactName='Kabinet-Test-${version}-win-x64.${ext}'
+          - os: macos-15
+            name: mac-arm64
+            ext: dmg
+            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.directories.output=preview-dist -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-arm64.${ext}'
+          - os: macos-15
+            name: mac-intel
+            ext: dmg
+            cmd: npx electron-builder --mac dmg --x64 --publish never -c.directories.output=preview-dist -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-Test-${version}-mac-intel.${ext}'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run build
+      - run: ${{ matrix.cmd }}
+        shell: bash
+        env:
+          KABINET_ADHOC: '1'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify binary and record source hash
+        shell: python
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          BUILD_PLATFORM: ${{ matrix.name }}
+          EXPECTED_EXT: ${{ matrix.ext }}
+        run: |
+          import hashlib, json, os
+          from pathlib import Path
+          folder = Path('preview-dist')
+          files = sorted(folder.glob('*.' + os.environ['EXPECTED_EXT']))
+          if len(files) != 1 or files[0].stat().st_size == 0:
+              found = [str(p) for p in folder.rglob('*') if p.is_file()]
+              raise RuntimeError('Expected one nonempty preview binary; found: ' + repr(found))
+          binary = files[0]
+          manifest = {'sourceCommit': os.environ['SOURCE_SHA'], 'platform': os.environ['BUILD_PLATFORM'], 'file': binary.name, 'bytes': binary.stat().st_size, 'sha256': hashlib.file_digest(binary.open('rb'), 'sha256').hexdigest(), 'releasePublished': False, 'isolatedUserData': False}
+          (folder / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-test-${{ matrix.name }}-${{ github.sha }}
+          path: |
+            preview-dist/*.exe
+            preview-dist/*.dmg
+            preview-dist/build-manifest.json
+          if-no-files-found: error

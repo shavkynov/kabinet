@@ -3,7 +3,7 @@
 
 import { Extension } from '@tiptap/core';
 import { Plugin } from '@tiptap/pm/state';
-import { typeChar, fixText } from '../src/typo.js';
+import { typeChar, fixText, emptyToDrop } from '../src/typo.js';
 
 export const Typography = Extension.create({
   name: 'typography',
@@ -41,10 +41,12 @@ export function fixDocTypography(editor, o) {
     return only;
   };
   // Пустые абзацы между абзацами (o.dropEmpty): расстояние между абзацами дают поля или красная строка, а не лишние пустые строки.
+  // o.keepEmpty: сколько пустых строк подряд между абзацами оставить (0 — ни одной); пустые в начале и в конце убираются всегда.
   const empties = new Set();
   if (o.dropEmpty) {
-    state.doc.forEach((node, offset) => { if (node.type.name === 'paragraph' && blank(node)) empties.add(offset); });
-    if (empties.size >= state.doc.childCount) empties.clear(); // пустой документ не трогаем
+    const top = [];
+    state.doc.forEach((node, offset) => top.push({ offset, empty: node.type.name === 'paragraph' && blank(node) }));
+    for (const i of emptyToDrop(top.map((x) => x.empty), o.keepEmpty)) empties.add(top[i].offset);
   }
   state.doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;

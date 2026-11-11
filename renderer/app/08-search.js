@@ -270,7 +270,7 @@ async function exportProject() {
   if (!project) return;
   try {
     await flush();
-    const file = await api.exportProject({ indent: settings.para === 'indent' });
+    const file = await api.exportProject({ indent: settings.para === 'indent', chapterNumbers: settings.exportNumbers === true });
     if (file) setStatus('ok', 'Экспорт готов');
   } catch (err) {
     showError(err.message);

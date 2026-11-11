@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('kabinet', {
   runCheck: (paragraphs, extraWords) => call('check:run', paragraphs, extraWords),
   cancelCheck: () => call('check:cancel'),
   addCheckWord: (w) => call('check:addWord', w),
+  getDictionary: () => call('check:getDictionary'),
+  setDictionary: (words) => call('check:setDictionary', words),
   ignoreCheckRule: (id) => call('check:ignoreRule', id),
   onCheckProgress: (cb) => onData('check:progress', cb),
   onContextMenu: (cb) => onData('ui:contextMenu', cb),
@@ -133,6 +135,7 @@ contextBridge.exposeInMainWorld('kabinet', {
   onBackupNow: (cb) => on('ui:backupNow', cb),
   onOpenBackups: (cb) => on('ui:openBackups', cb),
   onOpenSync: (cb) => on('ui:openSync', cb),
+  onSyncNow: (cb) => on('ui:syncNow', cb),
   onDavEvent: (cb) => onData('dav:event', cb),
   // сетевая папка: один вход, операция в первом аргументе (dav:login, dav:browse …)
   dav: (op, ...args) => davCall(`dav:${op}`, ...args),

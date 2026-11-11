@@ -306,6 +306,8 @@
         <button type="button" data-cmd="quote" title="Цитата">«»</button>
         <button type="button" data-cmd="bullet" title="Маркированный список">•</button>
         <button type="button" data-cmd="ordered" title="Нумерованный список">1.</button>
+        <button type="button" data-cmd="alignC" title="Абзац по центру">≡</button>
+        <button type="button" data-cmd="alignR" title="Абзац по правому краю">⇥</button>
         <button type="button" data-cmd="rule" title="Разделитель">—</button>
       </div>
 
@@ -399,6 +401,10 @@
         </div>
       </div>
       <h3>Дополнительно</h3>
+      <div class="row">
+        <label for="setExportNumbers">Нумеровать главы при экспорте</label>
+        <input id="setExportNumbers" type="checkbox">
+      </div>
       <div class="row">
         <label for="setLinks">Подсвечивать имена из карточек</label>
         <input id="setLinks" type="checkbox">
@@ -516,6 +522,15 @@
       <div class="row">
         <label class="wrap" for="setTypoLayout">Убирать пустые строки между абзацами</label>
         <input id="setTypoLayout" type="checkbox">
+      </div>
+      <div class="row">
+        <label class="wrap" for="setTypoKeep">Оставлять пустых строк подряд, не более</label>
+        <select id="setTypoKeep">
+          <option value="0">0 (убрать все)</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
       </div>
       <div class="row">
         <button id="btnFixTypo" type="button" class="secondary wide-btn">Привести типографику главы в порядок</button>
@@ -699,6 +714,12 @@
           <div class="row">
             <label for="setCheckServer">Свой сервер</label>
             <input id="setCheckServer" class="text" type="text" placeholder="по умолчанию languagetool.org" autocomplete="off" spellcheck="false" translate="no">
+          </div>
+          <p class="hint">Мой словарь: слова, которые проверка не считает ошибками. Они хранятся вместе с проектом и появятся на других устройствах после синхронизации.</p>
+          <div id="dictList" class="dict-list"></div>
+          <div class="row">
+            <input id="dictInput" class="text" type="text" maxlength="80" placeholder="Добавить слово" autocomplete="off" spellcheck="false" aria-label="Добавить слово в словарь">
+            <button id="btnDictAdd" type="button" class="secondary small">Добавить</button>
           </div>
           <div class="row">
             <button id="btnCheckReset" type="button" class="secondary small">Сбросить исключения и согласие</button>

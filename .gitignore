@@ -18,3 +18,4 @@ mobile/*.keystore
 mobile/*.jks
 *.keystore
 *.jks
+ci-diagnostics/
