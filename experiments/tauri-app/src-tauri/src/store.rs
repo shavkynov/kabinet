@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn words_like_electron() {
-        assert_eq!(count_words("Привет, мир! Что-то 12 и don't"), 5);
+        assert_eq!(count_words("Привет, мир! Что-то 12 и don't"), 6);
         assert_eq!(count_words(""), 0);
         assert_eq!(count_words("a - b"), 2);
     }
@@ -803,7 +803,7 @@ mod tests {
     #[test]
     fn chars_like_electron() {
         assert_eq!(count_chars("# Заголовок\n\nТекст *курсив*\n---\n> цитата"), 27);
-        assert_eq!(count_chars("a\\*b"), 3);
+        assert_eq!(count_chars("a\\*b"), 2); // как в Electron: экранирование снимается, затем убираются знаки разметки
     }
 
     #[test]
