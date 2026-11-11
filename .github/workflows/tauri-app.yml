@@ -1,0 +1,68 @@
+name: Кабинет на Tauri (сборка)
+
+on:
+  push:
+    branches: [experiment/tauri-rust]
+    paths:
+      - 'experiments/tauri-app/**'
+      - '.github/workflows/tauri-app.yml'
+      - 'renderer/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Сборка (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            binary: experiments/tauri-app/src-tauri/target/release/kabinet-tauri.exe
+          - os: macos-15
+            binary: experiments/tauri-app/src-tauri/target/release/kabinet-tauri
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Интерфейс для Tauri
+        run: node experiments/tauri-app/build.cjs
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc -Vv
+      - name: Тесты Rust (ядро проекта)
+        run: cargo test --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+      - name: Сборка
+        run: cargo build --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tauri-app-cargo-lock-${{ matrix.os }}-${{ github.sha }}
+          path: experiments/tauri-app/src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-tauri-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,844 @@
+// Хранение проекта на диске. Порт src/project.js (главы, корзина, список недавних) с тем же форматом файлов:
+// проект, созданный здесь, открывается в Electron-версии и наоборот. Неизвестные поля project.json сохраняются.
+use serde_json::{json, Map, Value};
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub type R<T> = Result<T, String>;
+
+const META: &str = "project.json";
+const CHAPTERS_DIR: &str = "Главы";
+const TRASH_DIR: &str = "Корзина";
+const SUBDIRS: [&str; 7] = ["Главы", "Персонажи", "Места", "Предметы", "Заметки", "Изображения", "Корзина"];
+const MARKERS: [&str; 3] = ["red", "orange", "green"];
+const SYNOPSIS_MAX: usize = 200_000;
+const NOTES_MAX: usize = 500_000;
+
+// (ключ списка в project.json, папка, расширение)
+const KINDS: [(&str, &str, &str, &str); 4] = [
+    ("character", "characters", "Персонажи", "json"),
+    ("place", "places", "Места", "json"),
+    ("item", "items", "Предметы", "json"),
+    ("note", "notes", "Заметки", "md"),
+];
+
+const CHAPTER_KEYS: [&str; 7] = ["id", "title", "goal", "marker", "synopsis", "notes", "comments"];
+const ITEM_KEYS: [&str; 3] = ["id", "title", "icon"];
+const TRASH_KEYS: [&str; 12] = ["tid", "kind", "id", "title", "index", "file", "deleted", "icon", "goal", "marker", "synopsis", "notes"];
+const TRASH_OWN: [&str; 7] = ["tid", "kind", "id", "title", "index", "file", "deleted"];
+
+fn kind_info(kind: &str) -> R<(&'static str, &'static str, &'static str)> {
+    KINDS
+        .iter()
+        .find(|k| k.0 == kind)
+        .map(|k| (k.1, k.2, k.3))
+        .ok_or_else(|| "Неизвестный вид записи.".to_string())
+}
+
+// ---------- мелочи ----------
+
+pub fn valid_id(s: &str) -> bool {
+    (6..=32).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase())
+}
+
+fn new_id(taken: &HashSet<String>) -> String {
+    loop {
+        let bytes: [u8; 5] = rand::random();
+        let id: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        if !taken.contains(&id) {
+            return id;
+        }
+    }
+}
+
+fn clean_title(v: Option<&Value>) -> String {
+    let raw = match v {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    raw.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect()
+}
+
+fn clean_goal(v: Option<&Value>) -> Option<i64> {
+    let n = match v {
+        Some(Value::Number(n)) => n.as_f64()?,
+        Some(Value::String(s)) if !s.trim().is_empty() => s.trim().parse::<f64>().ok()?,
+        _ => return None,
+    };
+    if !n.is_finite() {
+        return None;
+    }
+    let g = (n + 0.5).floor() as i64;
+    if (1..=1_000_000).contains(&g) { Some(g) } else { None }
+}
+
+fn clean_icon(v: Option<&Value>) -> Option<String> {
+    let s = v?.as_str()?.trim();
+    if !s.is_empty() && s.encode_utf16().count() <= 16 { Some(s.to_string()) } else { None }
+}
+
+fn clean_deadline(v: Option<&Value>) -> Option<String> {
+    let s = v?.as_str()?;
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' { return None; }
+    let digits = |r: std::ops::Range<usize>| s[r].bytes().all(|c| c.is_ascii_digit());
+    if !(digits(0..4) && digits(5..7) && digits(8..10)) { return None; }
+    let (y, m, d): (i32, u32, u32) = (s[0..4].parse().ok()?, s[5..7].parse().ok()?, s[8..10].parse().ok()?);
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if m >= 1 && m <= 12 && d >= 1 && d <= dim[(m - 1) as usize] { Some(s.to_string()) } else { None }
+}
+
+fn clean_template(v: Option<&Value>) -> Option<Vec<Value>> {
+    let arr = v?.as_array()?;
+    let mut names: Vec<String> = Vec::new();
+    for raw in arr {
+        let n: String = clean_title(Some(raw)).chars().take(100).collect();
+        if !n.is_empty() && !names.contains(&n) { names.push(n); }
+    }
+    names.truncate(60);
+    Some(names.into_iter().map(Value::String).collect())
+}
+
+fn clean_words(arr: &[Value]) -> Vec<Value> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for x in arr {
+        let w = x.as_str().map(|s| s.trim().to_string()).unwrap_or_default();
+        if w.is_empty() || w.encode_utf16().count() > 100 || w.chars().any(|c| (c as u32) < 0x20) || seen.contains(&w) { continue; }
+        seen.insert(w.clone());
+        out.push(Value::String(w));
+        if out.len() >= 5000 { break; }
+    }
+    out
+}
+
+fn clean_comments(v: Option<&Value>) -> Vec<Value> {
+    let Some(list) = v.and_then(|v| v.as_array()) else { return Vec::new() };
+    let s = |c: &Value, k: &str, n: usize| -> String {
+        c.get(k).and_then(|x| x.as_str()).map(|x| x.chars().take(n).collect()).unwrap_or_default()
+    };
+    let mut out = Vec::new();
+    for c in list.iter().take(500) {
+        let Some(id) = c.get("id").and_then(|x| x.as_str()) else { continue };
+        if id.is_empty() || id.chars().count() > 40 || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') { continue; }
+        let pos = c.get("pos").and_then(|p| p.as_f64()).filter(|p| p.is_finite()).map(|p| p.trunc().max(0.0) as i64).unwrap_or(0);
+        let mut e = Map::new();
+        e.insert("id".into(), json!(id));
+        e.insert("text".into(), json!(s(c, "text", 5000)));
+        e.insert("quote".into(), json!(s(c, "quote", 2000)));
+        e.insert("before".into(), json!(s(c, "before", 60)));
+        e.insert("after".into(), json!(s(c, "after", 60)));
+        e.insert("pos".into(), json!(pos));
+        e.insert("ts".into(), json!(s(c, "ts", 40)));
+        if c.get("lost") == Some(&Value::Bool(true)) { e.insert("lost".into(), Value::Bool(true)); }
+        out.push(Value::Object(e));
+    }
+    out
+}
+
+fn carry_unknown(src: &Map<String, Value>, out: &mut Map<String, Value>, known: &[&str]) {
+    for (k, v) in src {
+        if k != "__proto__" && !known.contains(&k.as_str()) && !out.contains_key(k) {
+            out.insert(k.clone(), v.clone());
+        }
+    }
+}
+
+fn is_auto_title(t: &str) -> bool {
+    match t.split_once(' ') {
+        Some((p, n)) => ["Глава", "Рассказ", "Chapter", "Story"].contains(&p) && !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
+fn unit_title(meta: &Map<String, Value>, n: usize) -> String {
+    if meta.get("mode").and_then(|m| m.as_str()) == Some("stories") { format!("Рассказ {}", n) } else { format!("Глава {}", n) }
+}
+
+fn renumber(meta: &mut Map<String, Value>) {
+    let stories = meta.get("mode").and_then(|m| m.as_str()) == Some("stories");
+    if let Some(Value::Array(chapters)) = meta.get_mut("chapters") {
+        for (i, c) in chapters.iter_mut().enumerate() {
+            let auto = c.get("title").and_then(|t| t.as_str()).map(is_auto_title).unwrap_or(false);
+            if auto {
+                let t = if stories { format!("Рассказ {}", i + 1) } else { format!("Глава {}", i + 1) };
+                c["title"] = Value::String(t);
+            }
+        }
+    }
+}
+
+// ---------- время ----------
+
+fn civil(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+fn now_parts() -> (i64, u32, u32, u64, u64, u64, u32) {
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let secs = d.as_secs();
+    let (y, m, day) = civil((secs / 86_400) as i64);
+    (y, m, day, (secs / 3600) % 24, (secs / 60) % 60, secs % 60, d.subsec_millis())
+}
+
+pub fn iso_now() -> String {
+    let (y, m, d, h, mi, s, ms) = now_parts();
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", y, m, d, h, mi, s, ms)
+}
+
+fn stamp() -> String {
+    let (y, m, d, h, mi, s, _) = now_parts();
+    format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, m, d, h, mi, s)
+}
+
+// ---------- файлы ----------
+
+pub fn write_atomic(file: &Path, data: &str) -> R<()> {
+    let tag: [u8; 3] = rand::random();
+    let tmp = PathBuf::from(format!("{}.{}.{:02x}{:02x}{:02x}.tmp", file.display(), std::process::id(), tag[0], tag[1], tag[2]));
+    let result = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(data.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        let mut last = Ok(());
+        for attempt in 0..6 {
+            match fs::rename(&tmp, file) {
+                Ok(()) => return Ok(()),
+                Err(e) => { last = Err(e); std::thread::sleep(std::time::Duration::from_millis(40 * (attempt + 1))); }
+            }
+        }
+        last
+    })();
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Не удалось записать файл: {}", e));
+    }
+    Ok(())
+}
+
+fn meta_path(dir: &Path) -> PathBuf { dir.join(META) }
+
+fn chapter_file(dir: &Path, id: &str) -> R<PathBuf> {
+    if !valid_id(id) { return Err("Неверный идентификатор главы.".into()); }
+    Ok(dir.join(CHAPTERS_DIR).join(format!("{}.md", id)))
+}
+
+fn item_file(dir: &Path, kind: &str, id: &str) -> R<PathBuf> {
+    let (_, d, ext) = kind_info(kind)?;
+    if !valid_id(id) { return Err("Неверный идентификатор.".into()); }
+    Ok(dir.join(d).join(format!("{}.{}", id, ext)))
+}
+
+// ---------- project.json ----------
+
+pub fn load_meta(dir: &Path) -> R<Map<String, Value>> {
+    let raw = match fs::read_to_string(meta_path(dir)) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err("В этой папке нет проекта Кабинета (нет файла project.json).".into());
+        }
+        Err(e) => return Err(format!("Не удалось прочитать project.json: {}", e)),
+    };
+    let parsed: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).map_err(|_| {
+        "Файл project.json повреждён. Программа его не изменяла. Рядом может лежать копия project.json.bak: её можно переименовать в project.json.".to_string()
+    })?;
+    let mut meta = match parsed {
+        Value::Object(m) if m.get("chapters").map(|c| c.is_array()).unwrap_or(false) => m,
+        _ => return Err("Файл project.json имеет неожиданный вид. Программа его не изменяла.".into()),
+    };
+    if meta.get("mode").and_then(|m| m.as_str()) != Some("stories") { meta.remove("mode"); }
+
+    let untitled = "Без названия";
+    let chapters: Vec<Value> = meta["chapters"].as_array().cloned().unwrap_or_default().iter().filter_map(|c| {
+        let src = c.as_object()?;
+        let id = src.get("id")?.as_str()?;
+        if !valid_id(id) { return None; }
+        let mut ch = Map::new();
+        ch.insert("id".into(), json!(id));
+        let t = clean_title(src.get("title"));
+        ch.insert("title".into(), json!(if t.is_empty() { untitled.to_string() } else { t }));
+        if let Some(g) = clean_goal(src.get("goal")) { ch.insert("goal".into(), json!(g)); }
+        if let Some(m) = src.get("marker").and_then(|m| m.as_str()) { if MARKERS.contains(&m) { ch.insert("marker".into(), json!(m)); } }
+        if let Some(s) = src.get("synopsis").and_then(|s| s.as_str()) { if !s.is_empty() { ch.insert("synopsis".into(), json!(s.chars().take(SYNOPSIS_MAX).collect::<String>())); } }
+        if let Some(s) = src.get("notes").and_then(|s| s.as_str()) { if !s.is_empty() { ch.insert("notes".into(), json!(s.chars().take(NOTES_MAX).collect::<String>())); } }
+        let comments = clean_comments(src.get("comments"));
+        if !comments.is_empty() { ch.insert("comments".into(), Value::Array(comments)); }
+        carry_unknown(src, &mut ch, &CHAPTER_KEYS);
+        Some(Value::Object(ch))
+    }).collect();
+    meta.insert("chapters".into(), Value::Array(chapters));
+
+    for (_, list, _, _) in KINDS.iter() {
+        let src_list = meta.get(*list).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let items: Vec<Value> = src_list.iter().filter_map(|c| {
+            let src = c.as_object()?;
+            let id = src.get("id")?.as_str()?;
+            if !valid_id(id) { return None; }
+            let mut it = Map::new();
+            it.insert("id".into(), json!(id));
+            let t = clean_title(src.get("title"));
+            it.insert("title".into(), json!(if t.is_empty() { untitled.to_string() } else { t }));
+            if let Some(i) = clean_icon(src.get("icon")) { it.insert("icon".into(), json!(i)); }
+            carry_unknown(src, &mut it, &ITEM_KEYS);
+            Some(Value::Object(it))
+        }).collect();
+        meta.insert((*list).to_string(), Value::Array(items));
+    }
+
+    let trash_src = meta.get("trash").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let trash: Vec<Value> = trash_src.iter().filter_map(|e| {
+        let src = e.as_object()?;
+        let tid = src.get("tid")?.as_str()?;
+        let id = src.get("id")?.as_str()?;
+        let kind = src.get("kind")?.as_str()?;
+        if !valid_id(id) || !(kind == "chapter" || kind_info(kind).is_ok()) { return None; }
+        let mut out = Map::new();
+        out.insert("tid".into(), json!(tid.chars().take(40).collect::<String>()));
+        out.insert("kind".into(), json!(kind));
+        out.insert("id".into(), json!(id));
+        let t = clean_title(src.get("title"));
+        out.insert("title".into(), json!(if t.is_empty() { untitled.to_string() } else { t }));
+        let index = src.get("index").and_then(|i| i.as_f64()).filter(|i| i.is_finite()).map(|i| i.trunc().max(0.0) as i64).unwrap_or(0);
+        out.insert("index".into(), json!(index));
+        let file = src.get("file").and_then(|f| f.as_str()).unwrap_or("");
+        out.insert("file".into(), json!(Path::new(file).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()));
+        out.insert("deleted".into(), json!(src.get("deleted").and_then(|d| d.as_str()).unwrap_or("")));
+        if let Some(i) = clean_icon(src.get("icon")) { out.insert("icon".into(), json!(i)); }
+        if let Some(g) = clean_goal(src.get("goal")) { out.insert("goal".into(), json!(g)); }
+        if let Some(m) = src.get("marker").and_then(|m| m.as_str()) { if MARKERS.contains(&m) { out.insert("marker".into(), json!(m)); } }
+        if let Some(s) = src.get("synopsis").and_then(|s| s.as_str()) { if !s.is_empty() { out.insert("synopsis".into(), json!(s.chars().take(SYNOPSIS_MAX).collect::<String>())); } }
+        if let Some(s) = src.get("notes").and_then(|s| s.as_str()) { if !s.is_empty() { out.insert("notes".into(), json!(s.chars().take(NOTES_MAX).collect::<String>())); } }
+        carry_unknown(src, &mut out, &TRASH_KEYS);
+        Some(Value::Object(out))
+    }).collect();
+    meta.insert("trash".into(), Value::Array(trash));
+
+    let t = meta.get("templates").and_then(|t| t.as_object()).cloned().unwrap_or_default();
+    let default_character = ["Общее описание", "Возраст", "Рост и телосложение", "Волосы", "Глаза", "Особые приметы", "Одежда", "Характер", "Привычки и манера речи", "Прошлое", "Цели и страхи", "Связи с другими"];
+    let default_place = ["Общее описание", "Расположение", "Климат", "Атмосфера", "Население", "Достопримечательности", "История", "Связанные персонажи"];
+    let defaults = |d: &[&str]| d.iter().map(|x| Value::String(x.to_string())).collect::<Vec<_>>();
+    let character = clean_template(t.get("character")).unwrap_or_else(|| defaults(&default_character));
+    let place = clean_template(t.get("place")).unwrap_or_else(|| defaults(&default_place));
+    meta.insert("templates".into(), json!({ "character": character, "place": place }));
+
+    match clean_goal(meta.get("projectGoal")) { Some(g) => { meta.insert("projectGoal".into(), json!(g)); } None => { meta.remove("projectGoal"); } }
+    // analysisSkip: объект остаётся как есть (в Electron его дополнительно чистит editing.cleanSkip), иначе убирается
+    let skip_ok = meta.get("analysisSkip").and_then(|s| s.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
+    if !skip_ok { meta.remove("analysisSkip"); }
+    if let Some(Value::Array(w)) = meta.get("words").cloned() { meta.insert("words".into(), Value::Array(clean_words(&w))); } else { meta.remove("words"); }
+    match clean_deadline(meta.get("deadline")) { Some(d) => { meta.insert("deadline".into(), json!(d)); } None => { meta.remove("deadline"); } }
+    match clean_goal(meta.get("defaultGoal")) { Some(g) => { meta.insert("defaultGoal".into(), json!(g)); } None => { meta.remove("defaultGoal"); } }
+    let unit_ok = matches!(meta.get("goalUnit").and_then(|u| u.as_str()), Some("words") | Some("chars"));
+    if !unit_ok { meta.remove("goalUnit"); }
+    match clean_goal(meta.get("charLimit")) { Some(g) => { meta.insert("charLimit".into(), json!(g)); } None => { meta.remove("charLimit"); } }
+    Ok(meta)
+}
+
+pub fn save_meta(dir: &Path, meta: &Map<String, Value>) -> R<()> {
+    let p = meta_path(dir);
+    if p.exists() { let _ = fs::copy(&p, format!("{}.bak", p.display())); }
+    let text = serde_json::to_string_pretty(&Value::Object(meta.clone())).map_err(|e| e.to_string())?;
+    write_atomic(&p, &text)
+}
+
+fn items_view(meta: &Map<String, Value>, list: &str) -> Value {
+    Value::Array(meta.get(list).and_then(|v| v.as_array()).map(|a| a.iter().map(|c| json!({
+        "id": c["id"], "title": c["title"], "icon": c.get("icon").cloned().unwrap_or(Value::Null),
+    })).collect()).unwrap_or_default())
+}
+
+pub fn view(dir: &Path, meta: &Map<String, Value>) -> Value {
+    let stories = meta.get("mode").and_then(|m| m.as_str()) == Some("stories");
+    let name = meta.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).map(|n| n.to_string())
+        .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let get = |k: &str| meta.get(k).cloned().unwrap_or(Value::Null);
+    let chapters: Vec<Value> = meta["chapters"].as_array().map(|a| a.iter().map(|c| json!({
+        "id": c["id"], "title": c["title"], "goal": c.get("goal").cloned().unwrap_or(Value::Null), "marker": c.get("marker").cloned().unwrap_or(Value::Null),
+    })).collect()).unwrap_or_default();
+    let trash: Vec<Value> = meta["trash"].as_array().map(|a| a.iter().rev().map(|e| json!({
+        "tid": e["tid"], "kind": e["kind"], "id": e["id"], "title": e["title"], "icon": e.get("icon").cloned().unwrap_or(Value::Null), "deleted": e["deleted"],
+    })).collect()).unwrap_or_default();
+    json!({
+        "name": name,
+        "defaultGoal": get("defaultGoal"),
+        "projectGoal": get("projectGoal"),
+        "analysisSkip": meta.get("analysisSkip").cloned().unwrap_or_else(|| json!({})),
+        "deadline": get("deadline"),
+        "mode": if stories { "stories" } else { "novel" },
+        "goalUnit": if stories { meta.get("goalUnit").cloned().unwrap_or_else(|| json!("chars")) } else { json!("words") },
+        "charLimit": if stories { get("charLimit") } else { Value::Null },
+        "chapters": chapters,
+        "characters": items_view(meta, "characters"),
+        "places": items_view(meta, "places"),
+        "items": items_view(meta, "items"),
+        "notes": items_view(meta, "notes"),
+        "templates": meta["templates"].clone(),
+        "trash": trash,
+    })
+}
+
+fn chapters_mut(meta: &mut Map<String, Value>) -> &mut Vec<Value> {
+    meta.get_mut("chapters").and_then(|c| c.as_array_mut()).expect("chapters проверены при чтении")
+}
+
+fn find_index(meta: &Map<String, Value>, id: &str) -> R<usize> {
+    meta["chapters"].as_array().and_then(|a| a.iter().position(|c| c["id"] == id)).ok_or_else(|| "Глава не найдена в проекте.".to_string())
+}
+
+fn ensure_dirs(dir: &Path) { for d in SUBDIRS.iter() { let _ = fs::create_dir_all(dir.join(d)); } }
+
+// ---------- проект ----------
+
+pub fn create_project(dir: &Path, name: &str, mode: Option<&str>) -> R<Value> {
+    if meta_path(dir).exists() { return Err("В этой папке уже есть проект.".into()); }
+    fs::create_dir_all(dir).map_err(|e| format!("Не удалось создать папку проекта: {}", e))?;
+    ensure_dirs(dir);
+    let id = new_id(&HashSet::new());
+    write_atomic(&chapter_file(dir, &id)?, "")?;
+    let stories = mode == Some("stories");
+    let t = clean_title(Some(&json!(name)));
+    let base = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let mut meta = Map::new();
+    meta.insert("app".into(), json!("kabinet"));
+    meta.insert("version".into(), json!(1));
+    meta.insert("name".into(), json!(if t.is_empty() { base } else { t }));
+    if stories { meta.insert("mode".into(), json!("stories")); }
+    meta.insert("chapters".into(), json!([{ "id": id, "title": if stories { "Рассказ 1" } else { "Глава 1" } }]));
+    for (_, list, _, _) in KINDS.iter() { meta.insert((*list).to_string(), json!([])); }
+    save_meta(dir, &meta)?;
+    let loaded = load_meta(dir)?;
+    Ok(view(dir, &loaded))
+}
+
+/// Открывает проект; файлы глав, которых нет в project.json, добавляются в конец списка, чтобы текст не потерялся.
+pub fn open_project(dir: &Path) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    ensure_dirs(dir);
+    let mut known: HashSet<String> = meta["chapters"].as_array().map(|a| a.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let mut files: Vec<String> = fs::read_dir(dir.join(CHAPTERS_DIR)).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
+    files.sort();
+    let mut changed = false;
+    for f in files {
+        if let Some(stem) = f.strip_suffix(".md") {
+            if valid_id(stem) && !known.contains(stem) {
+                let head: String = stem.chars().take(4).collect();
+                chapters_mut(&mut meta).push(json!({ "id": stem, "title": format!("Найденная глава ({})", head) }));
+                known.insert(stem.to_string());
+                changed = true;
+            }
+        }
+    }
+    if changed { save_meta(dir, &meta)?; }
+    Ok(view(dir, &meta))
+}
+
+// ---------- главы ----------
+
+pub fn add_chapter(dir: &Path, after: Option<&str>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let taken: HashSet<String> = meta["chapters"].as_array().map(|a| a.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let id = new_id(&taken);
+    write_atomic(&chapter_file(dir, &id)?, "")?; // сначала файл, потом запись в project.json: ссылка никогда не ведёт в пустоту
+    let mut at = chapters_mut(&mut meta).len();
+    if let Some(a) = after.filter(|a| !a.is_empty()) {
+        if let Some(i) = chapters_mut(&mut meta).iter().position(|c| c["id"] == a) { at = i + 1; }
+    }
+    let title = unit_title(&meta, at + 1);
+    chapters_mut(&mut meta).insert(at, json!({ "id": id, "title": title }));
+    renumber(&mut meta);
+    save_meta(dir, &meta)?;
+    Ok(json!({ "project": view(dir, &meta), "id": id }))
+}
+
+pub fn rename_chapter(dir: &Path, id: &str, title: &str) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = find_index(&meta, id)?;
+    let t = clean_title(Some(&json!(title)));
+    if !t.is_empty() { chapters_mut(&mut meta)[i]["title"] = json!(t); }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn move_chapter(dir: &Path, id: &str, new_index: f64) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let from = find_index(&meta, id)?;
+    let item = chapters_mut(&mut meta).remove(from);
+    let n = if new_index.is_finite() { new_index.trunc() as i64 } else { 0 };
+    let to = n.clamp(0, chapters_mut(&mut meta).len() as i64) as usize;
+    chapters_mut(&mut meta).insert(to, item);
+    renumber(&mut meta);
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_chapter_goal(dir: &Path, id: &str, goal: Option<&Value>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = find_index(&meta, id)?;
+    match clean_goal(goal) {
+        Some(g) => { chapters_mut(&mut meta)[i]["goal"] = json!(g); }
+        None => { if let Some(o) = chapters_mut(&mut meta)[i].as_object_mut() { o.remove("goal"); } }
+    }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_chapter_marker(dir: &Path, id: &str, marker: Option<&str>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = find_index(&meta, id)?;
+    match marker.filter(|m| MARKERS.contains(m)) {
+        Some(m) => { chapters_mut(&mut meta)[i]["marker"] = json!(m); }
+        None => { if let Some(o) = chapters_mut(&mut meta)[i].as_object_mut() { o.remove("marker"); } }
+    }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn set_default_goal(dir: &Path, goal: Option<&Value>) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    match clean_goal(goal) { Some(g) => { meta.insert("defaultGoal".into(), json!(g)); } None => { meta.remove("defaultGoal"); } }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
+    let file = chapter_file(dir, id)?;
+    match fs::read_to_string(&file) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
+    }
+}
+
+pub fn write_chapter(dir: &Path, id: &str, text: &str) -> R<Value> {
+    let meta = load_meta(dir)?;
+    find_index(&meta, id)?; // пишем только в главы, которые есть в проекте
+    write_atomic(&chapter_file(dir, id)?, text)?;
+    Ok(json!({ "conflict": null }))
+}
+
+// ---------- корзина ----------
+
+fn move_to_trash(dir: &Path, src: &Path, title: &str, id: &str, ext: &str) -> R<String> {
+    if !src.exists() { return Ok(String::new()); }
+    let safe: String = title.chars().map(|c| if "\\/:*?\"<>|".contains(c) { '-' } else { c }).take(60).collect();
+    let name = format!("{} ({}) {}.{}", safe, id, stamp(), ext);
+    fs::create_dir_all(dir.join(TRASH_DIR)).map_err(|e| e.to_string())?;
+    fs::rename(src, dir.join(TRASH_DIR).join(&name)).map_err(|e| format!("Не удалось переместить в корзину: {}", e))?;
+    Ok(name)
+}
+
+fn push_trash(meta: &mut Map<String, Value>, kind: &str, removed: &Value, index: usize, file: &str) {
+    let taken: HashSet<String> = meta["trash"].as_array().map(|a| a.iter().filter_map(|e| e["tid"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let mut entry = Map::new();
+    entry.insert("tid".into(), json!(new_id(&taken)));
+    entry.insert("kind".into(), json!(kind));
+    entry.insert("id".into(), removed["id"].clone());
+    entry.insert("title".into(), removed["title"].clone());
+    entry.insert("index".into(), json!(index));
+    entry.insert("file".into(), json!(file));
+    entry.insert("deleted".into(), json!(iso_now()));
+    if let Some(o) = removed.as_object() {
+        for (k, v) in o { if k != "__proto__" && !TRASH_OWN.contains(&k.as_str()) { entry.insert(k.clone(), v.clone()); } }
+    }
+    if let Some(Value::Array(t)) = meta.get_mut("trash") { t.push(Value::Object(entry)); }
+}
+
+pub fn delete_chapter(dir: &Path, id: &str) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = find_index(&meta, id)?;
+    let removed = chapters_mut(&mut meta).remove(i);
+    let title = removed["title"].as_str().unwrap_or("").to_string();
+    let file = move_to_trash(dir, &chapter_file(dir, id)?, &title, id, "md")?;
+    push_trash(&mut meta, "chapter", &removed, i, &file);
+    renumber(&mut meta);
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+fn trash_index(meta: &Map<String, Value>, tid: &str) -> R<usize> {
+    meta["trash"].as_array().and_then(|a| a.iter().position(|e| e["tid"] == tid)).ok_or_else(|| "Записи нет в корзине.".to_string())
+}
+
+pub fn restore_trash(dir: &Path, tid: &str) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = trash_index(&meta, tid)?;
+    let e = meta["trash"][i].clone();
+    let kind = e["kind"].as_str().unwrap_or("").to_string();
+    let id = e["id"].as_str().unwrap_or("").to_string();
+    let is_chapter = kind == "chapter";
+    let list_key = if is_chapter { "chapters".to_string() } else { kind_info(&kind)?.0.to_string() };
+    let exists = meta[&list_key].as_array().map(|a| a.iter().any(|c| c["id"] == id.as_str())).unwrap_or(false);
+    if exists { return Err("Такая запись уже есть в проекте.".into()); }
+    let dest = if is_chapter { chapter_file(dir, &id)? } else { item_file(dir, &kind, &id)? };
+    let file = e["file"].as_str().unwrap_or("");
+    let src = if file.is_empty() { None } else { Some(dir.join(TRASH_DIR).join(file)) };
+    match src {
+        Some(s) if s.exists() => {
+            if let Some(p) = dest.parent() { let _ = fs::create_dir_all(p); }
+            fs::rename(&s, &dest).map_err(|er| format!("Не удалось вернуть файл из корзины: {}", er))?;
+        }
+        _ if !dest.exists() => {
+            if !file.is_empty() {
+                return Err("Файл этой записи пропал из Корзины, вернуть её нельзя. Запись можно удалить из корзины насовсем.".into());
+            }
+            if !is_chapter && kind_info(&kind)?.2 != "md" {
+                return Err("Карточку без файла пока нельзя восстановить в этой версии.".into());
+            }
+            write_atomic(&dest, "")?;
+        }
+        _ => {}
+    }
+    let mut item = Map::new();
+    item.insert("id".into(), json!(id));
+    item.insert("title".into(), e["title"].clone());
+    if let Some(o) = e.as_object() {
+        for (k, v) in o { if k != "__proto__" && !TRASH_OWN.contains(&k.as_str()) { item.insert(k.clone(), v.clone()); } }
+    }
+    let at = (e["index"].as_u64().unwrap_or(0) as usize).min(meta[&list_key].as_array().map(|a| a.len()).unwrap_or(0));
+    if let Some(Value::Array(list)) = meta.get_mut(&list_key) { list.insert(at, Value::Object(item)); }
+    if let Some(Value::Array(t)) = meta.get_mut("trash") { t.remove(i); }
+    if is_chapter { renumber(&mut meta); }
+    save_meta(dir, &meta)?;
+    Ok(json!({ "project": view(dir, &meta), "kind": kind, "id": id }))
+}
+
+fn remove_trash_file(dir: &Path, e: &Value) -> R<()> {
+    let file = e["file"].as_str().unwrap_or("");
+    if file.is_empty() { return Ok(()); }
+    match fs::remove_file(dir.join(TRASH_DIR).join(file)) {
+        Ok(()) => Ok(()),
+        Err(er) if er.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(er) => Err(format!("Не удалось удалить файл из корзины: {}", er)),
+    }
+}
+
+pub fn purge_trash(dir: &Path, tid: &str) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let i = trash_index(&meta, tid)?;
+    remove_trash_file(dir, &meta["trash"][i])?;
+    if let Some(Value::Array(t)) = meta.get_mut("trash") { t.remove(i); }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+pub fn empty_trash(dir: &Path) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    for e in meta["trash"].as_array().cloned().unwrap_or_default() { remove_trash_file(dir, &e)?; }
+    meta.insert("trash".into(), json!([]));
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+// ---------- недавние проекты ----------
+
+const RECENTS_MAX: usize = 15;
+
+fn recents_raw(file: &Path) -> Vec<Value> {
+    fs::read_to_string(file).ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_array().cloned())
+        .map(|a| a.into_iter().filter(|x| x.get("path").and_then(|p| p.as_str()).is_some()).collect())
+        .unwrap_or_default()
+}
+
+fn recents_write(file: &Path, list: &[Value]) -> R<()> {
+    if let Some(p) = file.parent() { let _ = fs::create_dir_all(p); }
+    write_atomic(file, &serde_json::to_string_pretty(list).map_err(|e| e.to_string())?)
+}
+
+pub fn recents_add(file: &Path, path: &str, name: &str) -> R<()> {
+    let mut list: Vec<Value> = recents_raw(file).into_iter().filter(|x| x["path"] != path).collect();
+    list.insert(0, json!({ "path": path, "name": name, "lastOpened": iso_now() }));
+    list.truncate(RECENTS_MAX);
+    recents_write(file, &list)
+}
+
+pub fn recents_remove(file: &Path, path: &str) -> R<()> {
+    let list: Vec<Value> = recents_raw(file).into_iter().filter(|x| x["path"] != path).collect();
+    recents_write(file, &list)
+}
+
+pub fn recents_has(file: &Path, path: &str) -> bool { recents_raw(file).iter().any(|x| x["path"] == path) }
+
+pub fn recents_list(file: &Path) -> Value {
+    Value::Array(recents_raw(file).into_iter().map(|mut x| {
+        let exists = x["path"].as_str().map(|p| Path::new(p).join(META).exists()).unwrap_or(false);
+        x["exists"] = Value::Bool(exists);
+        x
+    }).collect())
+}
+
+pub fn safe_folder_name(name: &str) -> R<String> {
+    let replaced: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) { '-' } else { c }).collect();
+    let n = replaced.trim_start_matches('.').trim().trim_end_matches(|c| c == '.' || c == ' ').to_string();
+    if n.is_empty() { return Err("Введите название проекта.".into()); }
+    let reserved = {
+        let l = n.to_lowercase();
+        ["con", "prn", "aux", "nul"].contains(&l.as_str())
+            || ((l.starts_with("com") || l.starts_with("lpt")) && l.len() == 4 && l.as_bytes()[3].is_ascii_digit())
+    };
+    let n = if reserved { format!("_{}", n) } else { n };
+    Ok(n.chars().take(80).collect())
+}
+
+// ---------- объём текста ----------
+
+fn is_word_char(c: char) -> bool { c.is_alphabetic() || c.is_numeric() }
+
+/// Слова: буквы и цифры, внутри слова допустимы дефис, короткое тире и апострофы (как WORD_RE в Electron-версии).
+pub fn count_words(text: &str) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    let mut n = 0;
+    while i < chars.len() {
+        if !is_word_char(chars[i]) { i += 1; continue; }
+        n += 1;
+        while i < chars.len() {
+            if is_word_char(chars[i]) { i += 1; continue; }
+            if "-–’'".contains(chars[i]) && i + 1 < chars.len() && is_word_char(chars[i + 1]) { i += 2; continue; }
+            break;
+        }
+    }
+    n
+}
+
+fn strip_line_prefix(line: &str) -> String {
+    let t = line.trim_start();
+    let b: Vec<char> = t.chars().collect();
+    let ws = |c: char| c.is_whitespace();
+    // заголовок: от одного до шести «#» и пробел
+    let hashes = b.iter().take_while(|c| **c == '#').count();
+    if (1..=6).contains(&hashes) && b.get(hashes).map(|c| ws(*c)).unwrap_or(false) {
+        let mut k = hashes;
+        while k < b.len() && ws(b[k]) { k += 1; }
+        return b[k..].iter().collect();
+    }
+    if b.first() == Some(&'>') {
+        let k = if b.get(1).map(|c| ws(*c)).unwrap_or(false) { 2 } else { 1 };
+        return b[k..].iter().collect();
+    }
+    if matches!(b.first(), Some('-') | Some('*') | Some('+')) && b.get(1).map(|c| ws(*c)).unwrap_or(false) {
+        let mut k = 1;
+        while k < b.len() && ws(b[k]) { k += 1; }
+        return b[k..].iter().collect();
+    }
+    let digits = b.iter().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 && matches!(b.get(digits), Some('.') | Some(')')) && b.get(digits + 1).map(|c| ws(*c)).unwrap_or(false) {
+        let mut k = digits + 1;
+        while k < b.len() && ws(b[k]) { k += 1; }
+        return b[k..].iter().collect();
+    }
+    line.to_string()
+}
+
+/// Знаки с пробелами: Markdown без разметки и без переводов строк (как charCount в Electron-версии).
+pub fn count_chars(md: &str) -> usize {
+    let normalized = md.replace("\r\n", "\n").replace('\r', "\n");
+    let joined: String = normalized
+        .split('\n')
+        .filter(|l| {
+            let t = l.trim();
+            let mut cs = t.chars();
+            match cs.next() {
+                Some(f) if (f == '-' || f == '*' || f == '_') && t.chars().count() >= 3 => !t.chars().all(|c| c == f),
+                _ => true,
+            }
+        })
+        .map(strip_line_prefix)
+        .collect::<Vec<_>>()
+        .join("");
+    let cs: Vec<char> = joined.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < cs.len() {
+        if cs[i] == '\\' && i + 1 < cs.len() && "*_#>-\\".contains(cs[i + 1]) { out.push(cs[i + 1]); i += 2; continue; }
+        out.push(cs[i]);
+        i += 1;
+    }
+    out.chars().filter(|c| *c != '*' && *c != '_').map(|c| c.len_utf16()).sum()
+}
+
+pub fn project_stats(dir: &Path) -> R<Value> {
+    let meta = load_meta(dir)?;
+    let mut total = 0usize;
+    let mut total_chars = 0usize;
+    let mut chapters = Vec::new();
+    for c in meta["chapters"].as_array().cloned().unwrap_or_default() {
+        let id = c["id"].as_str().unwrap_or("");
+        let text = read_chapter(dir, id)?;
+        let (w, ch) = (count_words(&text), count_chars(&text));
+        total += w;
+        total_chars += ch;
+        chapters.push(json!({ "id": id, "words": w, "chars": ch }));
+    }
+    Ok(json!({ "total": total, "totalChars": total_chars, "chapters": chapters }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn words_like_electron() {
+        assert_eq!(count_words("Привет, мир! Что-то 12 и don't"), 5);
+        assert_eq!(count_words(""), 0);
+        assert_eq!(count_words("a - b"), 2);
+    }
+
+    #[test]
+    fn chars_like_electron() {
+        assert_eq!(count_chars("# Заголовок\n\nТекст *курсив*\n---\n> цитата"), 27);
+        assert_eq!(count_chars("a\\*b"), 3);
+    }
+
+    #[test]
+    fn titles_and_ids() {
+        assert!(valid_id("abc123"));
+        assert!(!valid_id("ABC123"));
+        assert!(is_auto_title("Глава 12"));
+        assert!(!is_auto_title("Глава"));
+        assert_eq!(safe_folder_name("a/b:c").unwrap(), "a-b-c");
+        assert_eq!(safe_folder_name("con").unwrap(), "_con");
+    }
+
+    #[test]
+    fn project_roundtrip_keeps_unknown_fields() {
+        let dir = std::env::temp_dir().join(format!("kab-rs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let proj = create_project(&dir, "Книга", None).unwrap();
+        assert_eq!(proj["chapters"].as_array().unwrap().len(), 1);
+        let mut meta = load_meta(&dir).unwrap();
+        meta.insert("futureField".into(), json!({ "a": 1 }));
+        meta.get_mut("chapters").unwrap()[0].as_object_mut().unwrap().insert("future".into(), json!("x"));
+        save_meta(&dir, &meta).unwrap();
+        let added = add_chapter(&dir, None).unwrap();
+        let id = added["id"].as_str().unwrap().to_string();
+        write_chapter(&dir, &id, "Текст").unwrap();
+        assert_eq!(read_chapter(&dir, &id).unwrap(), "Текст");
+        let again = load_meta(&dir).unwrap();
+        assert_eq!(again["futureField"]["a"], 1);
+        assert_eq!(again["chapters"][0]["future"], "x");
+        let after = delete_chapter(&dir, &id).unwrap();
+        assert_eq!(after["trash"].as_array().unwrap().len(), 1);
+        let tid = after["trash"][0]["tid"].as_str().unwrap().to_string();
+        restore_trash(&dir, &tid).unwrap();
+        assert_eq!(read_chapter(&dir, &id).unwrap(), "Текст");
+        assert_eq!(load_meta(&dir).unwrap()["chapters"].as_array().unwrap().len(), 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
