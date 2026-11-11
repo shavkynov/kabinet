@@ -560,7 +560,9 @@ test('экспорт: markdown, текст, html', () => {
   project.writeChapter(dir, a, 'Один **жирный** и *косой* <тег>.\n\n> цитата\n\n- раз\n- два\n\n---\n\nконец');
   const md = buildExport(dir, 'md');
   assert.match(md, /^# Книга/);
-  assert.match(md, /## 1\. Начало/);
+  assert.match(md, /^## Начало$/m);
+  assert.doesNotMatch(md, /^## 1\. Начало$/m);
+  assert.match(buildExport(dir, 'md', 'ru', { chapterNumbers: true }), /^## 1\. Начало$/m);
   const txt = buildExport(dir, 'txt');
   assert.match(txt, /Один жирный и косой <тег>\./);
   assert.match(txt, /\n\*\*\*\n/); // разделитель в тексте: строка ***

@@ -311,7 +311,7 @@ function fixChapterTypography() {
   }
   // Галочка «Убирать пустые строки между абзацами» отвечает только за пустые абзацы. Режим «Абзацы» (отступ или красная строка)
   // типографика не трогает: раньше она включала красную строку сама, и выключить это было нечем.
-  const { fixed, removed } = fixDocTypography(editor, { quotes: true, dashes: true, nbsp: settings.typoNbsp, tidy: true, dropEmpty: settings.typoLayout });
+  const { fixed, removed } = fixDocTypography(editor, { quotes: true, dashes: true, nbsp: settings.typoNbsp, tidy: true, dropEmpty: settings.typoLayout, keepEmpty: settings.typoKeep });
   const parts = [];
   if (fixed) parts.push(t('исправлено мест — {0}', fixed));
   if (removed) parts.push(t('убрано пустых строк между абзацами — {0}', removed));

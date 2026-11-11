@@ -29,6 +29,7 @@ const SHORT_MAX = 50_000;
 const ID_RE = /^[a-z0-9]{6,32}$/;
 const ORPHAN_RE = /^([a-z0-9]{6,32})\.md$/;
 const { t: tr } = require('./i18n'); // названия по умолчанию подставляются на языке интерфейса при создании
+const dict = require('./dict');
 // Главы, которым автор не давал своего названия, называются «Глава N» и сами перенумеровываются по месту в списке.
 // В режиме «Рассказы» то же самое, но «Рассказ N».
 const AUTO_TITLE_RE = /^(Глава|Рассказ|Chapter|Story) \d+$/;
@@ -206,6 +207,9 @@ function loadMeta(dir) {
   const analysisSkip = cleanSkip(meta.analysisSkip);
   if (Object.keys(analysisSkip).length) meta.analysisSkip = analysisSkip;
   else delete meta.analysisSkip;
+  // словарь проекта: пустой список остаётся (это «слов нет», а не «списка нет»), чтобы удаление слов дошло до других устройств
+  if (Array.isArray(meta.words)) meta.words = dict.cleanWords(meta.words);
+  else delete meta.words;
   const deadline = cleanDeadline(meta.deadline);
   if (deadline) meta.deadline = deadline;
   else delete meta.deadline;
@@ -453,6 +457,19 @@ function setProjectGoal(dir, goal) {
   else delete meta.projectGoal;
   saveMeta(dir, meta);
   return view(dir, meta);
+}
+
+/** Словарь проекта (слова, которые проверка не считает ошибками) или null, если у проекта своего списка ещё нет. */
+function projectWords(dir) {
+  const w = loadMeta(dir).words;
+  return Array.isArray(w) ? w : null;
+}
+
+function setProjectWords(dir, words) {
+  const meta = loadMeta(dir);
+  meta.words = dict.cleanWords(words);
+  saveMeta(dir, meta);
+  return meta.words;
 }
 
 /** Исключения подсветки «Не отмечать здесь»: { adv: [...], passive: [...], long: [...], repeat: [...], filler: [...] }. */
@@ -931,6 +948,8 @@ function projectStats(dir) {
 }
 
 module.exports = {
+  projectWords,
+  setProjectWords,
   importChapters,
   setAnalysisSkip,
   restoreTrash,

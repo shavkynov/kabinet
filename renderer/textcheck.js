@@ -254,7 +254,55 @@ export function initTextCheck(ctx) {
     }
   }
 
+  // ----- «Мой словарь» (настройки проверки): слова проекта, их можно убрать или добавить вручную -----
+  let dictWords = [];
+  function renderDict() {
+    const box = $('#dictList');
+    box.textContent = '';
+    if (!dictWords.length) {
+      const e = document.createElement('span');
+      e.className = 'dict-empty';
+      e.textContent = t('Пока пусто');
+      box.append(e);
+      return;
+    }
+    for (const w of dictWords) {
+      const chip = document.createElement('span');
+      chip.className = 'dict-word';
+      chip.append(document.createTextNode(w));
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.title = t('Убрать «{0}»', w);
+      x.setAttribute('aria-label', x.title);
+      x.addEventListener('click', () => saveDict(dictWords.filter((y) => y !== w)));
+      chip.append(x);
+      box.append(chip);
+    }
+  }
+  async function saveDict(next) {
+    try { dictWords = await api.setDictionary(next); } catch (err) { ctx.showError(err.message); }
+    renderDict();
+  }
+  async function loadDict() {
+    try { dictWords = await api.getDictionary(); } catch { dictWords = []; }
+    renderDict();
+  }
+  function addDictWord() {
+    const inp = $('#dictInput');
+    const w = inp.value.trim();
+    if (!w) return;
+    inp.value = '';
+    if (!dictWords.includes(w)) saveDict([...dictWords, w]);
+  }
+  $('#btnDictAdd').addEventListener('click', addDictWord);
+  $('#dictInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addDictWord(); }
+    else if (e.key !== 'Escape') e.stopPropagation();
+  });
+
   async function open() {
+    loadDict();
     try { cfg = await api.getCheckConfig(); } catch { /* значения по умолчанию */ }
     $('#setCheckLang').value = cfg.lang;
     $('#setCheckServer').value = cfg.server;
@@ -314,6 +362,7 @@ export function initTextCheck(ctx) {
     const word = d.spec.text;
     try {
       await api.addCheckWord(word);
+      loadDict();
       // убираем все такие же подчёркивания
       for (const x of decos().filter((y) => y.spec.kind === 'spelling' && y.spec.text.toLowerCase() === word.toLowerCase())) dispatch({ remove: x.spec.id });
       ctx.setStatus('ok', t('«{0}» добавлено в словарь', word));

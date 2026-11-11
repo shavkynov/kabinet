@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { typeChar, fixText, applyEdits, NB } = require('../src/typo');
+const { typeChar, fixText, applyEdits, NB, emptyToDrop } = require('../src/typo');
 
 // Набираем строку по одному символу, как в редакторе.
 function type(str, opts) {
@@ -124,4 +124,35 @@ test('tidy: ничего лишнего и повторный прогон ни�
   assert.equal(tidy(once), once);
   const edits = fixText(mess, { nbsp: false, tidy: true });
   assert.ok(edits.every((e, i) => e.from >= 0 && e.to <= mess.length && e.from <= e.to && (i === 0 || e.from >= edits[i - 1].to)));
+});
+
+// ---------- пустые строки между абзацами ----------
+const E = true; // пустой абзац
+const P = false; // абзац с текстом
+const drop = (flags, keep) => [...emptyToDrop(flags, keep)].sort((a, b) => a - b);
+
+test('пустые строки: по умолчанию убираются все, как раньше', () => {
+  assert.deepEqual(drop([P, E, P, E, E, P]), [1, 3, 4]);
+  assert.deepEqual(drop([P, E, P, E, E, P], 0), [1, 3, 4]);
+});
+
+test('пустые строки: из серии остаётся не больше N первых', () => {
+  assert.deepEqual(drop([P, E, E, E, E, P], 2), [3, 4]);
+  assert.deepEqual(drop([P, E, P, E, E, E, P], 1), [4, 5]);
+  assert.deepEqual(drop([P, E, E, P], 3), []);
+});
+
+test('пустые строки: в начале и в конце убираются всегда', () => {
+  assert.deepEqual(drop([E, E, P, E, P, E], 2), [0, 1, 5]);
+});
+
+test('пустые строки: документ из одних пустых и пустой документ не трогаются', () => {
+  assert.deepEqual(drop([E, E, E], 0), []);
+  assert.deepEqual(drop([], 2), []);
+});
+
+test('пустые строки: N вне 0-3 и мусор приводятся к допустимому', () => {
+  assert.deepEqual(drop([P, E, E, E, E, E, P], 99), [4, 5]); // не больше 3
+  assert.deepEqual(drop([P, E, E, P], -5), [1, 2]);
+  assert.deepEqual(drop([P, E, E, P], 'x'), [1, 2]);
 });

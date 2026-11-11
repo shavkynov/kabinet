@@ -23,35 +23,52 @@ function markDirty() {
   saveTimer = setTimeout(flush, SAVE_DELAY_MS);
 }
 
+// Возвращает false, если текст открытого документа записать не удалось: переходить к другому документу или закрывать проект нельзя.
 async function flush() {
   refreshCommentAnchors();
-  await flushDoc();
+  const saved = await flushDoc();
   await flushNote();
   await flushComments();
   await flushChapMeta();
   await flushPane2();
+  return saved;
+}
+
+// Запись, которая не удалась (диск, права, закрытая папка). Повторяется с тем же текстом и в тот же документ,
+// даже если на экране уже другая глава: иначе её текст ушёл бы в файл прежней.
+let failedWrite = null; // { id, kind, text }
+
+async function writeDocJob(job) {
+  try {
+    const res = job.kind === 'chapter' ? await api.writeChapter(job.id, job.text) : await api.writeItem(job.kind, job.id, job.text);
+    if (failedWrite === job) failedWrite = null;
+    setStatus('ok', 'Сохранено');
+    noteSyncConflict(res);
+    if (job.kind !== 'chapter') refreshIndex(); // имена и краткая справка могли измениться
+    return true;
+  } catch (err) {
+    failedWrite = job;
+    if (job.id === currentId && job.kind === currentKind) dirty = true; // на экране тот же документ: повторим уже с новым текстом
+    setStatus('error', 'Не удалось сохранить! Повтор через 3 с…');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 3000);
+    console.error('save failed:', err);
+    return false;
+  }
 }
 
 async function flushDoc() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  if (!dirty || !dirtyId) return;
-  const id = dirtyId;
-  const kind = dirtyKind;
-  const text = snapshot(kind);
-  dirty = false;
-  try {
-    const res = kind === 'chapter' ? await api.writeChapter(id, text) : await api.writeItem(kind, id, text);
-    setStatus('ok', 'Сохранено');
-    noteSyncConflict(res);
-    if (kind !== 'chapter') refreshIndex(); // имена и краткая справка могли измениться
-  } catch (err) {
-    dirty = true; // оставляем «грязным», чтобы повторить
-    setStatus('error', 'Не удалось сохранить! Повтор через 3 с…');
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(flush, 3000);
-    console.error('save failed:', err);
+  if (failedWrite) {
+    const newer = dirty && dirtyId === failedWrite.id && dirtyKind === failedWrite.kind;
+    if (newer) failedWrite = null; // на экране тот же документ с более свежим текстом
+    else if (!(await writeDocJob(failedWrite))) return false;
   }
+  if (!dirty || !dirtyId) return true;
+  const job = { id: dirtyId, kind: dirtyKind, text: snapshot(dirtyKind) };
+  dirty = false;
+  return writeDocJob(job);
 }
 
 // При закрытии окна ждать ответа нельзя, поэтому пишем синхронно.
@@ -87,6 +104,14 @@ window.addEventListener('beforeunload', () => {
       noteDirty = false;
     } catch (err) {
       console.error('final note save failed:', err);
+    }
+  }
+  if (failedWrite && !(dirty && dirtyId === failedWrite.id && dirtyKind === failedWrite.kind)) {
+    try {
+      api.writeDocSync(failedWrite.kind, failedWrite.id, failedWrite.text);
+      failedWrite = null;
+    } catch (err) {
+      console.error('final save of failed write failed:', err);
     }
   }
   if (dirty && dirtyId) {

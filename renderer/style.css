@@ -305,6 +305,8 @@ body.mode-stories .stories-only.block { display: block !important; }
 .ProseMirror blockquote { margin: 0 0 .85em; padding-left: 1em; border-left: 3px solid var(--line); color: var(--muted); }
 .ProseMirror ul, .ProseMirror ol { padding-left: 1.5em; margin: 0 0 .85em; }
 /* разделитель выглядит как «***» (так же он копируется в текст, см. clipboardText в 03-editor.js), а не как полоса */
+.ProseMirror p[data-align="center"] { text-align: center; text-indent: 0; }
+.ProseMirror p[data-align="right"] { text-align: right; text-indent: 0; }
 .ProseMirror hr { border: none; height: auto; overflow: visible; margin: 1.2em 0; text-align: center; color: var(--muted); }
 .ProseMirror hr::before { content: "***"; letter-spacing: .3em; padding-left: .3em; }
 .ProseMirror hr.ProseMirror-selectednode { background: var(--sel); border-radius: 4px; }
@@ -1193,7 +1195,16 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 :root[data-theme="dark"][data-paper="warm"] { --paper: #2a251d; }
 
 /* ---------- окно «Синхронизация» (WebDAV) ---------- */
+.dict-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.dict-list .dict-empty { font-size: 13px; color: var(--muted); }
+.dict-list .dict-word { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border: 1px solid rgba(128, 128, 128, .35); border-radius: 999px; font-size: 13px; }
+.dict-list .dict-word button { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; border-radius: 50%; cursor: pointer; }
+.dict-list .dict-word button:hover { color: var(--text); background: rgba(128, 128, 128, .18); }
 #syncDialog { width: 460px; }
+#syncDialog .sync-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+#syncDialog .sync-head h2 { margin: 0; }
+#syncDialog button.sync-x { flex: none; width: 28px; height: 28px; padding: 0; margin: -4px -6px 0 0; font-size: 20px; line-height: 1; border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
+#syncDialog button.sync-x:hover { color: var(--text, inherit); background: rgba(128, 128, 128, .15); }
 #syncDialog .sync-line { margin: 8px 0 0; font-size: 14px; line-height: 1.45; }
 #syncDialog .sync-line.muted { color: var(--muted); }
 #syncDialog .sync-line.err { color: #e5484d; }

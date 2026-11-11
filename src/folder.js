@@ -20,11 +20,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { writeFileAtomic } = require('./fsutil');
 const { CONFLICT_DIR, stamp, safeName } = require('./syncguard');
+const dictLib = require('./dict');
 
 // Что переносим в папку и обратно. «Копии» (резервные) и временные файлы не нужны:
 // на другом устройстве они только мешают. Замок kabinet.lock не входит: телефон пишет его
 // в папку сам (через adapter) и иначе он вечно конфликтовал бы с компьютерным замком.
 const FOLDERS = ['Главы', 'Персонажи', 'Места', 'Предметы', 'Заметки', 'Изображения', 'Корзина', CONFLICT_DIR];
+// Сколько файлов должно пропасть снаружи за один проход (и не меньше половины отслеживаемых), чтобы счесть ответ неполным.
+const MASS_DELETE_MIN = 5;
 const ROOT_FILES = /^project.*\.json$|^stats\.json$/;
 
 function isSyncable(rel) {
@@ -256,6 +259,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
 
     const metaDiffers = JSON.stringify(remoteMeta) !== JSON.stringify(localMeta);
     const hasLocalContent = added.length > 0 || trashExtra.length > 0
+      || Object.hasOwn(localMeta, 'words')
       || (Array.isArray(localMeta.chapters) && localMeta.chapters.some((c) => {
         if (!c || typeof c.id !== 'string') return false;
         try { return !!asText(readLocal(`Главы/${c.id}.md`)).trim(); } catch { return false; }
@@ -311,6 +315,14 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
       .filter((rel) => isSyncable(rel))
       .sort();
 
+    // Второй вид неполного ответа: корень на месте, но часть файлов не перечислена (обрыв, лимит страниц).
+    // Одна-две удалённые главы — обычное дело; массовое исчезновение нельзя принимать за удаление на другом устройстве.
+    const vanished = rels.filter((rel) => state[rel] !== undefined && !remote.has(rel) && local.get(rel) === state[rel]);
+    const tracked = Object.keys(state).filter((rel) => isSyncable(rel)).length;
+    if (vanished.length >= MASS_DELETE_MIN && vanished.length * 2 >= tracked) {
+      throw new Error('Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.');
+    }
+
     for (const rel of rels) {
       const r = remote.has(rel) ? remote.get(rel).hash : undefined;
       const l = local.get(rel);
@@ -326,9 +338,12 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
           res.pulled.push(rel);
           continue;
         }
-        await keepForeign(rel, await remoteBytes(remote.get(rel), rel), labelOf(rel));
+        const foreign = await remoteBytes(remote.get(rel), rel);
+        await keepForeign(rel, foreign, labelOf(rel));
+        const withWords = rel === 'project.json' ? dictLib.mergeMetaWords(readLocal(rel), foreign) : null; // слова, добавленные на другом устройстве, не теряем
+        if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
         await adapter.write(rel, readLocal(rel));
-        state[rel] = l;
+        state[rel] = withWords ? hashBytes(withWords) : l;
         res.pushed.push(rel);
         res.conflicts.push(rel);
         continue;

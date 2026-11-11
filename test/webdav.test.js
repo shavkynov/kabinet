@@ -181,3 +181,12 @@ test('компьютер: связь проекта с сетевой папко
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('http:// допустим только в домашней сети, через интернет пароль не отправляется', () => {
+  for (const ok of ['http://localhost', 'http://127.0.0.1:8080', 'http://192.168.1.5/dav', 'http://10.0.0.2', 'http://172.20.1.1', 'http://nas.local', 'http://nas', 'https://dav.example.com']) {
+    assert.doesNotThrow(() => dav.createWebDav({ url: ok, user: 'u', pass: 'p', request: async () => ({ status: 200, headers: {}, body: new Uint8Array() }) }), ok);
+  }
+  for (const bad of ['http://dav.example.com', 'http://8.8.8.8', 'http://172.32.0.1', 'http://192.169.1.1']) {
+    assert.throws(() => dav.createWebDav({ url: bad, user: 'u', pass: 'p', request: async () => ({}) }), /https/, bad);
+  }
+});

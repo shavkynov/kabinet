@@ -1,5 +1,7 @@
 'use strict';
 
+const { exportLines } = require('./export-spacing');
+
 // Экспорт глав проекта одним файлом: Markdown, обычный текст, RTF, HTML (из него же печатается PDF).
 
 const project = require('./project');
@@ -7,28 +9,38 @@ const { buildDocx } = require('./docx');
 const { buildRtf } = require('./rtf');
 const { t: tr } = require('./i18n');
 const { INDENT } = require('./clip');
+const { splitAlign, stripAlign } = require('./align');
+
+// Порядковый номер нужен программе для учёта порядка глав. В готовый файл он попадает только по настройке
+// «Нумеровать главы при экспорте» (opts.chapterNumbers); в режиме «Рассказы» номеров нет.
+const chapterTitle = (title, i, numbered = false) => (numbered ? `${i + 1}. ${title}` : title);
 
 const escapeHtml = (s) => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function inline(text) {
   let t = escapeHtml(text);
-  t = t.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
+  t = t.replace(/(?<!\\)\*\*([^*\n]+?)(?<!\\)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^*\w\\])\*([^*\n]+?)(?<!\\)\*(?!\*)/g, '$1<em>$2</em>');
   t = t.replace(/(^|[^\w])_([^_\n]+?)_(?!\w)/g, '$1<em>$2</em>');
-  return t.replace(/\\([*_#>\-\\])/g, '$1');
+  // экранирование Markdown (редактор пишет \~ \[ \] \` \* \_ \\ …); &, <, > и " уже превращены в сущности
+  return t.replace(/\\(&(?:amp|lt|gt|quot);|[!#$%'()*+,\-./:;=?@[\\\]^_`{|}~])/g, '$1');
 }
 
 /** Небольшой преобразователь Markdown редактора (абзацы, заголовки, цитаты, списки, разделитель). */
 function mdToHtml(md) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  const lines = exportLines(md);
   const out = [];
   let para = [];
   let list = null; // 'ul' | 'ol'
   let quote = [];
 
   const flushPara = () => {
-    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    if (para.length) {
+      const al = splitAlign(para);
+      if (al) out.push(`<p class="${al.align}" style="text-align:${al.align === 'center' ? 'center' : 'right'};text-indent:0">${al.lines.map(inline).join('<br>')}</p>`);
+      else out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    }
     para = [];
   };
   const flushList = () => {
@@ -42,6 +54,7 @@ function mdToHtml(md) {
   const flushAll = () => { flushPara(); flushList(); flushQuote(); };
 
   for (const line of lines) {
+    if (line === null) { flushAll(); out.push('<p class="empty-line" style="margin:0;text-indent:0"><br></p>'); continue; }
     let m;
     if (/^\s*$/.test(line)) {
       flushAll();
@@ -71,14 +84,15 @@ function mdToHtml(md) {
   return out.join('\n');
 }
 
-/** Markdown без разметки: заголовки и абзацы через пустую строку. */
+/** Markdown без разметки: внутренние пустые строки сохраняются; края главы очищаются как прежде. */
 function mdToText(md, o = {}) {
   let start = true; // строка начинает новый блок
   let skip = false; // предыдущий блок: заголовок или цитата, красной строки после них нет
-  return String(md).replace(/\r\n?/g, '\n').split('\n').map((line) => {
+  return stripAlign(String(md).replace(/\r\n?/g, '\n').split('\n')).map((line) => {
     if (/^\s*$/.test(line)) { start = true; return line; }
     const first = start;
     start = false;
+
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { skip = false; return '***'; }
     const heading = /^#{1,6}\s/.test(line);
     const quote = /^>/.test(line);
@@ -87,10 +101,10 @@ function mdToText(md, o = {}) {
       .replace(/^#{1,6}\s+/, '')
       .replace(/^>\s?/, '    ')
       .replace(/^\s*[-*+]\s+/, '— ')
-      .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
-      .replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\*)/g, '$1$2')
+      .replace(/(?<!\\)\*\*([^*\n]+?)(?<!\\)\*\*/g, '$1')
+      .replace(/(^|[^*\w\\])\*([^*\n]+?)(?<!\\)\*(?!\*)/g, '$1$2')
       .replace(/(^|[^\w])_([^_\n]+?)_(?!\w)/g, '$1$2')
-      .replace(/\\([*_#>\-\\])/g, '$1');
+      .replace(/\\([!-\/:-@[-`{-~])/g, '$1'); // экранирование Markdown: \~ \[ \] \` и т.п.
     if (first && !heading && !quote && !list) {
       if (o.indent && !skip && /^\S/.test(text)) text = INDENT + text; // красная строка при режиме «Красная строка»
       skip = false;
@@ -98,7 +112,7 @@ function mdToText(md, o = {}) {
       skip = heading || quote;
     }
     return text;
-  }).join('\n').replace(/\n{3,}/g, '\n\n').replace(/^[ \t\n]+/, '').replace(/\s+$/, ''); // не trim(): он съел бы красную строку первого абзаца
+  }).join('\n').replace(/^[ \t\n]+/, '').replace(/\s+$/, ''); // не trim(): он съел бы красную строку первого абзаца
 }
 
 const CSS = `
@@ -124,14 +138,14 @@ const INDENT_CSS = `
 
 /**
  * Собирает документ из всех глав. format: 'md' | 'txt' | 'html' | 'rtf' | 'docx' (Buffer). PDF печатается из html.
- * Заголовок главы: номер по порядку и название.
+ * Заголовок главы: название; с opts.chapterNumbers перед ним ставится номер по порядку.
  */
 function buildExport(dir, format, lang, opts = {}) {
   const view = project.openProject(dir);
   const stories = view.mode === 'stories';
   // Рассказы: название без номера; в сборнике из двух и более рассказов после титула идёт «Содержание».
   const chapters = view.chapters.map((c, i) => ({
-    title: stories ? c.title : `${i + 1}. ${c.title}`,
+    title: stories ? c.title : chapterTitle(c.title, i, !!opts.chapterNumbers),
     text: project.readChapter(dir, c.id, { track: false }).trim(),
   }));
   const tocHeading = tr('Содержание');
@@ -164,4 +178,4 @@ function buildExport(dir, format, lang, opts = {}) {
   throw new Error('Неизвестный формат экспорта.');
 }
 
-module.exports = { buildExport, mdToHtml, mdToText };
+module.exports = { buildExport, mdToHtml, mdToText, chapterTitle };

@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS = {
   typeAnim: true,   // плавное появление набираемых букв
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
   typoLayout: true, // «Привести типографику в порядок» убирает пустые абзацы (красную строку выбирают отдельно, в «Абзацах»)
+  exportNumbers: false,
+  typoKeep: 0, // сколько пустых строк подряд между абзацами оставить при этом (0–3)
   spellOn: true,
   typewriter: false,
   links: true,
@@ -93,7 +95,9 @@ function loadSettings() {
     if (typeof raw.marks === 'boolean') s.marks = raw.marks;
     if (typeof raw.marksSpaces === 'boolean') s.marksSpaces = raw.marksSpaces;
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;
+    if (typeof raw.exportNumbers === 'boolean') s.exportNumbers = raw.exportNumbers;
     if (typeof raw.typoLayout === 'boolean') s.typoLayout = raw.typoLayout;
+    if ([0, 1, 2, 3].includes(raw.typoKeep)) s.typoKeep = raw.typoKeep;
     if (raw.typoWeb !== true) s.typoNbsp = false; // один раз при обновлении неразрывные пробелы выключаются, дальше выбор за автором
     if (isTheme(raw.theme)) s.theme = raw.theme;
     if (['none', 'grain', 'warm'].includes(raw.paper)) s.paper = raw.paper;
@@ -183,6 +187,8 @@ function applySettings() {
   $('#setTypo').checked = settings.typo;
   $('#setTypoNbsp').checked = settings.typoNbsp;
   $('#setTypoLayout').checked = settings.typoLayout;
+  $('#setTypoKeep').value = String(settings.typoKeep);
+  $('#setTypoKeep').disabled = !settings.typoLayout;
   $('#setTypeAnim').checked = settings.typeAnim;
   $('#setSearchEngine').value = settings.searchEngine;
   $('#setMarks').checked = settings.marks;
@@ -213,6 +219,7 @@ function applySettings() {
   $('#setTheme').value = settings.theme;
   $('#setPaper').value = settings.paper;
   $('#setPara').value = settings.para;
+  $('#setExportNumbers').checked = settings.exportNumbers;
 
   // поле имени шрифта не трогаем, пока в нём печатают
   const nameInput = $('#setFontName');

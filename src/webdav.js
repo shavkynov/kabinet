@@ -76,12 +76,31 @@ function parseMultistatus(xml) {
 
 const PROPFIND_BODY = '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><resourcetype/><getcontentlength/><getlastmodified/></prop></propfind>';
 
+/** http:// допустим только в домашней сети: пароль идёт открытым текстом, в интернете это недопустимо. */
+function isHomeHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1' || h.endsWith('.local') || !h.includes('.') && !h.includes(':')) return true;
+  const m = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(h);
+  if (!m) return /^f[cd][0-9a-f]{2}:/.test(h) || h.startsWith('fe80:'); // IPv6: частные и локальные адреса
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
+function assertSafeTransport(base) {
+  const u = new URL(base);
+  if (u.protocol === 'http:' && !isHomeHost(u.hostname)) {
+    throw new DavError('Логин и пароль нельзя отправлять по http:// через интернет. Укажите адрес с https://.');
+  }
+}
+
 /**
  * Папка на сервере: { url, user, pass, root }, root — путь внутри сервера («/Кабинет/Мой роман»).
  * Пути в методах — относительно root.
  */
 function createWebDav({ url, user, pass, root = '', request }) {
   const base = normalizeUrl(url);
+  assertSafeTransport(base);
   const basePath = segs(new URL(base).pathname);
   const rootParts = segs(root);
   const auth = `Basic ${toBase64(enc.encode(`${user || ''}:${pass || ''}`))}`;
@@ -224,4 +243,4 @@ const PRESETS = [
   { id: 'other', name: 'Другой сервер WebDAV', url: '', hint: 'Адрес, логин и пароль вам даёт сервис или администратор сервера.' },
 ];
 
-module.exports = { createWebDav, browseFolders, parseMultistatus, normalizeUrl, toBase64, DavError, PRESETS };
+module.exports = { createWebDav, browseFolders, parseMultistatus, normalizeUrl, isHomeHost, toBase64, DavError, PRESETS };

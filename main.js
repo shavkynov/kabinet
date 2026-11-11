@@ -21,9 +21,11 @@ const { retrying } = require('./src/net-retry');
 const syncguard = require('./src/syncguard');
 const { createWatcher } = require('./src/watcher');
 const exporter = require('./src/export');
+const exportTarget = require('./src/export-target');
 const importer = require('./src/import');
 const { writeFileAtomic } = require('./src/fsutil');
 const langcheck = require('./src/langcheck');
+const dict = require('./src/dict');
 const i18n = require('./src/i18n');
 const themes = require('./src/themes');
 const searchEngines = require('./src/searchengines');
@@ -252,10 +254,20 @@ function requireDir() {
   return currentDir;
 }
 
+// Слова из словаря проекта добавляются в словарь системной проверки орфографии (слова, убранные на другом устройстве, остаются
+// в нём до явного удаления здесь: лишнего подчёркивания это не создаёт).
+function applyProjectDictionary() {
+  const ses = spellSession();
+  const words = projectWordsNow();
+  if (!ses || !words) return;
+  try { for (const w of words) ses.addWordToSpellCheckerDictionary(w); } catch (err) { console.error('dictionary:', err.message); }
+}
+
 async function openAt(dir) {
   const proj = project.openProject(dir);
   if (!(await confirmLock(dir))) return null; // автор передумал: проект открыт на другом устройстве
   currentDir = dir;
+  applyProjectDictionary();
   projectMode = proj.mode;
   recents.add(recentsFile(), { path: dir, name: proj.name });
   autoBackup();
@@ -442,18 +454,18 @@ handle('project:replace', (find, repl, dry) => {
 // Экспорт всех глав одним файлом: PDF, DOCX, Markdown, текст или HTML (формат по расширению).
 handle('project:export', async (opts) => {
   const dir = requireDir();
-  const exportOpts = { indent: !!(opts && opts.indent) }; // красная строка: решает режим «Абзацы» в окне
+  const exportOpts = { indent: !!(opts && opts.indent), chapterNumbers: !!(opts && opts.chapterNumbers === true) }; // красная строка: решает режим «Абзацы» в окне
+  let defaultPath = path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`);
+  try {
+    defaultPath = exportTarget.defaultPath(app.getPath('userData'), dir, app.getPath('documents'));
+  } catch (err) {
+    console.error('export destination read:', err);
+    dialog.showErrorBox(t('Экспорт проекта'), t('Не удалось прочитать настройки места экспорта. Будет предложена папка «Документы».') + '\n' + String(err.message || err));
+  }
   const res = await dialog.showSaveDialog(win, {
     title: t('Экспорт проекта'),
-    defaultPath: path.join(app.getPath('documents'), `${path.basename(dir)}.pdf`),
-    filters: [
-      { name: 'PDF', extensions: ['pdf'] },
-      { name: 'Word (DOCX)', extensions: ['docx'] },
-      { name: 'RTF', extensions: ['rtf'] },
-      { name: 'Markdown', extensions: ['md'] },
-      { name: t('Обычный текст'), extensions: ['txt'] },
-      { name: 'HTML', extensions: ['html'] },
-    ],
+    defaultPath,
+    filters: exportTarget.filters(defaultPath, t('Обычный текст')),
     buttonLabel: t('Экспортировать'),
   });
   if (res.canceled || !res.filePath) return null;
@@ -479,9 +491,15 @@ handle('project:export', async (opts) => {
       try { fs.unlinkSync(tmpHtml); } catch { /* временный файл не критичен */ }
     }
   } else if (ext === 'docx') {
-    fs.writeFileSync(file, exporter.buildExport(dir, 'docx', i18n.getLang()));
+    fs.writeFileSync(file, exporter.buildExport(dir, 'docx', i18n.getLang(), exportOpts));
   } else {
     fs.writeFileSync(file, exporter.buildExport(dir, ext, i18n.getLang(), exportOpts), 'utf8');
+  }
+  try {
+    exportTarget.remember(app.getPath('userData'), dir, file);
+  } catch (err) {
+    console.error('export destination write:', err);
+    dialog.showErrorBox(t('Экспорт проекта'), t('Файл экспортирован, но запомнить папку и формат не удалось.') + '\n' + String(err.message || err));
   }
   shell.showItemInFolder(file);
   return file;
@@ -932,7 +950,7 @@ handle('check:run', async (paragraphs, extraWords) => {
       lang: cfg.lang,
       disabledRules: cfg.disabledRules,
       hiddenKinds: langcheck.cleanKinds(cfg.hiddenKinds),
-      words: [...cfg.words, ...strList(extraWords)],
+      words: [...dict.effective(projectWordsNow(), cfg.words), ...strList(extraWords)],
       fetchImpl: (u, init) => net.fetch(u, init),
       signal: ctl.signal,
       onProgress: (done, total) => send('check:progress', { done, total }),
@@ -944,13 +962,39 @@ handle('check:run', async (paragraphs, extraWords) => {
 
 handle('check:cancel', () => { if (checkCtl) checkCtl.abort(); return true; });
 
+// Словарь: у проекта свой список в project.json (он переезжает вместе с проектом), общий список в check.json остаётся запасным.
+function projectWordsNow() {
+  try { return currentDir ? project.projectWords(currentDir) : null; } catch { return null; }
+}
+
+function spellSession() { return win && !win.isDestroyed() ? win.webContents.session : null; }
+
 handle('check:addWord', (word) => {
   const w = String(word || '').trim();
-  if (!w) return false;
+  if (!w || w.length > dict.MAX_LEN) return false;
   const cfg = loadCheck();
   if (!cfg.words.includes(w)) { cfg.words.push(w); saveCheck(cfg); }
-  if (win && !win.isDestroyed()) win.webContents.session.addWordToSpellCheckerDictionary(w);
+  if (currentDir) project.setProjectWords(currentDir, dict.withWord(projectWordsNow(), cfg.words, w));
+  const ses = spellSession();
+  if (ses) ses.addWordToSpellCheckerDictionary(w);
   return true;
+});
+
+handle('check:getDictionary', () => dict.effective(projectWordsNow(), loadCheck().words));
+
+handle('check:setDictionary', (list) => {
+  const cfg = loadCheck();
+  const before = dict.effective(projectWordsNow(), cfg.words);
+  const next = dict.cleanWords(list);
+  if (currentDir) project.setProjectWords(currentDir, next);
+  cfg.words = dict.mergeShared(cfg.words, before, next);
+  saveCheck(cfg);
+  const ses = spellSession();
+  if (ses) {
+    for (const w of before) if (!next.includes(w)) ses.removeWordFromSpellCheckerDictionary(w);
+    for (const w of next) ses.addWordToSpellCheckerDictionary(w);
+  }
+  return next;
 });
 
 handle('check:ignoreRule', (ruleId) => {
@@ -1038,6 +1082,7 @@ function buildMenu() {
           ],
         },
         { label: t('Синхронизация…'), click: () => send('ui:openSync') },
+        { label: t('Синхронизировать сейчас'), accelerator: isMac ? 'Cmd+Shift+S' : 'F5', click: () => send('ui:syncNow') },
         sep,
         { label: t('Закрыть проект'), accelerator: 'CmdOrCtrl+Shift+W', click: () => send('ui:closeProject') },
         { label: t('Закрыть окно'), role: 'close' },
