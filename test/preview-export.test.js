@@ -33,7 +33,7 @@ for (const backend of ['main.js', 'mobile/backend.js']) {
           handle: (_channel, fn) => { run = fn; }, requireDir: () => '/test/Book', path,
           t: (s) => s, win: null, TextEncoder, Uint8Array,
           app: { getPath: () => '/test' }, i18n: { getLang: () => 'ru' },
-          exportTarget: { defaultPath: () => '/test/Book.' + format, remember() {} },
+          exportTarget: { defaultPath: () => '/test/Book.' + format, remember() {}, filters: () => [] },
           dialog: { showSaveDialog: async () => ({ filePath: '/test/Book.' + format }), showErrorBox() {} },
           fs: { writeFileSync() {}, unlinkSync() {} }, shell: { showItemInFolder() {} },
           crypto: { randomBytes: () => Buffer.from('123456') },

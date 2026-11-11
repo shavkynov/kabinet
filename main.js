@@ -465,14 +465,7 @@ handle('project:export', async (opts) => {
   const res = await dialog.showSaveDialog(win, {
     title: t('Экспорт проекта'),
     defaultPath,
-    filters: [
-      { name: 'PDF', extensions: ['pdf'] },
-      { name: 'Word (DOCX)', extensions: ['docx'] },
-      { name: 'RTF', extensions: ['rtf'] },
-      { name: 'Markdown', extensions: ['md'] },
-      { name: t('Обычный текст'), extensions: ['txt'] },
-      { name: 'HTML', extensions: ['html'] },
-    ],
+    filters: exportTarget.filters(defaultPath, t('Обычный текст')),
     buttonLabel: t('Экспортировать'),
   });
   if (res.canceled || !res.filePath) return null;

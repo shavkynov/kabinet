@@ -27,4 +27,14 @@ function remember(dataDir, projectDir, file) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   writeFileAtomic(target, JSON.stringify({ folder: path.dirname(file), format }) + '\n');
 }
-module.exports = { defaultPath, remember };
+// Фильтры окна «Сохранить»: формат из предложенного имени файла идёт первым. Иначе окно покажет «PDF»,
+// а в имени будет «.rtf», и файл сохранится в прежнем формате, пока автор не перещёлкнет тип файла.
+function filters(defaultFile, plainName) {
+  const all = [
+    ['pdf', 'PDF'], ['docx', 'Word (DOCX)'], ['rtf', 'RTF'], ['md', 'Markdown'], ['txt', plainName || 'Plain text'], ['html', 'HTML'],
+  ].map(([ext, name]) => ({ name, extensions: [ext] }));
+  const ext = path.extname(String(defaultFile || '')).slice(1).toLowerCase();
+  const first = all.findIndex((f) => f.extensions[0] === ext);
+  return first > 0 ? [all[first], ...all.slice(0, first), ...all.slice(first + 1)] : all;
+}
+module.exports = { defaultPath, remember, filters };

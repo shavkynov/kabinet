@@ -55,7 +55,7 @@ function handler({ canceled = false, failWrite = false, failRemember = false } =
     handle: (_name, fn) => { run = fn; },
     requireDir: () => '/project/Book', path, t: (s) => s,
     app: { getPath: () => '/local' },
-    exportTarget: { defaultPath: () => '/out/Book.txt', remember: () => { events.push('remember'); if (failRemember) throw new Error('settings'); } },
+    exportTarget: { defaultPath: () => '/out/Book.txt', filters: () => [], remember: () => { events.push('remember'); if (failRemember) throw new Error('settings'); } },
     dialog: { showSaveDialog: async (win, opts) => { events.push(opts.defaultPath); return { canceled, filePath: '/out/Book.txt' }; }, showErrorBox: () => events.push('warning') },
     win: null, console: { error: () => {} },
     fs: { writeFileSync: () => { events.push('write'); if (failWrite) throw new Error('disk'); } },
@@ -77,4 +77,14 @@ test('cancel does not remember; failed export does not remember; success remembe
   const settings = handler({ failRemember: true });
   assert.equal(await settings.run(), '/out/Book.txt');
   assert.deepEqual(settings.events, ['/out/Book.txt', 'write', 'remember', 'warning', 'show']);
+});
+test('в окне «Сохранить» первым идёт формат из предложенного имени файла', () => {
+  for (const ext of ['pdf', 'docx', 'rtf', 'md', 'txt', 'html']) {
+    const f = target.filters(`/x/Book.${ext}`, 'Обычный текст');
+    assert.deepEqual(f[0].extensions, [ext]);
+    assert.equal(f.length, 6);
+    assert.deepEqual([...f.map((x) => x.extensions[0])].sort(), ['docx', 'html', 'md', 'pdf', 'rtf', 'txt']);
+  }
+  assert.deepEqual(target.filters('/x/Book.pdf')[0].extensions, ['pdf']);
+  assert.deepEqual(target.filters('/x/Book')[0].extensions, ['pdf']);
 });
