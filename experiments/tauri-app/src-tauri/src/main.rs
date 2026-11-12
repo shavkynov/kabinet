@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::store;
+use kabinet_core::{export, exporttarget, store};
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -43,6 +43,12 @@ fn open_path(p: &Path) {
     #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(p).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(p).spawn(); }
     #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(p).spawn(); }
+}
+
+fn reveal(p: &Path) {
+    #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(format!("/select,{}", p.display())).spawn(); }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg("-R").arg(p).spawn(); }
+    #[cfg(not(any(windows, target_os = "macos")))] { if let Some(d) = p.parent() { open_path(d); } }
 }
 
 /// Остановить обмен с облаком прежнего проекта (с дозаписью) и запустить для нового, если он связан.
@@ -165,6 +171,31 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         "trash:restore" => store::restore_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:purge" => store::purge_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:empty" => store::empty_trash(&current_dir(&state)?),
+        "project:export" => {
+            let dir = current_dir(&state)?;
+            let opts = a.first().cloned().unwrap_or(Value::Null);
+            let indent = opts["indent"].as_bool().unwrap_or(false);
+            let numbers = opts["chapterNumbers"].as_bool() == Some(true);
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let docs = app.path().document_dir().unwrap_or_else(|_| dir.clone());
+            let default = exporttarget::default_path(&data, &dir, &docs);
+            let mut dlg = rfd::AsyncFileDialog::new().set_title("Экспорт проекта").set_directory(default.parent().unwrap_or(&docs))
+                .set_file_name(default.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+            for (ext, name) in exporttarget::filters(&default) { dlg = dlg.add_filter(name, &[ext]); }
+            let Some(picked) = dlg.save_file().await else { return Ok(Value::Null) };
+            let mut file = picked.path().to_path_buf();
+            let mut ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if !exporttarget::FORMATS.contains(&ext.as_str()) { ext = "docx".into(); file.set_extension("docx"); }
+            let lang = "ru".to_string();
+            let d2 = dir.clone();
+            let ext2 = ext.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || export::build_export(&d2, &ext2, &lang, indent, numbers))
+                .await.map_err(|e| e.to_string())??;
+            store::write_atomic_bytes(&file, &bytes)?;
+            let _ = exporttarget::remember(&data, &dir, &file);
+            reveal(&file);
+            Ok(json!(file.to_string_lossy()))
+        }
         "dav:open" => {
             let (session, root) = (arg_str(a, 0)?, arg_str(a, 1)?);
             let Some(parent) = pick_folder("Где сохранить копию проекта на этом компьютере?").await else { return Ok(Value::Null) };

@@ -2,6 +2,8 @@
 //! Всё здесь проверяется обычными тестами `cargo test`, без Tauri и без сети.
 pub mod davapi;
 pub mod davlink;
+pub mod export;
+pub mod exporttarget;
 pub mod foldersync;
 pub mod remote;
 pub mod store;
