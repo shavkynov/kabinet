@@ -1212,3 +1212,10 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 #syncDialog .sync-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 38vh; overflow-y: auto; }
 #syncDialog .sync-main { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 #syncDialog button.sync-row { text-align: left; padding: 10px 12px; }
+
+/* Нижняя полоса: панель сведений справа и заголовок «Корзина» слева одной высоты, их верхние линии лежат на одной прямой,
+   а текст по вертикали стоит по центру (высота не зависит от шрифта и движка окна). */
+:root { --foot-h: 34px; }
+#toolbar { box-sizing: border-box; height: var(--foot-h); padding-top: 0; padding-bottom: 0; }
+.bar-info { align-items: center; }
+#sideDock .sec-head { box-sizing: border-box; min-height: calc(var(--foot-h) - 1px); padding-top: 0; padding-bottom: 0; }
