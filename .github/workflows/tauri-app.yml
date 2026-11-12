@@ -49,7 +49,7 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
           rustc -Vv
-      - name: Тесты Rust (ядро: проекты, WebDAV, синхронизация)
+      - name: Тесты Rust (ядро — проекты, WebDAV, синхронизация)
         run: cargo test --manifest-path experiments/tauri-app/core/Cargo.toml
       - name: Сборка
         run: cargo build --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
