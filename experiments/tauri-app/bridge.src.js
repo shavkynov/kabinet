@@ -109,4 +109,9 @@ const declension = require('../../src/declension');
     'onOpenSearch', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
     'onOpenBackups', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
   ]) window.kabinet[name] = none;
+  // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.
+  const listen = tauri && tauri.event && tauri.event.listen;
+  const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => cb(e.payload)).catch(() => {}); };
+  window.kabinet.onDavEvent = subscribe('dav:event');
+  window.kabinet.onExternalChange = subscribe('sync:changed');
 })();

@@ -12,3 +12,11 @@ tauri = { version = "2", features = [] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 rfd = "0.15"
+kabinet-core = { path = "../core" }
+
+# Пароли WebDAV хранятся в защищённом хранилище системы: Credential Manager (Windows), Связка ключей (macOS).
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }

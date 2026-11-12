@@ -1,12 +1,58 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Кабинет на Tauri: этап 1 — ядро (проекты, главы, корзина, недавние). Интерфейс тот же, что в Electron-версии;
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
-mod store;
-
+use kabinet_core::davapi::DavApi;
+use kabinet_core::davlink::{DavLink, Event, Secret};
+use kabinet_core::store;
+use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use tauri::{Manager, State};
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager, State};
+
+/// Пароль облака лежит в связке ключей системы; в файле связей остаётся только ссылка «kr:…».
+struct KeyringSecret;
+
+#[cfg(any(windows, target_os = "macos"))]
+impl Secret for KeyringSecret {
+    fn seal(&self, key: &str, pass: &str) -> Result<String, String> {
+        let e = keyring::Entry::new("Кабинет: сетевая папка", key).map_err(|e| e.to_string())?;
+        e.set_password(pass).map_err(|e| format!("Не удалось сохранить пароль в защищённом хранилище системы: {}", e))?;
+        Ok(format!("kr:{}", key))
+    }
+    fn open(&self, key: &str, sealed: &str) -> Result<String, String> {
+        if !sealed.starts_with("kr:") { return Err("Пароль не найден в защищённом хранилище.".into()); }
+        keyring::Entry::new("Кабинет: сетевая папка", key).and_then(|e| e.get_password()).map_err(|e| e.to_string())
+    }
+    fn forget(&self, key: &str) {
+        if let Ok(e) = keyring::Entry::new("Кабинет: сетевая папка", key) { let _ = e.delete_credential(); }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+impl Secret for KeyringSecret {
+    fn seal(&self, _key: &str, _pass: &str) -> Result<String, String> { Err("Безопасное хранилище паролей на этой системе пока не подключено.".into()) }
+    fn open(&self, _key: &str, _sealed: &str) -> Result<String, String> { Err("Безопасное хранилище паролей на этой системе пока не подключено.".into()) }
+}
+
+fn device_name() -> String {
+    std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).or_else(|_| std::env::var("HOST")).unwrap_or_else(|_| "Компьютер".into())
+}
+
+fn open_path(p: &Path) {
+    #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(p).spawn(); }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(p).spawn(); }
+    #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(p).spawn(); }
+}
+
+/// Остановить обмен с облаком прежнего проекта (с дозаписью) и запустить для нового, если он связан.
+async fn switch_sync(dav: &Arc<DavApi>, dir: Option<PathBuf>) {
+    let d = dav.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        d.link.stop();
+        if let Some(dir) = dir { d.link.start(&dir); }
+    }).await;
+}
 
 #[derive(Default)]
 struct AppState {
@@ -39,9 +85,10 @@ fn set_current(state: &State<'_, AppState>, dir: Option<PathBuf>) {
     if let Ok(mut g) = state.current.lock() { *g = dir; }
 }
 
-fn open_at(app: &tauri::AppHandle, state: &State<'_, AppState>, dir: &Path) -> Result<Value, String> {
+async fn open_at(app: &tauri::AppHandle, state: &State<'_, AppState>, dav: &Arc<DavApi>, dir: &Path) -> Result<Value, String> {
     let proj = store::open_project(dir)?;
     set_current(state, Some(dir.to_path_buf()));
+    switch_sync(dav, Some(dir.to_path_buf())).await;
     let name = proj["name"].as_str().unwrap_or("");
     store::recents_add(&recents_file(app)?, &dir.to_string_lossy(), name)?;
     Ok(proj)
@@ -52,8 +99,9 @@ async fn pick_folder(title: &str) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-async fn call(app: tauri::AppHandle, state: State<'_, AppState>, channel: String, args: Vec<Value>) -> Result<Value, String> {
+async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, Arc<DavApi>>, channel: String, args: Vec<Value>) -> Result<Value, String> {
     let a = &args;
+    let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
         "app:setLang" | "ui:setTheme" | "app:about" => Ok(json!(true)),
@@ -70,19 +118,20 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, channel: String
             let dir = parent.join(folder);
             let proj = store::create_project(&dir, &name, arg_opt_str(a, 1).as_deref())?;
             set_current(&state, Some(dir.clone()));
+            switch_sync(&dav, None).await;
             store::recents_add(&recents_file(&app)?, &dir.to_string_lossy(), proj["name"].as_str().unwrap_or(""))?;
             Ok(proj)
         }
         "project:openDialog" => {
             let Some(dir) = pick_folder("Открыть проект: выберите папку, в которой лежит project.json").await else { return Ok(Value::Null) };
-            open_at(&app, &state, &dir)
+            open_at(&app, &state, &dav, &dir).await
         }
         "project:openRecent" => {
             let p = arg_str(a, 0)?;
             if !store::recents_has(&recents_file(&app)?, &p) { return Err("Этого проекта нет в списке недавних.".into()); }
-            open_at(&app, &state, Path::new(&p))
+            open_at(&app, &state, &dav, Path::new(&p)).await
         }
-        "project:close" => { set_current(&state, None); Ok(json!(true)) }
+        "project:close" => { set_current(&state, None); switch_sync(&dav, None).await; Ok(json!(true)) }
         "project:reload" => store::open_project(&current_dir(&state)?),
         "chapter:add" => store::add_chapter(&current_dir(&state)?, arg_opt_str(a, 0).as_deref()),
         "chapter:rename" => store::rename_chapter(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1)?),
@@ -116,6 +165,39 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, channel: String
         "trash:restore" => store::restore_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:purge" => store::purge_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:empty" => store::empty_trash(&current_dir(&state)?),
+        "dav:open" => {
+            let (session, root) = (arg_str(a, 0)?, arg_str(a, 1)?);
+            let Some(parent) = pick_folder("Где сохранить копию проекта на этом компьютере?").await else { return Ok(Value::Null) };
+            let (acc, target) = dav.open_target(&session, &root, &parent)?;
+            set_current(&state, None);
+            switch_sync(&dav, None).await;
+            let d = dav.clone();
+            let t = target.clone();
+            tauri::async_runtime::spawn_blocking(move || d.link.open_remote(&acc, &t)).await.map_err(|e| e.to_string())??;
+            open_at(&app, &state, &dav, &target).await
+        }
+        "dav:info" => {
+            let dir = state.current.lock().ok().and_then(|g| g.clone());
+            let mut text = String::new();
+            if dir.is_some() { text.push_str("Сейчас проект лежит на этом компьютере. Чтобы он синхронизировался, выберите «Файл → Синхронизация…».\n\n"); }
+            text.push_str("Облако без установки программ: подключает Яндекс Диск, Mail.ru, Nextcloud и другие серверы WebDAV по логину и паролю приложения. Проект остаётся на этом компьютере, а его копия синхронизируется с облаком; на телефоне в Кабинете для Android подключается тот же сервер.\n\nПравки с обеих сторон сохраняются: если один и тот же текст изменили на двух устройствах, чужая версия сохраняется в папке «Конфликты».\n\nСовет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать.");
+            let buttons = if dir.is_some() { rfd::MessageButtons::OkCancelCustom("OK".into(), "Открыть папку «Конфликты»".into()) } else { rfd::MessageButtons::Ok };
+            let res = rfd::AsyncMessageDialog::new().set_title("Синхронизация").set_description(text).set_buttons(buttons).show().await;
+            if let (Some(dir), rfd::MessageDialogResult::Custom(c)) = (dir, res) {
+                if c.starts_with("Открыть") {
+                    let f = dir.join("Конфликты");
+                    let _ = std::fs::create_dir_all(&f);
+                    open_path(&f);
+                }
+            }
+            Ok(json!(true))
+        }
+        other if other.starts_with("dav:") => {
+            let op = other[4..].to_string();
+            let cur = state.current.lock().ok().and_then(|g| g.clone());
+            let args = args.clone();
+            tauri::async_runtime::spawn_blocking(move || dav.call(&op, &args, cur.as_deref())).await.map_err(|e| e.to_string())?
+        }
         other => Err(format!("Эта функция пока не перенесена в версию на Tauri: {}", other)),
     }
 }
@@ -123,6 +205,24 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, channel: String
 fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .setup(|app| {
+            let data = app.path().app_data_dir().map_err(|e| format!("Нет папки данных приложения: {}", e))?;
+            let handle = app.handle().clone();
+            let on_event = Arc::new(move |e: Event| match e {
+                Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
+                Event::Error(m) => { let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
+                Event::Changed(files) => { let _ = handle.emit("sync:changed", files); }
+            });
+            let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
+                Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);
+            app.manage(Arc::new(DavApi::new(link)));
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Some(d) = window.app_handle().try_state::<Arc<DavApi>>() { d.link.stop(); }
+            }
+        })
         .invoke_handler(tauri::generate_handler![call])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Кабинет на Tauri");

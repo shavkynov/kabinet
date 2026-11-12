@@ -199,20 +199,19 @@ pub fn iso_now() -> String {
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z", y, m, d, h, mi, s, ms)
 }
 
-fn stamp() -> String {
-    let (y, m, d, h, mi, s, _) = now_parts();
-    format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, m, d, h, mi, s)
-}
+fn stamp() -> String { crate::syncguard::stamp_now() }
 
 // ---------- файлы ----------
 
-pub fn write_atomic(file: &Path, data: &str) -> R<()> {
+pub fn write_atomic(file: &Path, data: &str) -> R<()> { write_atomic_bytes(file, data.as_bytes()) }
+
+pub fn write_atomic_bytes(file: &Path, data: &[u8]) -> R<()> {
     let tag: [u8; 3] = rand::random();
     let tmp = PathBuf::from(format!("{}.{}.{:02x}{:02x}{:02x}.tmp", file.display(), std::process::id(), tag[0], tag[1], tag[2]));
     let result = (|| -> std::io::Result<()> {
         use std::io::Write;
         let mut f = fs::File::create(&tmp)?;
-        f.write_all(data.as_bytes())?;
+        f.write_all(data)?;
         f.sync_all()?;
         drop(f);
         let mut last = Ok(());

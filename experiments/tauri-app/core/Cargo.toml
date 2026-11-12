@@ -1,0 +1,18 @@
+[package]
+name = "kabinet-core"
+version = "0.38.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rand = "0.8"
+sha1 = "0.10"
+ureq = "2"
+url = "2"
+percent-encoding = "2"
+regex = "1"
+httpdate = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+notify = "6"
