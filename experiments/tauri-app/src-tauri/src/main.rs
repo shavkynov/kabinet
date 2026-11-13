@@ -582,7 +582,20 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             let mut file = picked.path().to_path_buf();
             let mut ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
             if !exporttarget::FORMATS.contains(&ext.as_str()) { ext = "docx".into(); file.set_extension("docx"); }
-            let lang = "ru".to_string();
+            let lang = if LANG_EN.load(std::sync::atomic::Ordering::SeqCst) { "en" } else { "ru" }.to_string();
+            if ext == "pdf" {
+                // Печать окна в PDF на этих системах без отдельного кода не вызвать: открываем готовую страницу в браузере.
+                let (d2, l2) = (dir.clone(), lang.clone());
+                let html = tauri::async_runtime::spawn_blocking(move || export::build_export(&d2, "html", &l2, indent, numbers))
+                    .await.map_err(|e| e.to_string())??;
+                let page = export::print_page(&String::from_utf8_lossy(&html));
+                let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Проект".into());
+                let tmp = std::env::temp_dir().join(format!("{} (для печати в PDF).html", stem));
+                store::write_atomic_bytes(&tmp, page.as_bytes())?;
+                let _ = exporttarget::remember(&data, &dir, &file);
+                open_path(&tmp);
+                return Ok(json!(tmp.to_string_lossy()));
+            }
             let d2 = dir.clone();
             let ext2 = ext.clone();
             let bytes = tauri::async_runtime::spawn_blocking(move || export::build_export(&d2, &ext2, &lang, indent, numbers))

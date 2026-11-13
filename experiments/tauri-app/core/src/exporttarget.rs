@@ -1,10 +1,10 @@
 //! Куда и в каком формате проект экспортировался в прошлый раз. Порт src/export-target.js.
-//! PDF в версии на Tauri пока нет (печать окна недоступна), поэтому форматы: DOCX, RTF, Markdown, текст, HTML.
+//! PDF в версии на Tauri делается через печать в браузере: Кабинет открывает страницу с готовой вёрсткой, и система предлагает «Сохранить как PDF».
 use crate::store::{write_atomic, R};
 use sha1::{Digest, Sha1};
 use std::path::{Path, PathBuf};
 
-pub const FORMATS: [&str; 5] = ["docx", "rtf", "md", "txt", "html"];
+pub const FORMATS: [&str; 6] = ["docx", "rtf", "md", "txt", "html", "pdf"];
 
 fn settings_file(data_dir: &Path, project_dir: &Path) -> PathBuf {
     let mut h = Sha1::new();
@@ -38,7 +38,7 @@ pub fn remember(data_dir: &Path, project_dir: &Path, file: &Path) -> R<()> {
 
 /// Фильтры окна «Сохранить»: формат предложенного имени идёт первым, иначе окно покажет один тип, а в имени будет другой.
 pub fn filters(default_file: &Path) -> Vec<(&'static str, &'static str)> {
-    let all = [("docx", "Word (DOCX)"), ("rtf", "RTF"), ("md", "Markdown"), ("txt", "Обычный текст"), ("html", "HTML")];
+    let all = [("docx", "Word (DOCX)"), ("rtf", "RTF"), ("md", "Markdown"), ("txt", "Обычный текст"), ("html", "HTML"), ("pdf", "PDF (печать в браузере)")];
     let ext = default_file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let mut v: Vec<(&str, &str)> = all.to_vec();
     if let Some(i) = v.iter().position(|(e, _)| *e == ext) { let f = v.remove(i); v.insert(0, f); }
@@ -60,14 +60,15 @@ mod tests {
         std::fs::remove_dir_all(&out).unwrap();
         assert_eq!(default_path(&data, proj, &docs), docs.join("Роман.rtf")); // папки больше нет
         assert!(remember(&data, proj, Path::new("rel.txt")).is_err());
-        assert!(remember(&data, proj, &docs.join("a.pdf")).is_err());
+        assert!(remember(&data, proj, &docs.join("a.xyz")).is_err());
     }
 
     #[test]
     fn selected_format_goes_first() {
         let f = filters(Path::new("/a/b.md"));
         assert_eq!(f[0].0, "md");
-        assert_eq!(f.len(), 5);
-        assert_eq!(filters(Path::new("/a/b.pdf"))[0].0, "docx");
+        assert_eq!(f.len(), 6);
+        assert_eq!(filters(Path::new("/a/b.pdf"))[0].0, "pdf");
+        assert_eq!(filters(Path::new("/a/b.xyz"))[0].0, "docx");
     }
 }
