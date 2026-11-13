@@ -145,15 +145,16 @@ mod tests {
     fn fonts_and_sounds() {
         let data = tmpdir("media");
         let src = tmpdir("mediasrc");
-        std::fs::write(src.join("Мой \"шрифт\".TTF"), b"FONT").unwrap();
+        std::fs::write(src.join("Мой шрифт.TTF"), b"FONT").unwrap();
         std::fs::write(src.join("a.txt"), b"x").unwrap();
         std::fs::write(src.join("дождь.mp3"), b"RAIN").unwrap();
-        let added = fonts_add(&data, &[src.join("Мой \"шрифт\".TTF"), src.join("a.txt")]).unwrap();
+        let added = fonts_add(&data, &[src.join("Мой шрифт.TTF"), src.join("a.txt")]).unwrap();
         assert_eq!(added.len(), 1);
         let l = fonts_list(&data);
         assert_eq!(l[0]["family"], "Мой шрифт");
+        assert_eq!(family("a'b\\c\"d.otf"), "abcd");
         assert_eq!(l[0]["data"], "Rk9OVA==");
-        fonts_remove(&data, "../fonts/Мой \"шрифт\".TTF").unwrap();
+        fonts_remove(&data, "../fonts/Мой шрифт.TTF").unwrap();
         assert!(fonts_list(&data).is_empty());
 
         assert!(sounds_add(&data, "ambient/nope", &[]).is_err());
