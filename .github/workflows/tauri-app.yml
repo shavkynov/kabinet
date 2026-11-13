@@ -52,7 +52,7 @@ jobs:
       - name: Тесты Rust (ядро — проекты, WebDAV, синхронизация)
         run: cargo test --manifest-path experiments/tauri-app/core/Cargo.toml
       - name: Сборка
-        run: cargo build --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+        run: cargo build --release --locked --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
       - name: Пакет .app для macOS (ссылка kabinet:// после входа в Яндекс работает только из пакета)
         if: runner.os == 'macOS'
         run: |
