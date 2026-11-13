@@ -115,8 +115,10 @@ async function openPane2(id, keepView) {
     showPane2(true);
     fillP2Select();
     $('#p2Scroll').scrollTop = keepView ? top : 0;
+    return true;
   } catch (err) {
     showError(err.message);
+    return false;
   }
 }
 

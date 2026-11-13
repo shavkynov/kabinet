@@ -84,7 +84,7 @@ function showNothing() {
 
 // keepView: перечитать уже открытый документ, не сбрасывая лист и курсор (см. setEditorContent).
 async function openDoc(kind, id, keepView) {
-  if (id === currentId && kind === currentKind) return;
+  if (id === currentId && kind === currentKind && !keepView) return;
   const token = ++openToken;
   if (!(await flush())) { // предыдущий документ не записался: остаёмся в нём, текст не потеряется
     setStatus('error', 'Не удалось сохранить главу. Переход отменён, текст остался на экране');
@@ -117,8 +117,10 @@ async function openDoc(kind, id, keepView) {
     if (kind === 'chapter') loadChapMeta(id);
     else clearChapMeta();
     updateAllSelections();
+    return true;
   } catch (err) {
     showError(err.message);
+    return false;
   }
 }
 

@@ -546,7 +546,8 @@ pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
     let file = chapter_file(dir, id)?;
     match fs::read_to_string(&file) {
         Ok(s) => Ok(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!(
+            "Файл главы «{}.md» не найден в папке «Главы». Дождитесь завершения синхронизации или восстановите файл из резервной копии. Пустая глава вместо него не создана.", id)),
         Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
     }
 }
