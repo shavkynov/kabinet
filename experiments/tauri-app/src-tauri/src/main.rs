@@ -70,6 +70,114 @@ fn natural_key(name: &str) -> Vec<(bool, u64, String)> {
     out
 }
 
+fn open_url(url: &str) {
+    #[cfg(windows)] { let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn(); }
+    #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(url).spawn(); }
+    #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
+}
+
+/// Пункт меню. Если сочетание клавиш система не приняла, пункт всё равно создаётся (без сочетания): меню не должно ломать запуск.
+fn menu_item(app: &tauri::AppHandle, id: &str, label: &str, accel: Option<&str>) -> tauri::Result<tauri::menu::MenuItem<tauri::Wry>> {
+    use tauri::menu::MenuItemBuilder;
+    if let Some(a) = accel {
+        if let Ok(item) = MenuItemBuilder::with_id(id, label).accelerator(a).build(app) { return Ok(item); }
+    }
+    MenuItemBuilder::with_id(id, label).build(app)
+}
+
+/// Главное меню, как в Electron-версии. Пункты «ui:…» передаются окну событием с тем же именем.
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{MenuBuilder, SubmenuBuilder};
+    let mac = cfg!(target_os = "macos");
+    let it = |id: &str, label: &str, accel: Option<&str>| menu_item(app, id, label, accel);
+
+    let lang = SubmenuBuilder::new(app, "Язык интерфейса")
+        .item(&it("lang:ru", "Русский", None)?)
+        .item(&it("lang:en", "English", None)?)
+        .build()?;
+    let about = it("app:about", "О программе «Кабинет»", None)?;
+    let backups = SubmenuBuilder::new(app, "Резервные копии")
+        .item(&it("ui:backupNow", "Сделать копию сейчас", None)?)
+        .item(&it("ui:openBackups", "Открыть папку копий", None)?)
+        .build()?;
+
+    let mut file = SubmenuBuilder::new(app, "Файл")
+        .item(&it("ui:newProject", "Новый проект…", Some("CmdOrCtrl+N"))?)
+        .item(&it("ui:openProject", "Открыть проект…", Some("CmdOrCtrl+O"))?)
+        .item(&it("ui:importFiles", "Импорт глав…", None)?)
+        .separator()
+        .item(&it("ui:export", "Экспорт проекта…", Some("CmdOrCtrl+E"))?)
+        .separator()
+        .item(&it("ui:openTemplates", "Шаблоны карточек…", None)?)
+        .item(&backups)
+        .item(&it("ui:openSync", "Синхронизация…", None)?)
+        .item(&it("ui:syncNow", "Синхронизировать сейчас", Some(if mac { "Cmd+Shift+S" } else { "F5" }))?)
+        .separator()
+        .item(&it("ui:closeProject", "Закрыть проект", Some("CmdOrCtrl+Shift+W"))?)
+        .close_window_with_text("Закрыть окно");
+    if !mac { file = file.separator().item(&lang).item(&about).separator().quit_with_text("Выход"); }
+    let file = file.build()?;
+
+    let edit = SubmenuBuilder::new(app, "Правка")
+        .undo_with_text("Отменить")
+        .redo_with_text("Повторить")
+        .separator()
+        .cut_with_text("Вырезать")
+        .copy_with_text("Копировать")
+        .paste_with_text("Вставить")
+        .select_all_with_text("Выделить всё")
+        .separator()
+        .item(&it("ui:openCheck", "Проверить текст главы…", Some("CmdOrCtrl+Shift+L"))?)
+        .item(&it("ui:toggleSpell", "Орфография при наборе вкл / выкл", None)?)
+        .build()?;
+
+    let view = SubmenuBuilder::new(app, "Вид")
+        .item(&it("ui:openSearch", "Поиск по проекту…", Some("CmdOrCtrl+F"))?)
+        .separator()
+        .item(&it("ui:toggleSidebar", "Показать / скрыть панель глав", Some("CmdOrCtrl+\\"))?)
+        .item(&it("ui:toggleFocus", "Только лист", Some("CmdOrCtrl+Shift+F"))?)
+        .item(&it("ui:toggleTypewriter", "Режим «печатная машинка»", Some("CmdOrCtrl+Shift+T"))?)
+        .item(&it("ui:toggleMarks", "Скрытые символы", Some("CmdOrCtrl+Shift+8"))?)
+        .item(&it("ui:toggleSound", "Звуки клавиш вкл / выкл", Some("CmdOrCtrl+Shift+M"))?)
+        .item(&it("ui:toggleAmbient", "Фоновый эмбиент вкл / выкл", Some("CmdOrCtrl+Shift+A"))?)
+        .item(&it("ui:openSettings", "Текст и оформление…", Some("CmdOrCtrl+,"))?)
+        .separator()
+        .item(&it("app:fullscreen", "Полный экран", Some(if mac { "Ctrl+Cmd+F" } else { "F11" }))?)
+        .build()?;
+
+    let updates = SubmenuBuilder::new(app, "Обновления")
+        .item(&it("app:updates", "Где взять новые версии…", None)?)
+        .build()?;
+    let window = SubmenuBuilder::new(app, "Окно").minimize_with_text("Свернуть").build()?;
+
+    let mut menu = MenuBuilder::new(app);
+    if mac {
+        let app_menu = SubmenuBuilder::new(app, "Кабинет").item(&about).separator().item(&lang).separator().hide().hide_others().show_all().separator().quit().build()?;
+        menu = menu.item(&app_menu);
+    }
+    menu.item(&file).item(&edit).item(&view).item(&updates).item(&window).build()
+}
+
+fn on_menu(app: &tauri::AppHandle, id: &str) {
+    match id {
+        "lang:ru" => { let _ = app.emit("ui:setLang", "ru"); }
+        "lang:en" => { let _ = app.emit("ui:setLang", "en"); }
+        "app:about" => {
+            let text = format!("Кабинет {}\nВерсия на Tauri (Rust).\n\nРедактор для писателей: тексты лежат у вас в папке обычными файлами.", env!("CARGO_PKG_VERSION"));
+            tauri::async_runtime::spawn(async move { rfd::AsyncMessageDialog::new().set_title("О программе «Кабинет»").set_description(text).show().await; });
+        }
+        "app:updates" => open_url("https://github.com/shavkynov/kabinet/releases"),
+        "app:fullscreen" => {
+            if let Some(w) = app.get_webview_window("main").or_else(|| app.webview_windows().into_values().next()) {
+                let on = w.is_fullscreen().unwrap_or(false);
+                let _ = w.set_fullscreen(!on);
+            }
+        }
+        other if other.starts_with("ui:") => { let _ = app.emit(other, ()); }
+        _ => {}
+    }
+}
+
 fn reveal(p: &Path) {
     #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(format!("/select,{}", p.display())).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg("-R").arg(p).spawn(); }
@@ -329,6 +437,7 @@ fn main() {
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
                 Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);
             app.manage(Arc::new(DavApi::new(link)));
+            app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.
             let h = app.handle().clone();
             std::thread::spawn(move || loop {
@@ -338,6 +447,7 @@ fn main() {
             });
             Ok(())
         })
+        .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(d) = window.app_handle().try_state::<Arc<DavApi>>() { d.link.stop(); }

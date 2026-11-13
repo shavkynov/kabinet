@@ -112,6 +112,17 @@ const declension = require('../../src/declension');
   // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.
   const listen = tauri && tauri.event && tauri.event.listen;
   const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => cb(e.payload)).catch(() => {}); };
+  const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => cb()).catch(() => {}); };
+  // Пункты главного меню (в Electron — send('ui:…')).
+  const MENU = {
+    onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
+    onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',
+    onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onExport: 'ui:export',
+    onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onOpenBackups: 'ui:openBackups',
+    onOpenSync: 'ui:openSync', onSyncNow: 'ui:syncNow', onToggleSound: 'ui:toggleSound', onToggleAmbient: 'ui:toggleAmbient',
+  };
+  for (const [name, event] of Object.entries(MENU)) window.kabinet[name] = subscribeVoid(event);
+  window.kabinet.onSetLang = subscribe('ui:setLang');
   window.kabinet.onDavEvent = subscribe('dav:event');
   window.kabinet.onExternalChange = subscribe('sync:changed');
 })();
