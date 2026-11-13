@@ -1,0 +1,168 @@
+//! Резервные копии проекта: обычные папки с копиями файлов. Копия делается, только если что-то изменилось.
+//! Порт src/backup.js и detectCloud из src/cloud.js.
+use crate::store::R;
+use crate::syncguard::stamp_now;
+use sha1::{Digest, Sha1};
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub const BACKUP_DIR: &str = "Резервные копии";
+const SKIP: [&str; 3] = [BACKUP_DIR, "Корзина", "kabinet.lock"];
+
+pub fn detect_cloud(dir: &Path) -> Option<&'static str> {
+    let p = dir.to_string_lossy().replace('\\', "/").to_lowercase();
+    if p.contains("/library/mobile documents/") || p.contains("com~apple~clouddocs") { return Some("iCloud Drive"); }
+    if p.contains("/dropbox") { return Some("Dropbox"); }
+    if p.contains("googledrive") || p.contains("google drive") { return Some("Google Drive"); }
+    if p.contains("onedrive") { return Some("OneDrive"); }
+    if (p.contains("yandex") && p.contains("disk")) || p.contains("/яндекс.диск") || p.contains("/yandexdisk") { return Some("Яндекс Диск"); }
+    None
+}
+
+/// Куда складывать копии: внутрь проекта; для проектов в облачных папках — в данные приложения,
+/// чтобы копии не гонялись между устройствами и не пропадали вместе с проектом.
+pub fn backup_root(data_dir: &Path, dir: &Path) -> PathBuf {
+    if detect_cloud(dir).is_none() { return dir.join(BACKUP_DIR); }
+    let mut h = Sha1::new();
+    h.update(dir.to_string_lossy().as_bytes());
+    let key: String = h.finalize().iter().map(|b| format!("{:02x}", b)).collect::<String>().chars().take(8).collect();
+    let name: String = dir.file_name().map(|n| n.to_string_lossy().chars().map(|c| if "\\/:*?\"<>|".contains(c) { '-' } else { c }).collect()).unwrap_or_default();
+    data_dir.join("Копии").join(format!("{}-{}", if name.is_empty() { "project" } else { &name }, key))
+}
+
+fn list_files(root: &Path, rel: &Path, out: &mut Vec<String>) {
+    let Ok(rd) = fs::read_dir(root.join(rel)) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let r = if rel.as_os_str().is_empty() { PathBuf::from(&name) } else { rel.join(&name) };
+        if rel.as_os_str().is_empty() && SKIP.contains(&name.as_str()) { continue; }
+        if name.ends_with(".tmp") || name == ".DS_Store" { continue; }
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_dir() { list_files(root, &r, out); } else if ft.is_file() { out.push(r.to_string_lossy().to_string()); }
+    }
+}
+
+fn is_text_file(name: &str) -> bool {
+    let l = name.to_lowercase();
+    l.ends_with(".md") || l.ends_with(".json") || l.ends_with(".txt")
+}
+
+fn signature(root: &Path, files: &[String]) -> String {
+    let mut h = Sha1::new();
+    for f in files {
+        let full = root.join(f);
+        h.update(f.as_bytes());
+        h.update([0u8]);
+        if is_text_file(f) {
+            if let Ok(b) = fs::read(&full) { h.update(&b); }
+        } else if let Ok(md) = fs::metadata(&full) {
+            let ms = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis()).unwrap_or(0);
+            h.update(format!("{}:{}", md.len(), ms).as_bytes());
+        }
+        h.update([0u8]);
+    }
+    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn is_backup_name(n: &str) -> bool {
+    let b = n.as_bytes();
+    b.len() == 19 && b.iter().enumerate().all(|(i, c)| match i { 4 | 7 | 13 | 16 => *c == b'-', 10 => *c == b' ', _ => c.is_ascii_digit() })
+}
+
+pub fn list_backups(root: &Path) -> Vec<String> {
+    let mut v: Vec<String> = fs::read_dir(root).map(|rd| rd.flatten().filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| is_backup_name(n)).collect()).unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// Какие копии оставить: последние `keep` и самая поздняя копия каждого из `keep_days` последних дней, когда копии делались.
+pub fn copies_to_keep(all: &[String], keep: usize, keep_days: usize) -> BTreeSet<String> {
+    let mut set: BTreeSet<String> = all[all.len().saturating_sub(keep)..].iter().cloned().collect();
+    let mut days: BTreeSet<String> = BTreeSet::new();
+    for name in all.iter().rev() {
+        if keep_days == 0 { break; }
+        let day: String = name.chars().take(10).collect();
+        if days.contains(&day) { continue; }
+        if days.len() >= keep_days { break; }
+        days.insert(day);
+        set.insert(name.clone());
+    }
+    set
+}
+
+/// Делает копию. Возвращает имя папки копии или None, если менять было нечего.
+pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Option<String>> {
+    let (keep, keep_days) = (60, 30);
+    let mut files = Vec::new();
+    list_files(dir, Path::new(""), &mut files);
+    files.sort();
+    if files.is_empty() { return Ok(None); }
+    let sig = signature(dir, &files);
+    let existing = list_backups(root);
+    if let Some(last) = existing.last() {
+        if fs::read_to_string(root.join(last).join(".sig")).map(|s| s.trim() == sig).unwrap_or(false) { return Ok(None); }
+    }
+    let name = name_override.map(String::from).unwrap_or_else(stamp_now);
+    if existing.contains(&name) { return Ok(None); }
+    let target = root.join(&name);
+    let tmp = root.join(format!("{}.tmp", name));
+    let _ = fs::remove_dir_all(&tmp);
+    for f in &files {
+        let to = tmp.join(f);
+        if let Some(p) = to.parent() { fs::create_dir_all(p).map_err(|e| format!("Не удалось сделать копию: {}", e))?; }
+        fs::copy(dir.join(f), &to).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
+    }
+    fs::write(tmp.join(".sig"), &sig).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
+    fs::rename(&tmp, &target).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
+    let all = list_backups(root);
+    let mut keep_set = copies_to_keep(&all, keep, keep_days);
+    keep_set.insert(name.clone()); // только что сделанную копию не удаляем никогда
+    for old in all { if !keep_set.contains(&old) { let _ = fs::remove_dir_all(root.join(old)); } }
+    Ok(Some(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::tmpdir;
+
+    #[test]
+    fn makes_copy_only_when_changed() {
+        let dir = tmpdir("b").join("p");
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("Главы/a.md"), "один").unwrap();
+        fs::write(dir.join("kabinet.lock"), "x").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        assert_eq!(make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().as_deref(), Some("2026-01-01 10-00-00"));
+        assert!(root.join("2026-01-01 10-00-00/Главы/a.md").exists());
+        assert!(!root.join("2026-01-01 10-00-00/kabinet.lock").exists());
+        assert_eq!(make_backup(&dir, &root, Some("2026-01-01 10-00-05")).unwrap(), None);
+        fs::write(dir.join("Главы/a.md"), "два").unwrap();
+        assert!(make_backup(&dir, &root, Some("2026-01-01 10-00-10")).unwrap().is_some());
+        assert_eq!(list_backups(&root).len(), 2);
+        // сами копии в копию не попадают
+        assert!(!root.join("2026-01-01 10-00-10").join(BACKUP_DIR).exists());
+    }
+
+    #[test]
+    fn retention_keeps_recent_and_one_per_day() {
+        let all: Vec<String> = (0..5).flat_map(|d| (0..4).map(move |h| format!("2026-01-0{} 1{}-00-00", d + 1, h))).collect();
+        let keep = copies_to_keep(&all, 3, 2);
+        assert!(keep.contains("2026-01-05 13-00-00") && keep.contains("2026-01-05 12-00-00") && keep.contains("2026-01-05 11-00-00"));
+        assert!(keep.contains("2026-01-04 13-00-00")); // последняя копия предыдущего дня
+        assert!(!keep.contains("2026-01-03 13-00-00"));
+        assert!(is_backup_name("2026-01-01 10-00-00") && !is_backup_name("x"));
+    }
+
+    #[test]
+    fn cloud_projects_keep_copies_elsewhere() {
+        let data = Path::new("/data");
+        assert_eq!(backup_root(data, Path::new("/home/a/Roman")), Path::new("/home/a/Roman").join(BACKUP_DIR));
+        let r = backup_root(data, Path::new("/home/a/Dropbox/Roman"));
+        assert!(r.starts_with("/data/Копии") && r.to_string_lossy().contains("Roman-"));
+        assert_eq!(detect_cloud(Path::new("C:\\Users\\me\\OneDrive\\x")), Some("OneDrive"));
+    }
+}

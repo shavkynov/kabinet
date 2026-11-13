@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::{export, exporttarget, store};
+use kabinet_core::{backup, export, exporttarget, import, store};
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -43,6 +43,31 @@ fn open_path(p: &Path) {
     #[cfg(windows)] { let _ = std::process::Command::new("explorer").arg(p).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(p).spawn(); }
     #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(p).spawn(); }
+}
+
+/// Копия проекта в папку копий (внутри проекта или, для облачных папок, в данных приложения).
+fn backup_now(app: &tauri::AppHandle, dir: &Path) -> Result<Option<String>, String> {
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    backup::make_backup(dir, &backup::backup_root(&data, dir), None)
+}
+
+/// Естественный порядок имён: «глава 2» раньше «глава 10».
+fn natural_key(name: &str) -> Vec<(bool, u64, String)> {
+    let mut out = Vec::new();
+    let mut digits = String::new();
+    let mut text = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_digit() {
+            if !text.is_empty() { out.push((false, 0, std::mem::take(&mut text))); }
+            digits.push(c);
+        } else {
+            if !digits.is_empty() { out.push((true, digits.parse().unwrap_or(0), String::new())); digits.clear(); }
+            text.push(c);
+        }
+    }
+    if !digits.is_empty() { out.push((true, digits.parse().unwrap_or(0), String::new())); }
+    if !text.is_empty() { out.push((false, 0, text)); }
+    out
 }
 
 fn reveal(p: &Path) {
@@ -94,6 +119,7 @@ fn set_current(state: &State<'_, AppState>, dir: Option<PathBuf>) {
 async fn open_at(app: &tauri::AppHandle, state: &State<'_, AppState>, dav: &Arc<DavApi>, dir: &Path) -> Result<Value, String> {
     let proj = store::open_project(dir)?;
     set_current(state, Some(dir.to_path_buf()));
+    let _ = backup_now(app, dir);
     switch_sync(dav, Some(dir.to_path_buf())).await;
     let name = proj["name"].as_str().unwrap_or("");
     store::recents_add(&recents_file(app)?, &dir.to_string_lossy(), name)?;
@@ -137,7 +163,7 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             if !store::recents_has(&recents_file(&app)?, &p) { return Err("Этого проекта нет в списке недавних.".into()); }
             open_at(&app, &state, &dav, Path::new(&p)).await
         }
-        "project:close" => { set_current(&state, None); switch_sync(&dav, None).await; Ok(json!(true)) }
+        "project:close" => { if let Ok(d) = current_dir(&state) { let _ = backup_now(&app, &d); } set_current(&state, None); switch_sync(&dav, None).await; Ok(json!(true)) }
         "project:reload" => store::open_project(&current_dir(&state)?),
         "chapter:add" => store::add_chapter(&current_dir(&state)?, arg_opt_str(a, 0).as_deref()),
         "chapter:rename" => store::rename_chapter(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1)?),
@@ -171,6 +197,47 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         "trash:restore" => store::restore_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:purge" => store::purge_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:empty" => store::empty_trash(&current_dir(&state)?),
+        "backup:now" => {
+            let dir = current_dir(&state)?;
+            Ok(match backup_now(&app, &dir)? { Some(n) => json!(n), None => Value::Null })
+        }
+        "backup:openFolder" => {
+            let dir = current_dir(&state)?;
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let folder = backup::backup_root(&data, &dir);
+            std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+            open_path(&folder);
+            Ok(json!(true))
+        }
+        "project:import" => {
+            let dir = current_dir(&state)?;
+            let picked = rfd::AsyncFileDialog::new().set_title("Импорт глав")
+                .add_filter("Документы", &["docx", "rtf", "md", "markdown", "txt"]).pick_files().await;
+            let Some(files) = picked else { return Ok(Value::Null) };
+            let mut paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+            paths.sort_by_key(|p| natural_key(&p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+            let app2 = app.clone();
+            let out = tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+                let mut items: Vec<(String, String)> = Vec::new();
+                let mut skipped: Vec<String> = Vec::new();
+                for p in &paths {
+                    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    let res = std::fs::metadata(p).map_err(|e| e.to_string())
+                        .and_then(|md| if md.len() as usize > import::MAX_FILE { Err("Файл слишком большой для импорта (больше 30 МБ).".to_string()) } else { Ok(()) })
+                        .and_then(|_| std::fs::read(p).map_err(|e| e.to_string()))
+                        .and_then(|bytes| import::parse_file(&name, &bytes));
+                    match res {
+                        Ok(chs) => items.extend(chs.into_iter().map(|c| (c.title, c.text))),
+                        Err(e) => skipped.push(format!("{}: {}", name, e)),
+                    }
+                }
+                if items.is_empty() { return Err(if skipped.is_empty() { "В файлах нет текста.".into() } else { skipped.join("\n") }); }
+                backup_now(&app2, &dir)?; // без копии ничего не меняем
+                let out = store::import_chapters(&dir, &items)?;
+                Ok(json!({ "project": out["project"], "ids": out["ids"], "skipped": skipped }))
+            }).await.map_err(|e| e.to_string())??;
+            Ok(out)
+        }
         "project:export" => {
             let dir = current_dir(&state)?;
             let opts = a.first().cloned().unwrap_or(Value::Null);
@@ -247,6 +314,13 @@ fn main() {
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
                 Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);
             app.manage(Arc::new(DavApi::new(link)));
+            // Копия раз в 20 минут. Ошибка копирования не мешает писать.
+            let h = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(20 * 60));
+                let cur = h.state::<AppState>().current.lock().ok().and_then(|g| g.clone());
+                if let Some(d) = cur { let _ = backup_now(&h, &d); }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {

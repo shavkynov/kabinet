@@ -464,6 +464,33 @@ pub fn add_chapter(dir: &Path, after: Option<&str>) -> R<Value> {
     Ok(json!({ "project": view(dir, &meta), "id": id }))
 }
 
+/// Импорт глав: первый текст занимает пустую главу нового проекта, остальные добавляются в конец.
+pub fn import_chapters(dir: &Path, items: &[(String, String)]) -> R<Value> {
+    if items.is_empty() { return Err("Нечего импортировать.".into()); }
+    if items.len() > 500 { return Err("За один раз можно импортировать не больше 500 глав.".into()); }
+    let meta0 = load_meta(dir)?;
+    let only = meta0["chapters"].as_array().filter(|a| a.len() == 1).map(|a| a[0].clone());
+    let reuse = only.and_then(|c| {
+        let id = c["id"].as_str()?.to_string();
+        let empty = read_chapter(dir, &id).map(|t| t.trim().is_empty()).unwrap_or(false);
+        if is_auto_title(c["title"].as_str().unwrap_or("")) && empty { Some(id) } else { None }
+    });
+    let mut ids = Vec::new();
+    for (k, (title, text)) in items.iter().enumerate() {
+        let id = match (&reuse, k) {
+            (Some(r), 0) => r.clone(),
+            _ => add_chapter(dir, None)?["id"].as_str().unwrap_or("").to_string(),
+        };
+        if !title.is_empty() { rename_chapter(dir, &id, title)?; }
+        if !text.is_empty() { write_chapter(dir, &id, text)?; }
+        ids.push(id);
+    }
+    let mut meta = load_meta(dir)?;
+    renumber(&mut meta);
+    save_meta(dir, &meta)?;
+    Ok(json!({ "project": view(dir, &meta), "ids": ids }))
+}
+
 pub fn rename_chapter(dir: &Path, id: &str, title: &str) -> R<Value> {
     let mut meta = load_meta(dir)?;
     let i = find_index(&meta, id)?;
