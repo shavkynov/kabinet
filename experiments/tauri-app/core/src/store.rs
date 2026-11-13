@@ -4,9 +4,19 @@ use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type R<T> = Result<T, String>;
+
+/// Общий замок между штатным сохранением (write_chapter/write_item) и записью/удалением локальных
+/// файлов внутри прохода синхронизации (foldersync::sync): закрывает окно «свежий хеш → запись/удаление».
+/// write_atomic его НЕ берёт, чтобы guard_write (который сам вызывает write_atomic для копии в «Конфликты»)
+/// не зашёл в повторный захват.
+pub(crate) fn sync_save_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 const META: &str = "project.json";
 const CHAPTERS_DIR: &str = "Главы";
@@ -593,6 +603,9 @@ pub fn write_chapter(dir: &Path, id: &str, text: &str) -> R<Value> {
     let title = meta["chapters"][i]["title"].as_str().unwrap_or("").to_string();
     let file = chapter_file(dir, id)?;
     // Файл изменили снаружи: чужую версию сохраняем в «Конфликты», потом пишем свою.
+    // Замок держим только вокруг проверки и записи, чтобы проход синхронизации не мог вклиниться
+    // между «свежий хеш» и записью/удалением этого файла.
+    let _guard = sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
     let conflict = crate::syncguard::guard_write(dir, &file, text, &title)?;
     write_atomic(&file, text)?;
     Ok(json!({ "conflict": conflict }))
@@ -1098,6 +1111,7 @@ pub fn write_item(dir: &Path, kind: &str, id: &str, text: &str) -> R<Value> {
     } else { text.to_string() };
     let file = item_file(dir, kind, id)?;
     // Файл изменили снаружи: чужую версию сохраняем в «Конфликты», потом пишем свою.
+    let _guard = sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
     let conflict = crate::syncguard::guard_write(dir, &file, &out, &title)?;
     write_atomic(&file, &out)?;
     Ok(json!({ "conflict": conflict }))

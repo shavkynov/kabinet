@@ -179,6 +179,16 @@ impl<T: Remote> FolderSync<T> {
 
     fn read_local(&self, rel: &str) -> R<Vec<u8>> { fs::read(self.dir.join(rel)).map_err(|e| format!("{}: {}", rel, e)) }
 
+    /// Хэш локального файла на диске; None, если файла уже нет. Позволяет заметить сохранение,
+    /// случившееся после walk_local, но до обработки файла в проходе.
+    fn local_hash(&self, rel: &str) -> R<Option<String>> {
+        match fs::read(self.dir.join(rel)) {
+            Ok(b) => Ok(Some(hash_bytes(&b))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("{}: {}", rel, e)),
+        }
+    }
+
     fn write_local(&self, rel: &str, bytes: &[u8]) -> R<()> {
         let target = self.dir.join(rel);
         if let Some(p) = target.parent() { fs::create_dir_all(p).map_err(|e| e.to_string())?; }
@@ -301,76 +311,100 @@ impl<T: Remote> FolderSync<T> {
         }
 
         for rel in &rels {
-            let r = remote.get(rel).map(|e| e.hash.clone());
-            let l = local.get(rel).cloned();
-            let b = self.state.get(rel).cloned();
-            if r.is_none() && l.is_none() { self.state.remove(rel); continue; }
-            if r.is_some() && r == l { self.state.insert(rel.clone(), r.unwrap()); continue; }
+            // Решение по файлу принимаем заново, если перечитывание локального файла показало, что снимок l
+            // устарел (сохранение во время прохода). Обычная ветка выходит через break.
+            loop {
+                let r = remote.get(rel).map(|e| e.hash.clone());
+                let l = local.get(rel).cloned();
+                let b = self.state.get(rel).cloned();
+                if r.is_none() && l.is_none() { self.state.remove(rel); break; }
+                if r.is_some() && r == l { self.state.insert(rel.clone(), r.unwrap()); break; }
 
-            if let (Some(rh), Some(lh)) = (&r, &l) {
-                if b.as_ref() == Some(rh) {
-                    let data = self.read_local(rel)?;
-                    self.remote.write(rel, &data)?;
-                    self.state.insert(rel.clone(), lh.clone());
+                if let (Some(rh), Some(lh)) = (&r, &l) {
+                    if b.as_ref() == Some(rh) {
+                        let data = self.read_local(rel)?;
+                        self.remote.write(rel, &data)?;
+                        self.state.insert(rel.clone(), lh.clone());
+                        res.pushed.push(rel.clone());
+                        break;
+                    }
+                    if b.as_ref() == Some(lh) {
+                        // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
+                        // перечитаем его: сохранение во время этого прохода уже изменило файл. Замок не даёт штатному
+                        // сохранению вклиниться между проверкой и записью; сетевых вызовов под замком нет.
+                        let mut e = remote.remove(rel).unwrap();
+                        let bytes = self.remote_bytes(&mut e, rel);
+                        remote.insert(rel.clone(), e);
+                        let bytes = bytes?;
+                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                        if let Some(fresh) = self.local_hash(rel)? {
+                            if &fresh != lh {
+                                local.insert(rel.clone(), fresh);
+                                continue;
+                            }
+                        }
+                        self.write_local(rel, &bytes)?;
+                        self.state.insert(rel.clone(), rh.clone());
+                        res.pulled.push(rel.clone());
+                        break;
+                    }
+                    let mut e = remote.remove(rel).unwrap();
+                    let foreign = self.remote_bytes(&mut e, rel);
+                    remote.insert(rel.clone(), e);
+                    let foreign = foreign?;
+                    self.keep_foreign(rel, &foreign, &label_of(rel))?;
+                    let mine = self.read_local(rel)?;
+                    let with_words = if rel == "project.json" { merge_meta_words(&mine, &foreign) } else { None };
+                    if let Some(w) = &with_words { self.write_local(rel, w)?; }
+                    let now_local = self.read_local(rel)?;
+                    self.remote.write(rel, &now_local)?;
+                    self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
                     res.pushed.push(rel.clone());
-                    continue;
+                    res.conflicts.push(rel.clone());
+                    break;
                 }
-                if b.as_ref() == Some(lh) {
+
+                if let Some(rh) = &r { // снаружи есть, у нас нет
                     let mut e = remote.remove(rel).unwrap();
                     let bytes = self.remote_bytes(&mut e, rel);
                     remote.insert(rel.clone(), e);
-                    self.write_local(rel, &bytes?)?;
-                    self.state.insert(rel.clone(), rh.clone());
-                    res.pulled.push(rel.clone());
-                    continue;
+                    if b.is_none() {
+                        self.write_local(rel, &bytes?)?;
+                        self.state.insert(rel.clone(), rh.clone());
+                        res.pulled.push(rel.clone());
+                    } else {
+                        if b.as_ref() != Some(rh) { let bytes = bytes?; self.keep_foreign(rel, &bytes, &label_of(rel))?; }
+                        let _ = fs::remove_file(self.dir.join(rel));
+                        self.state.remove(rel);
+                        res.pulled.push(rel.clone());
+                    }
+                    break;
                 }
-                let mut e = remote.remove(rel).unwrap();
-                let foreign = self.remote_bytes(&mut e, rel);
-                remote.insert(rel.clone(), e);
-                let foreign = foreign?;
-                self.keep_foreign(rel, &foreign, &label_of(rel))?;
-                let mine = self.read_local(rel)?;
-                let with_words = if rel == "project.json" { merge_meta_words(&mine, &foreign) } else { None };
-                if let Some(w) = &with_words { self.write_local(rel, w)?; }
-                let now_local = self.read_local(rel)?;
-                self.remote.write(rel, &now_local)?;
-                self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
-                res.pushed.push(rel.clone());
-                res.conflicts.push(rel.clone());
-                continue;
-            }
 
-            if let Some(rh) = &r { // снаружи есть, у нас нет
-                let mut e = remote.remove(rel).unwrap();
-                let bytes = self.remote_bytes(&mut e, rel);
-                remote.insert(rel.clone(), e);
+                // у нас есть, снаружи нет
+                let lh = l.unwrap();
                 if b.is_none() {
-                    self.write_local(rel, &bytes?)?;
-                    self.state.insert(rel.clone(), rh.clone());
-                    res.pulled.push(rel.clone());
-                } else {
-                    if b.as_ref() != Some(rh) { let bytes = bytes?; self.keep_foreign(rel, &bytes, &label_of(rel))?; }
+                    if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
+                    let data = self.read_local(rel)?;
+                    self.remote.write(rel, &data)?;
+                    self.state.insert(rel.clone(), lh);
+                    res.pushed.push(rel.clone());
+                } else if Some(&lh) == b.as_ref() {
+                    // Перед удалением перечитаем файл: сохранение во время прохода могло изменить его.
+                    let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                    if let Some(fresh) = self.local_hash(rel)? {
+                        if fresh != lh {
+                            local.insert(rel.clone(), fresh);
+                            continue;
+                        }
+                    }
                     let _ = fs::remove_file(self.dir.join(rel));
                     self.state.remove(rel);
                     res.pulled.push(rel.clone());
+                } else {
+                    res.conflicts.push(rel.clone());
                 }
-                continue;
-            }
-
-            // у нас есть, снаружи нет
-            let lh = l.unwrap();
-            if b.is_none() {
-                if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
-                let data = self.read_local(rel)?;
-                self.remote.write(rel, &data)?;
-                self.state.insert(rel.clone(), lh);
-                res.pushed.push(rel.clone());
-            } else if Some(&lh) == b.as_ref() {
-                let _ = fs::remove_file(self.dir.join(rel));
-                self.state.remove(rel);
-                res.pulled.push(rel.clone());
-            } else {
-                res.conflicts.push(rel.clone());
+                break;
             }
         }
 
