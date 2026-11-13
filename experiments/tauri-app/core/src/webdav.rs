@@ -108,7 +108,7 @@ impl<H: Http> Http for Retrying<H> {
 pub fn normalize_url(raw: &str) -> R<String> {
     let mut s = raw.trim().to_string();
     if s.is_empty() { return Err("Введите адрес сервера.".into()); }
-    let has_scheme = Regex::new(r"^(?i)[a-z][a-z0-9+.-]*://").unwrap().is_match(&s);
+    let has_scheme = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"^(?i)[a-z][a-z0-9+.-]*://").unwrap()) }.is_match(&s);
     if !has_scheme { s = format!("https://{}", s); }
     let u = url::Url::parse(&s).map_err(|_| "Адрес сервера записан неверно.".to_string())?;
     if u.scheme() != "https" && u.scheme() != "http" { return Err("Адрес должен начинаться с https://".into()); }
@@ -145,18 +145,8 @@ fn assert_safe_transport(base: &str) -> R<()> {
 }
 
 pub fn to_base64(data: &[u8]) -> String {
-    const CH: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in data.chunks(3) {
-        let a = chunk[0];
-        let b = *chunk.get(1).unwrap_or(&0);
-        let c = *chunk.get(2).unwrap_or(&0);
-        out.push(CH[(a >> 2) as usize] as char);
-        out.push(CH[(((a & 3) << 4) | (b >> 4)) as usize] as char);
-        out.push(if chunk.len() > 1 { CH[(((b & 15) << 2) | (c >> 6)) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { CH[(c & 63) as usize] as char } else { '=' });
-    }
-    out
+    use ::base64::Engine as _;
+    ::base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 fn segs(p: &str) -> Vec<String> { p.split('/').filter(|x| !x.is_empty()).map(|x| x.to_string()).collect() }
@@ -170,9 +160,9 @@ fn encode_path(parts: &[String]) -> String {
 
 fn unxml(s: &str) -> String {
     let mut out = s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'");
-    let dec = Regex::new(r"&#(\d+);").unwrap();
+    let dec = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"&#(\d+);").unwrap()) };
     out = dec.replace_all(&out, |c: &regex::Captures| c[1].parse::<u32>().ok().and_then(char::from_u32).map(|x| x.to_string()).unwrap_or_default()).into_owned();
-    let hex = Regex::new(r"(?i)&#x([0-9a-f]+);").unwrap();
+    let hex = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?i)&#x([0-9a-f]+);").unwrap()) };
     out = hex.replace_all(&out, |c: &regex::Captures| u32::from_str_radix(&c[1], 16).ok().and_then(char::from_u32).map(|x| x.to_string()).unwrap_or_default()).into_owned();
     out.replace("&amp;", "&")
 }
@@ -187,12 +177,12 @@ pub struct DavEntry {
 
 /// Разбор ответа PROPFIND. Префиксы пространств имён любые.
 pub fn parse_multistatus(xml: &str) -> Vec<DavEntry> {
-    let block_re = Regex::new(r"(?is)<(?:[\w.-]+:)?response[\s>].*?</(?:[\w.-]+:)?response>").unwrap();
-    let href_re = Regex::new(r"(?is)<(?:[\w.-]+:)?href[^>]*>(.*?)</(?:[\w.-]+:)?href>").unwrap();
-    let coll_re = Regex::new(r"(?i)<(?:[\w.-]+:)?collection\s*/?>").unwrap();
-    let size_re = Regex::new(r"(?i)<(?:[\w.-]+:)?getcontentlength[^>]*>(\d+)<").unwrap();
-    let mod_re = Regex::new(r"(?i)<(?:[\w.-]+:)?getlastmodified[^>]*>([^<]*)<").unwrap();
-    let abs_re = Regex::new(r"^(?i)[a-z][a-z0-9+.-]*://").unwrap();
+    let block_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?is)<(?:[\w.-]+:)?response[\s>].*?</(?:[\w.-]+:)?response>").unwrap()) };
+    let href_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?is)<(?:[\w.-]+:)?href[^>]*>(.*?)</(?:[\w.-]+:)?href>").unwrap()) };
+    let coll_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?i)<(?:[\w.-]+:)?collection\s*/?>").unwrap()) };
+    let size_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?i)<(?:[\w.-]+:)?getcontentlength[^>]*>(\d+)<").unwrap()) };
+    let mod_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"(?i)<(?:[\w.-]+:)?getlastmodified[^>]*>([^<]*)<").unwrap()) };
+    let abs_re = { static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new(); C.get_or_init(|| Regex::new(r"^(?i)[a-z][a-z0-9+.-]*://").unwrap()) };
     let mut out = Vec::new();
     for m in block_re.find_iter(xml) {
         let block = m.as_str();

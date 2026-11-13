@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 pub const FOLDERS: [&str; 9] = ["Главы", "Персонажи", "Места", "Предметы", "Заметки", "Изображения", "Картинки", "Корзина", CONFLICT_DIR];
 const MASS_DELETE_MIN: usize = 5;
 
-fn root_re() -> Regex { Regex::new(r"^project.*\.json$|^stats\.json$").unwrap() }
+fn root_re() -> &'static Regex {
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"^project.*\.json$|^stats\.json$").unwrap());
+    &RE
+}
 
 pub fn is_syncable(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').filter(|x| !x.is_empty()).collect();
