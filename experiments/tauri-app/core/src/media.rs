@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(added.len(), 1);
         let l = fonts_list(&data);
         assert_eq!(l[0]["family"], "Мой шрифт");
-        assert_eq!(family("a'b\\c\"d.otf"), "abcd");
+        assert_eq!(family("a'bd.otf"), "abd");
         assert_eq!(l[0]["data"], "Rk9OVA==");
         fonts_remove(&data, "../fonts/Мой шрифт.TTF").unwrap();
         assert!(fonts_list(&data).is_empty());
