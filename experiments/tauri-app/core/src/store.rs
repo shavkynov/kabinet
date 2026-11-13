@@ -203,7 +203,12 @@ fn stamp() -> String { crate::syncguard::stamp_now() }
 
 // ---------- файлы ----------
 
-pub fn write_atomic(file: &Path, data: &str) -> R<()> { write_atomic_bytes(file, data.as_bytes()) }
+pub fn write_atomic(file: &Path, data: &str) -> R<()> {
+    write_atomic_bytes(file, data.as_bytes())?;
+    // Своя запись тоже становится «известной» версией файла: как known+wrote в JS writeFileAtomic.
+    crate::syncguard::note_written(file, data);
+    Ok(())
+}
 
 pub fn write_atomic_bytes(file: &Path, data: &[u8]) -> R<()> {
     let tag: [u8; 3] = rand::random();
@@ -248,7 +253,11 @@ fn item_file(dir: &Path, kind: &str, id: &str) -> R<PathBuf> {
 
 pub fn load_meta(dir: &Path) -> R<Map<String, Value>> {
     let raw = match fs::read_to_string(meta_path(dir)) {
-        Ok(s) => s,
+        Ok(s) => {
+            // Запоминаем прочитанную версию до разбора: как noteRead в JS loadMeta.
+            crate::syncguard::note_read(&meta_path(dir), &s);
+            s
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err("В этой папке нет проекта Кабинета (нет файла project.json).".into());
         }
@@ -542,14 +551,29 @@ pub fn set_default_goal(dir: &Path, goal: Option<&Value>) -> R<Value> {
     Ok(view(dir, &meta))
 }
 
-pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
+fn read_chapter_impl(dir: &Path, id: &str, track: bool) -> R<String> {
     let file = chapter_file(dir, id)?;
     match fs::read_to_string(&file) {
-        Ok(s) => Ok(s),
+        Ok(s) => {
+            if track {
+                crate::syncguard::note_read(&file, &s); // окно открыло главу: эту версию защищаем от затирания
+            }
+            Ok(s)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!(
             "Файл главы «{}.md» не найден в папке «Главы». Дождитесь завершения синхронизации или восстановите файл из резервной копии. Пустая глава вместо него не создана.", id)),
         Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
     }
+}
+
+/// Чтение главы для окна (chapter:read): запоминаем версию файла для защиты от затирания.
+pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
+    read_chapter_impl(dir, id, true)
+}
+
+/// Строгое чтение главы без запоминания версии: сборка экспорта не должна обновлять «известный» хэш.
+pub fn read_chapter_untracked(dir: &Path, id: &str) -> R<String> {
+    read_chapter_impl(dir, id, false)
 }
 
 /// Чтение главы для сводных операций (счётчики, доска, поиск, замена, упоминания): отсутствующий файл считается пустым,
@@ -565,9 +589,13 @@ pub fn read_chapter_lenient(dir: &Path, id: &str) -> R<String> {
 
 pub fn write_chapter(dir: &Path, id: &str, text: &str) -> R<Value> {
     let meta = load_meta(dir)?;
-    find_index(&meta, id)?; // пишем только в главы, которые есть в проекте
-    write_atomic(&chapter_file(dir, id)?, text)?;
-    Ok(json!({ "conflict": null }))
+    let i = find_index(&meta, id)?; // пишем только в главы, которые есть в проекте
+    let title = meta["chapters"][i]["title"].as_str().unwrap_or("").to_string();
+    let file = chapter_file(dir, id)?;
+    // Файл изменили снаружи: чужую версию сохраняем в «Конфликты», потом пишем свою.
+    let conflict = crate::syncguard::guard_write(dir, &file, text, &title)?;
+    write_atomic(&file, text)?;
+    Ok(json!({ "conflict": conflict }))
 }
 
 // ---------- корзина ----------
@@ -1031,10 +1059,16 @@ pub fn delete_item(dir: &Path, kind: &str, id: &str) -> R<Value> {
     Ok(view(dir, &meta))
 }
 
-pub fn read_item(dir: &Path, kind: &str, id: &str) -> R<String> {
+fn read_item_impl(dir: &Path, kind: &str, id: &str, track: bool) -> R<String> {
     let (_, _, ext) = kind_info(kind)?;
-    match fs::read_to_string(item_file(dir, kind, id)?) {
-        Ok(s) => Ok(s),
+    let file = item_file(dir, kind, id)?;
+    match fs::read_to_string(&file) {
+        Ok(s) => {
+            if track {
+                crate::syncguard::note_read(&file, &s); // карточку открыли в окне: эту версию защищаем от затирания
+            }
+            Ok(s)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if ext == "json" { card_text(&sanitize_card(&json!({}))?) } else { Ok(String::new()) }
         }
@@ -1042,16 +1076,31 @@ pub fn read_item(dir: &Path, kind: &str, id: &str) -> R<String> {
     }
 }
 
+/// Чтение карточки или заметки для окна (item:read): запоминаем версию файла для защиты от затирания.
+pub fn read_item(dir: &Path, kind: &str, id: &str) -> R<String> {
+    read_item_impl(dir, kind, id, true)
+}
+
+/// Чтение без запоминания версии для массовых операций (индекс карточек, поиск, замена):
+/// они не должны обновлять «известный» хэш, иначе защита не заметит чужую правку открытого файла.
+pub fn read_item_lenient(dir: &Path, kind: &str, id: &str) -> R<String> {
+    read_item_impl(dir, kind, id, false)
+}
+
 pub fn write_item(dir: &Path, kind: &str, id: &str, text: &str) -> R<Value> {
     let (list, _, ext) = kind_info(kind)?;
     let meta = load_meta(dir)?;
-    let _ = meta[list].as_array().and_then(|a| a.iter().position(|c| c["id"] == id)).ok_or_else(|| "Запись не найдена в проекте.".to_string())?;
+    let i = meta[list].as_array().and_then(|a| a.iter().position(|c| c["id"] == id)).ok_or_else(|| "Запись не найдена в проекте.".to_string())?;
+    let title = meta[list][i]["title"].as_str().unwrap_or("").to_string();
     let out = if ext == "json" {
         let parsed: Value = serde_json::from_str(text).map_err(|_| "Карточка имеет неверный формат.".to_string())?;
         card_text(&sanitize_card(&parsed)?)?
     } else { text.to_string() };
-    write_atomic(&item_file(dir, kind, id)?, &out)?;
-    Ok(json!({ "conflict": null }))
+    let file = item_file(dir, kind, id)?;
+    // Файл изменили снаружи: чужую версию сохраняем в «Конфликты», потом пишем свою.
+    let conflict = crate::syncguard::guard_write(dir, &file, &out, &title)?;
+    write_atomic(&file, &out)?;
+    Ok(json!({ "conflict": conflict }))
 }
 
 pub fn set_template(dir: &Path, kind: &str, names: Option<&Value>) -> R<Value> {
@@ -1072,7 +1121,7 @@ pub fn card_index(dir: &Path) -> R<Value> {
         let list = kind_info(kind)?.0;
         for item in meta[list].as_array().cloned().unwrap_or_default() {
             let id = item["id"].as_str().unwrap_or("");
-            let card = read_item(dir, kind, id).ok()
+            let card = read_item_lenient(dir, kind, id).ok()
                 .and_then(|t| serde_json::from_str::<Value>(&t).ok())
                 .and_then(|v| sanitize_card(&v).ok())
                 .unwrap_or_else(|| sanitize_card(&json!({})).unwrap_or(Value::Null));

@@ -456,7 +456,9 @@ pub fn build_export(dir: &Path, format: &str, lang: &str, indent: bool, chapter_
         let id = c["id"].as_str().unwrap_or("");
         chapters.push(Chapter {
             title: if stories || !chapter_numbers { title.to_string() } else { format!("{}. {}", i + 1, title) },
-            text: store::read_chapter(dir, id)?.trim().to_string(),
+            // Экспорт не должен обновлять «известный» хэш открытых файлов (в JS readChapter с { track: false }),
+            // но отсутствие главы по-прежнему ошибка: пустой главой её не подменяем.
+            text: store::read_chapter_untracked(dir, id)?.trim().to_string(),
         });
     }
     let toc_heading = if lang == "en" { "Contents" } else { "Содержание" };

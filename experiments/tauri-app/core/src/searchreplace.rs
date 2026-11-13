@@ -73,8 +73,8 @@ pub fn search_project(dir: &Path, query: &str) -> R<Value> {
             let id = item["id"].as_str().unwrap_or("");
             let text = match kind {
                 "chapter" => store::read_chapter_lenient(dir, id)?,
-                "note" => store::read_item(dir, "note", id)?,
-                _ => card_text(&store::read_item(dir, kind, id)?),
+                "note" => store::read_item_lenient(dir, "note", id)?,
+                _ => card_text(&store::read_item_lenient(dir, kind, id)?),
             };
             let title = item["title"].as_str().unwrap_or("");
             let in_title = title.to_lowercase().contains(&qlow);
@@ -143,7 +143,7 @@ pub fn replace_project(dir: &Path, find: &str, repl: &str, dry: bool) -> R<Value
     for (kind, key) in [("character", "characters"), ("place", "places"), ("item", "items")] {
         for c in list(key) {
             let id = c["id"].as_str().unwrap_or("");
-            let (t, n) = replace_in_card(&store::read_item(dir, kind, id)?, q, repl);
+            let (t, n) = replace_in_card(&store::read_item_lenient(dir, kind, id)?, q, repl);
             if n == 0 { continue; }
             if !dry { store::write_item(dir, kind, id, &t)?; }
             note(kind, &c, n);
@@ -151,7 +151,7 @@ pub fn replace_project(dir: &Path, find: &str, repl: &str, dry: bool) -> R<Value
     }
     for c in list("notes") {
         let id = c["id"].as_str().unwrap_or("");
-        let (t, n) = replace_in_text(&store::read_item(dir, "note", id)?, q, repl);
+        let (t, n) = replace_in_text(&store::read_item_lenient(dir, "note", id)?, q, repl);
         if n == 0 { continue; }
         if !dry { store::write_item(dir, "note", id, &t)?; }
         note("note", &c, n);
