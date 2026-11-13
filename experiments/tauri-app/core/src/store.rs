@@ -227,6 +227,7 @@ pub fn write_atomic_bytes(file: &Path, data: &[u8]) -> R<()> {
         let _ = fs::remove_file(&tmp);
         return Err(format!("Не удалось записать файл: {}", e));
     }
+    crate::watcher::note_written(file, data);
     Ok(())
 }
 

@@ -198,6 +198,8 @@ async fn switch_sync(dav: &Arc<DavApi>, dir: Option<PathBuf>) {
 #[derive(Default)]
 struct AppState {
     current: Mutex<Option<PathBuf>>,
+    watcher: Mutex<Option<kabinet_core::watcher::Watcher>>,
+    on_external: std::sync::OnceLock<Arc<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
 fn arg_str(args: &[Value], i: usize) -> Result<String, String> {
@@ -223,6 +225,13 @@ fn current_dir(state: &State<'_, AppState>) -> Result<PathBuf, String> {
 }
 
 fn set_current(state: &State<'_, AppState>, dir: Option<PathBuf>) {
+    // Наблюдатель за внешними правками файлов (облако принесло изменения, другая программа).
+    if let Ok(mut w) = state.watcher.lock() {
+        *w = match (&dir, state.on_external.get()) {
+            (Some(d), Some(cb)) => Some(kabinet_core::watcher::Watcher::start(d, cb.clone(), std::time::Duration::from_millis(800), std::time::Duration::from_secs(5))),
+            _ => None,
+        };
+    }
     if let Ok(mut g) = state.current.lock() { *g = dir; }
 }
 
@@ -465,6 +474,8 @@ fn main() {
         .setup(|app| {
             let data = app.path().app_data_dir().map_err(|e| format!("Нет папки данных приложения: {}", e))?;
             let handle = app.handle().clone();
+            let h2 = handle.clone();
+            let _ = app.state::<AppState>().on_external.set(Arc::new(move |files: Vec<String>| { let _ = h2.emit("sync:changed", files); }));
             let on_event = Arc::new(move |e: Event| match e {
                 Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
                 Event::Error(m) => { let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
