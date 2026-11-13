@@ -6,6 +6,7 @@ use kabinet_core::davlink::{DavLink, Event, Secret};
 use kabinet_core::{backup, export, exporttarget, import, searchreplace, store};
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
+use kabinet_core::stats;
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -71,6 +72,23 @@ fn natural_key(name: &str) -> Vec<(bool, u64, String)> {
     if !digits.is_empty() { out.push((true, digits.parse().unwrap_or(0), String::new())); }
     if !text.is_empty() { out.push((false, 0, text)); }
     out
+}
+
+/// Язык интерфейса: нужен для поиска в Википедии.
+static LANG_EN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Адрес поиска для слова (поисковые системы зашиты в код: наружу открываются только они). Порт src/searchengines.js.
+fn search_url(engine: &str, text: &str, en: bool) -> Option<String> {
+    let q: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+    if q.trim().is_empty() { return None; }
+    let base = match engine {
+        "yandex" => "https://yandex.ru/search/?text=".to_string(),
+        "duckduckgo" => "https://duckduckgo.com/?q=".into(),
+        "bing" => "https://www.bing.com/search?q=".into(),
+        "wikipedia" => format!("https://{}.wikipedia.org/w/index.php?search=", if en { "en" } else { "ru" }),
+        _ => "https://www.google.com/search?q=".into(),
+    };
+    Some(format!("{}{}", base, url::form_urlencoded::byte_serialize(q.as_bytes()).collect::<String>().replace('+', "%20")))
 }
 
 fn open_url(url: &str) {
@@ -201,6 +219,8 @@ async fn switch_sync(dav: &Arc<DavApi>, dir: Option<PathBuf>) {
 struct AppState {
     current: Mutex<Option<PathBuf>>,
     watcher: Mutex<Option<kabinet_core::watcher::Watcher>>,
+    /// Окно уже дописало несохранённое и теперь закрывается по-настоящему.
+    closing: std::sync::atomic::AtomicBool,
     on_external: std::sync::OnceLock<Arc<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
@@ -257,8 +277,60 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
     let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
-        "app:setLang" => { chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
+        "app:exit" => {
+            state.closing.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(w) = app.get_webview_window("main") { let _ = w.close(); }
+            Ok(json!(true))
+        }
+        "app:setLang" => { LANG_EN.store(arg_str(a, 0).ok().as_deref() == Some("en"), std::sync::atomic::Ordering::SeqCst); chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
         "ui:setTheme" | "app:about" => Ok(json!(true)),
+        "stats:setDay" => { stats::set_day_words(&current_dir(&state)?, &arg_str(a, 0)?, a.get(1).unwrap_or(&Value::Null))?; Ok(json!(true)) }
+        "stats:summary" => {
+            let dir = current_dir(&state)?;
+            let v = store::open_project(&dir)?;
+            let st = store::project_stats(&dir)?;
+            let total = if v["mode"] == "stories" && v["goalUnit"] == "chars" { st["totalChars"].as_i64() } else { st["total"].as_i64() }.unwrap_or(0);
+            let today_words = a.get(1).cloned().unwrap_or(Value::Null);
+            stats::summary(&dir, stats::SummaryIn { today: &arg_str(a, 0)?, today_words: &today_words, goal: v["projectGoal"].as_i64(), deadline: v["deadline"].as_str(), total })
+        }
+        "project:setAnalysisSkip" => store::set_analysis_skip(&current_dir(&state)?, a.get(0).unwrap_or(&Value::Null)),
+        "image:pick" => {
+            let dir = current_dir(&state)?;
+            let Some(f) = rfd::AsyncFileDialog::new().set_title("Выберите картинку").add_filter("Картинки", &["png", "jpg", "jpeg", "webp", "gif"]).pick_file().await else { return Ok(Value::Null) };
+            Ok(json!(store::add_image(&dir, f.path())?))
+        }
+        "ctx:edit" => {
+            let js = match arg_str(a, 0)?.as_str() {
+                "cut" => "document.execCommand('cut')",
+                "copy" => "document.execCommand('copy')",
+                "selectAll" => "document.execCommand('selectAll')",
+                "undo" => "document.execCommand('undo')",
+                "redo" => "document.execCommand('redo')",
+                "paste" => "navigator.clipboard.readText().then(t=>document.execCommand('insertText',false,t)).catch(()=>{})",
+                _ => return Err("Неизвестная команда.".into()),
+            };
+            if let Some(w) = app.get_webview_window("main") { let _ = w.eval(js); }
+            Ok(json!(true))
+        }
+        "ctx:replaceMisspelling" => {
+            let word = serde_json::to_string(&arg_str(a, 0)?).map_err(|e| e.to_string())?;
+            if let Some(w) = app.get_webview_window("main") { let _ = w.eval(format!("document.execCommand('insertText',false,{})", word)); }
+            Ok(json!(true))
+        }
+        "ctx:webSearch" => {
+            let q = arg_str(a, 0).unwrap_or_default();
+            let en = LANG_EN.load(std::sync::atomic::Ordering::SeqCst);
+            match search_url(&arg_opt_str(a, 1).unwrap_or_default(), &q, en) { Some(u) => { open_url(&u); Ok(json!(true)) } None => Ok(json!(false)) }
+        }
+        "app:popupMenu" => {
+            use tauri::menu::ContextMenu;
+            if let (Some(menu), Some(w)) = (app.menu(), app.get_webview_window("main")) {
+                let wv: &tauri::Webview = w.as_ref();
+                let (x, y) = (a.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0), a.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0));
+                let _ = menu.popup_at(wv.window(), tauri::LogicalPosition::new(x, y));
+            }
+            Ok(json!(true))
+        }
         c if c.starts_with("check:") => {
             let op = c["check:".len()..].to_string();
             let chk: Arc<CheckApi> = chk.inner().clone();
@@ -524,7 +596,21 @@ fn main() {
         })
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let st = window.app_handle().state::<AppState>();
+                if !st.closing.load(std::sync::atomic::Ordering::SeqCst) {
+                    // Сначала окно дописывает несохранённое (app:close-requested), потом само просит закрыть (app:exit).
+                    // Если окно не ответило за 5 секунд, закрываем всё равно.
+                    api.prevent_close();
+                    let _ = window.emit("app:close-requested", ());
+                    let w = window.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        if let Some(st) = w.app_handle().try_state::<AppState>() { st.closing.store(true, std::sync::atomic::Ordering::SeqCst); }
+                        let _ = w.close();
+                    });
+                    return;
+                }
                 if let Some(d) = window.app_handle().try_state::<Arc<DavApi>>() { d.link.stop(); }
             }
         })

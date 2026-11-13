@@ -12,6 +12,7 @@ tauri = { version = "2", features = [] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 rfd = "0.15"
+url = "2"
 tauri-plugin-deep-link = "2"
 kabinet-core = { path = "../core" }
 

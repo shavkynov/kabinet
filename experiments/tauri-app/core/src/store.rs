@@ -1099,6 +1099,47 @@ pub fn set_project_deadline(dir: &Path, date: Option<&Value>) -> R<Value> {
     Ok(view(dir, &meta))
 }
 
+/// Исключения подсветки «Не отмечать здесь»: { adv, passive, long, repeat, filler } — ключи в нижнем регистре, «ё» как «е».
+pub fn set_analysis_skip(dir: &Path, raw: &Value) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let mut skip = Map::new();
+    if let Some(obj) = raw.as_object() {
+        for cat in ["adv", "passive", "long", "repeat", "filler"] {
+            let Some(list) = obj.get(cat).and_then(|v| v.as_array()) else { continue };
+            let mut seen = HashSet::new();
+            let mut out: Vec<String> = vec![];
+            for x in list {
+                let Some(t) = x.as_str() else { continue };
+                let low = t.to_lowercase().replace('ё', "е");
+                let squeezed = low.split(|c: char| c.is_whitespace() || c == '\u{a0}').filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" ");
+                let units: Vec<u16> = squeezed.encode_utf16().take(160).collect();
+                let key = String::from_utf16_lossy(&units).trim().to_string();
+                if !key.is_empty() && seen.insert(key.clone()) { out.push(key); }
+            }
+            out.truncate(300);
+            if !out.is_empty() { skip.insert(cat.into(), json!(out)); }
+        }
+    }
+    if skip.is_empty() { meta.remove("analysisSkip"); } else { meta.insert("analysisSkip".into(), Value::Object(skip)); }
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
+/// Копирует выбранную картинку в папку «Картинки» проекта, возвращает имя файла.
+pub fn add_image(dir: &Path, src: &Path) -> R<String> {
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if !["png", "jpg", "jpeg", "webp", "gif"].contains(&ext.as_str()) { return Err("Поддерживаются картинки png, jpg, webp и gif.".into()); }
+    let bytes = fs::read(src).map_err(|e| e.to_string())?;
+    if bytes.len() > 10 * 1024 * 1024 { return Err("Картинка слишком большая (больше 10 МБ).".into()); }
+    let folder = dir.join("Картинки");
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let taken: HashSet<String> = fs::read_dir(&folder).map(|rd| rd.filter_map(|e| e.ok())
+        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().to_string())).collect()).unwrap_or_default();
+    let file = format!("{}.{}", new_id(&taken), if ext == "jpeg" { "jpg" } else { &ext });
+    write_atomic_bytes(&folder.join(&file), &bytes)?;
+    Ok(file)
+}
+
 pub fn set_project_mode(dir: &Path, mode: Option<&str>) -> R<Value> {
     let mut meta = load_meta(dir)?;
     if mode == Some("stories") { meta.insert("mode".into(), json!("stories")); } else { meta.remove("mode"); }

@@ -1,5 +1,6 @@
 'use strict';
 const declension = require('../../src/declension');
+const { nameRegex, isCapital } = require('../../src/namematch');
 // Мост окна к Rust: тот же набор функций window.kabinet, что давал preload.js в Electron.
 // Каждый вызов уходит в одну команду Rust `call(channel, args)`. Что ещё не перенесено, отвечает понятной ошибкой.
 (function () {
@@ -15,8 +16,54 @@ const declension = require('../../src/declension');
   }
   // Двоичные данные приходят из Rust строкой base64; окну нужен Uint8Array, как Buffer из Electron.
   const fromB64 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
+  const closing = []; // записи, начатые при закрытии окна
   const none = () => {}; // события из меню Electron: меню на Tauri пока нет
   const plat = /Mac/i.test(navigator.platform) ? 'darwin' : /Win/i.test(navigator.platform) ? 'win32' : 'linux';
+
+  // «Встречается в главах»: те же правила, что у подсветки имён в тексте (src/mentions.js), но на данных из Rust.
+  async function cardMentions(kind, id) {
+    const card = (await call('cards:index')).find((c) => c.kind === kind && c.id === id);
+    if (!card) throw new Error('Карточка не найдена.');
+    if (card.protagonist === true) return { protagonist: true, chapters: [] };
+    const ignore = new Set((card.ignore || []).map((x) => String(x).trim().toLowerCase()));
+    const explicit = [];
+    for (const name of [card.title, ...(card.aliases || [])]) {
+      const key = String(name).trim().toLowerCase();
+      if (key.length >= 2 && !ignore.has(key) && !explicit.includes(key)) explicit.push(key);
+    }
+    const keys = [];
+    const capKeys = new Set();
+    if (card.inflect !== false) {
+      for (const f of declension.nameForms(card.title, card.aliases || [], { kind: kind === 'item' ? 'place' : kind })) {
+        const key = f.toLowerCase();
+        if (key.length < 2 || ignore.has(key) || explicit.includes(key)) continue;
+        keys.push(key);
+        if (isCapital(f)) capKeys.add(key);
+      }
+    }
+    const re = nameRegex([...explicit, ...keys]);
+    const view = await call('project:current');
+    const chapters = [];
+    const list = (view && view.chapters) || [];
+    for (let i = 0; i < list.length; i += 1) {
+      const c = list[i];
+      const count = re ? countIn(await call('chapter:read', c.id), re, capKeys) : 0;
+      if (count > 0) chapters.push({ id: c.id, title: c.title, n: i + 1, count });
+    }
+    return { protagonist: false, chapters };
+  }
+  function countIn(text, re, capKeys) {
+    const flat = String(text).replace(/\u00a0/g, ' ');
+    re.lastIndex = 0;
+    let n = 0;
+    let m;
+    while ((m = re.exec(flat)) !== null) {
+      if (m[0].length === 0) { re.lastIndex += 1; continue; }
+      if (capKeys.has(m[0].toLowerCase()) && !isCapital(m[0])) continue;
+      n += 1;
+    }
+    return n;
+  }
 
   window.kabinet = {
     lang: 'ru',
@@ -89,12 +136,17 @@ const declension = require('../../src/declension');
         forms: c.inflect ? declension.nameForms(c.title, c.aliases, { kind: c.kind === 'item' ? 'place' : c.kind }) : [], // склонение остаётся на JS, как в Electron
       }));
     },
-    cardMentions: (k, id) => call('cards:mentions', k, id),
+    cardMentions,
     readImage: (f) => call('image:read', f),
     pickImage: () => call('image:pick'),
     setTemplate: (k, n) => call('project:setTemplate', k, n),
-    // запись при закрытии окна: синхронного вызова в Tauri нет, поэтому отправляем запрос и не ждём ответа
-    writeDocSync: (kind, id, text) => { if (kind === 'chapter') call('chapter:write', id, text).catch(() => {}); },
+    // Запись при закрытии окна: синхронного вызова в Tauri нет. Записи копятся в списке, а перед закрытием окно ждёт их (см. ниже).
+    writeDocSync: (kind, id, text) => {
+      const job = kind === 'chapter' ? call('chapter:write', id, text)
+        : kind === 'chaptermeta' ? call('chapter:writeMeta', id, JSON.parse(text))
+          : call('item:write', kind, id, text);
+      closing.push(job.catch((e) => console.error('final save failed:', e && e.message)));
+    },
     popupMenu: (x, y) => call('app:popupMenu', x, y),
     reloadProject: () => call('project:reload'),
     dav: (op, ...args) => call(`dav:${op}`, ...args),
@@ -113,6 +165,13 @@ const declension = require('../../src/declension');
   ]) window.kabinet[name] = none;
   // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.
   const listen = tauri && tauri.event && tauri.event.listen;
+  // Rust не закрывает окно сразу: просит сначала дописать несохранённое, ждёт записи и только потом закрывает.
+  if (listen) {
+    listen('app:close-requested', async () => {
+      try { window.dispatchEvent(new Event('beforeunload')); await Promise.allSettled(closing); } catch (e) { console.error(e); }
+      call('app:exit').catch(() => {});
+    }).catch(() => {});
+  }
   const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => cb(e.payload)).catch(() => {}); };
   const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => cb()).catch(() => {}); };
   // Пункты главного меню (в Electron — send('ui:…')).

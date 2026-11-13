@@ -12,6 +12,7 @@ pub mod import;
 pub mod media;
 pub mod remote;
 pub mod searchreplace;
+pub mod stats;
 pub mod store;
 pub mod syncguard;
 pub mod watcher;
