@@ -1,8 +1,9 @@
 name: Кабинет на Tauri (сборка)
 
 on:
+  workflow_dispatch:
   push:
-    branches: [experiment/tauri-rust]
+    branches: [experiment/tauri-rust, experiment/tauri-rust-finish]
     paths:
       - 'experiments/tauri-app/**'
       - '.github/workflows/tauri-app.yml'
