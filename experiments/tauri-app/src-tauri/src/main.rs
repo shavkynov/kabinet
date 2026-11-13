@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::{backup, export, exporttarget, import, searchreplace, store};
+use kabinet_core::{backup, export, exporttarget, import, mentions, searchreplace, store};
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
@@ -380,6 +380,10 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         "chapter:write" => store::write_chapter(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1).unwrap_or_default()),
         "project:stats" => store::project_stats(&current_dir(&state)?),
         "cards:index" => store::card_index(&current_dir(&state)?),
+        "cards:mentions" => {
+            let dir = current_dir(&state)?;
+            mentions::card_mentions(&dir, &arg_str(a, 0)?, &arg_str(a, 1)?)
+        }
         "item:add" => store::add_item(&current_dir(&state)?, &arg_str(a, 0)?, arg_opt_str(a, 1).as_deref()),
         "item:rename" => store::rename_item(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1)?, &arg_str(a, 2)?),
         "item:move" => store::move_item(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1)?, a.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0)),

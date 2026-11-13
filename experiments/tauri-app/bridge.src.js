@@ -1,6 +1,4 @@
 'use strict';
-const declension = require('../../src/declension');
-const { nameRegex, isCapital } = require('../../src/namematch');
 // Мост окна к Rust: тот же набор функций window.kabinet, что давал preload.js в Electron.
 // Каждый вызов уходит в одну команду Rust `call(channel, args)`. Что ещё не перенесено, отвечает понятной ошибкой.
 (function () {
@@ -19,51 +17,6 @@ const { nameRegex, isCapital } = require('../../src/namematch');
   const closing = []; // записи, начатые при закрытии окна
   const none = () => {}; // события из меню Electron: меню на Tauri пока нет
   const plat = /Mac/i.test(navigator.platform) ? 'darwin' : /Win/i.test(navigator.platform) ? 'win32' : 'linux';
-
-  // «Встречается в главах»: те же правила, что у подсветки имён в тексте (src/mentions.js), но на данных из Rust.
-  async function cardMentions(kind, id) {
-    const card = (await call('cards:index')).find((c) => c.kind === kind && c.id === id);
-    if (!card) throw new Error('Карточка не найдена.');
-    if (card.protagonist === true) return { protagonist: true, chapters: [] };
-    const ignore = new Set((card.ignore || []).map((x) => String(x).trim().toLowerCase()));
-    const explicit = [];
-    for (const name of [card.title, ...(card.aliases || [])]) {
-      const key = String(name).trim().toLowerCase();
-      if (key.length >= 2 && !ignore.has(key) && !explicit.includes(key)) explicit.push(key);
-    }
-    const keys = [];
-    const capKeys = new Set();
-    if (card.inflect !== false) {
-      for (const f of declension.nameForms(card.title, card.aliases || [], { kind: kind === 'item' ? 'place' : kind })) {
-        const key = f.toLowerCase();
-        if (key.length < 2 || ignore.has(key) || explicit.includes(key)) continue;
-        keys.push(key);
-        if (isCapital(f)) capKeys.add(key);
-      }
-    }
-    const re = nameRegex([...explicit, ...keys]);
-    const view = await call('project:current');
-    const chapters = [];
-    const list = (view && view.chapters) || [];
-    for (let i = 0; i < list.length; i += 1) {
-      const c = list[i];
-      const count = re ? countIn(await call('chapter:read', c.id), re, capKeys) : 0;
-      if (count > 0) chapters.push({ id: c.id, title: c.title, n: i + 1, count });
-    }
-    return { protagonist: false, chapters };
-  }
-  function countIn(text, re, capKeys) {
-    const flat = String(text).replace(/\u00a0/g, ' ');
-    re.lastIndex = 0;
-    let n = 0;
-    let m;
-    while ((m = re.exec(flat)) !== null) {
-      if (m[0].length === 0) { re.lastIndex += 1; continue; }
-      if (capKeys.has(m[0].toLowerCase()) && !isCapital(m[0])) continue;
-      n += 1;
-    }
-    return n;
-  }
 
   window.kabinet = {
     lang: 'ru',
@@ -130,7 +83,7 @@ const { nameRegex, isCapital } = require('../../src/namematch');
     addSounds: (s) => call('sounds:add', s),
     removeSound: (s, f) => call('sounds:remove', s, f),
     cardIndex: async () => call('cards:index'), // падежные формы `forms` считает Rust (declension.rs)
-    cardMentions,
+    cardMentions: (kind, id) => call('cards:mentions', kind, id),
     readImage: (f) => call('image:read', f),
     pickImage: () => call('image:pick'),
     setTemplate: (k, n) => call('project:setTemplate', k, n),

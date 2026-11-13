@@ -11,6 +11,8 @@ pub mod exporttarget;
 pub mod foldersync;
 pub mod import;
 pub mod media;
+pub mod mentions;
+pub mod namematch;
 pub mod remote;
 pub mod searchreplace;
 pub mod stats;
