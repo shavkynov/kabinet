@@ -256,7 +256,7 @@ jobs:
                               });
           ''', '')
           replace(native, '        .manage(AppState::default())\n', '''        .manage(AppState::default())
-                  .plugin(tauri::plugin::Builder::new("safe-close")
+                  .plugin(tauri::plugin::Builder::<tauri::Wry, ()>::new("safe-close")
                       .on_event(|app, event| {
                           if let tauri::RunEvent::ExitRequested { api, .. } = event {
                               let st = app.state::<AppState>();
