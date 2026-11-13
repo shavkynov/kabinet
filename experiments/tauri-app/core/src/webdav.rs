@@ -47,6 +47,19 @@ impl UreqHttp {
     }
 }
 
+const MAX_BODY: u64 = 256 * 1024 * 1024;
+
+/// Читает ответ целиком, но не обрезает молча: слишком большой ответ - это ошибка, а не «файл поменьше».
+pub fn read_capped(reader: impl std::io::Read, limit: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut body = Vec::new();
+    reader.take(limit + 1).read_to_end(&mut body).map_err(|e| e.to_string())?;
+    if body.len() as u64 > limit {
+        return Err(format!("ответ сервера больше {} МБ, файл не прочитан целиком", limit / (1024 * 1024)));
+    }
+    Ok(body)
+}
+
 impl Default for UreqHttp {
     fn default() -> Self { Self::new() }
 }
@@ -66,9 +79,7 @@ impl Http for UreqHttp {
         };
         let status = resp.status();
         let location = resp.header("location").map(String::from);
-        let mut body = Vec::new();
-        use std::io::Read;
-        resp.into_reader().take(256 * 1024 * 1024).read_to_end(&mut body).map_err(|e| e.to_string())?;
+        let body = read_capped(resp.into_reader(), MAX_BODY)?;
         Ok(Resp { status, body, location })
     }
 }
@@ -335,6 +346,8 @@ impl<H: Http> Remote for WebDav<H> {
         let mut res = put(self)?;
         if res.status == 409 || res.status == 404 {
             let parent = parts[..parts.len().saturating_sub(1)].to_vec();
+            self.known.clear();
+            if !self.root_parts.is_empty() { self.mkdir_root()?; }
             self.mkdir_parts(&parent)?;
             res = put(self)?;
         }
@@ -462,5 +475,46 @@ mod tests {
         r.pause_ms = 0;
         let res = r.request(Req { method: "GET".into(), url: "https://x".into(), headers: vec![], body: None }).unwrap();
         assert_eq!(res.status, 200);
+    }
+}
+
+#[cfg(test)]
+mod folder_recovery_tests {
+    use super::*;
+    use crate::testutil::*;
+
+    #[test]
+    fn write_recovers_after_a_folder_was_deleted_on_the_server() {
+        let s = FakeServer::new();
+        let mut d = dav_on(&s, "/Кабинет/Роман");
+        d.write("Главы/a.md", "один".as_bytes()).unwrap();
+        {
+            let mut state = s.0.lock().unwrap();
+            state.dirs.remove("/Кабинет/Роман/Главы");
+            state.files.remove("/Кабинет/Роман/Главы/a.md");
+        }
+        d.write("Главы/b.md", "два".as_bytes()).unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/b.md").unwrap(), "два".as_bytes());
+    }
+
+    #[test]
+    fn write_recovers_after_the_whole_root_was_deleted_on_the_server() {
+        let s = FakeServer::new();
+        let mut d = dav_on(&s, "/Кабинет/Роман");
+        d.write("Главы/a.md", "один".as_bytes()).unwrap();
+        {
+            let mut state = s.0.lock().unwrap();
+            state.dirs.clear();
+            state.files.clear();
+        }
+        d.write("Главы/b.md", "два".as_bytes()).unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/b.md").unwrap(), "два".as_bytes());
+    }
+
+    #[test]
+    fn read_capped_reports_oversized_bodies_instead_of_truncating() {
+        assert_eq!(read_capped(&b"abcd"[..], 4).unwrap(), b"abcd".to_vec());
+        assert!(read_capped(&b"abcde"[..], 4).unwrap_err().contains("больше"));
+        assert!(read_capped(&b""[..], 4).unwrap().is_empty());
     }
 }
