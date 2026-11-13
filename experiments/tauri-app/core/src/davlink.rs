@@ -281,7 +281,7 @@ impl DavLink {
     }
 
     pub fn sync_now(&self) -> R<Value> {
-        if self.config.try_lock().is_err() { return Err("Идёт обмен…".into()); }
+        let _config_guard = self.config.try_lock().map_err(|_| "Идёт обмен…".to_string())?;
         let (dir, shared, sync) = {
             let cur = self.cur.lock().unwrap();
             let w = cur.as_ref().ok_or("Проект не связан с сетевой папкой.")?;
@@ -479,5 +479,58 @@ mod tests {
         let d = link(&tmpdir("data"), &s, Default::default());
         assert!(d.make_folder(&acc(), "", "a/b").is_err());
         assert_eq!(d.make_folder(&acc(), "/Книги", "Новая").unwrap(), "/Книги/Новая");
+    }
+
+    #[test]
+    fn sync_now_rejects_busy_config_and_releases_on_early_return() {
+        let s = FakeServer::new();
+        let d = link(&tmpdir("sync-config"), &s, Default::default());
+        let guard = d.config.lock().unwrap();
+        assert_eq!(d.sync_now().unwrap_err(), "Идёт обмен…");
+        drop(guard);
+        assert_eq!(d.sync_now().unwrap_err(), "Проект не связан с сетевой папкой.");
+        assert!(d.config.try_lock().is_ok());
+    }
+
+    #[test]
+    fn sync_now_holds_config_during_error_callback() {
+        struct Offline;
+        impl Http for Offline {
+            fn request(&self, _: crate::webdav::Req) -> Result<crate::webdav::Resp, String> {
+                Err("Сеть недоступна (тест)".into())
+            }
+        }
+        let data = tmpdir("sync-config-data");
+        let dir = tmpdir("sync-config-project");
+        let observed = Arc::new(AtomicBool::new(false));
+        let d: Arc<DavLink> = Arc::new_cyclic(|weak: &std::sync::Weak<DavLink>| {
+            let weak = weak.clone();
+            let observed = observed.clone();
+            DavLink::new(&data, Arc::new(PlainSecret), "Тест",
+                Arc::new(|| Box::new(Offline) as Box<dyn Http>),
+                Arc::new(move |event| {
+                    assert!(matches!(event, Event::Error(_)));
+                    let d = weak.upgrade().unwrap();
+                    assert!(d.config.try_lock().is_err(), "блокировка должна удерживаться до завершения sync_now");
+                    observed.store(true, Ordering::SeqCst);
+                }))
+        });
+        let sync = d.folder_sync(&dir, &acc()).unwrap();
+        *d.cur.lock().unwrap() = Some(Work {
+            dir: dir.clone(),
+            shared: Arc::new(Shared {
+                stop: AtomicBool::new(false),
+                busy: AtomicBool::new(false),
+                dirty_at: Mutex::new(None),
+                quiet_until: Mutex::new(Instant::now()),
+                st: Mutex::new(St::default()),
+            }),
+            sync: Arc::new(Mutex::new(sync)),
+            thread: None,
+            _watcher: None,
+        });
+        d.sync_now().unwrap();
+        assert!(observed.load(Ordering::SeqCst));
+        assert!(d.config.try_lock().is_ok(), "после sync_now блокировка должна освобождаться");
     }
 }
