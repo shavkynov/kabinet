@@ -65,21 +65,27 @@ pub fn search_project(dir: &Path, query: &str) -> R<Value> {
     let view = store::open_project(dir)?;
     let mut out: Vec<Value> = Vec::new();
     let qlow: String = q.iter().collect();
-    let mut add = |kind: &str, item: &Value, text: String| {
-        let title = item["title"].as_str().unwrap_or("");
-        let in_title = title.to_lowercase().contains(&qlow);
-        let (count, snippets) = scan(&text, &q);
-        if count == 0 && !in_title { return; }
-        out.push(json!({ "kind": kind, "id": item["id"], "title": title, "icon": item.get("icon").cloned().filter(|i| !i.is_null()).unwrap_or(Value::Null),
-            "count": count, "titleMatch": in_title, "snippets": snippets }));
-    };
-    let list = |k: &str| view[k].as_array().cloned().unwrap_or_default();
-    for c in list("chapters") { add("chapter", &c, store::read_chapter_lenient(dir, c["id"].as_str().unwrap_or(""))?); }
-    for (kind, key) in [("character", "characters"), ("place", "places"), ("item", "items")] {
-        for c in list(key) { add(kind, &c, card_text(&store::read_item(dir, kind, c["id"].as_str().unwrap_or(""))?)); }
+    // Порядок прежний: главы, персонажи, места, предметы, заметки.
+    // Ограничиваем число найденных документов, а не число просмотренных файлов.
+    for (kind, key) in [("chapter", "chapters"), ("character", "characters"), ("place", "places"), ("item", "items"), ("note", "notes")] {
+        let list = view[key].as_array().map(Vec::as_slice).unwrap_or(&[]);
+        for item in list {
+            let id = item["id"].as_str().unwrap_or("");
+            let text = match kind {
+                "chapter" => store::read_chapter_lenient(dir, id)?,
+                "note" => store::read_item(dir, "note", id)?,
+                _ => card_text(&store::read_item(dir, kind, id)?),
+            };
+            let title = item["title"].as_str().unwrap_or("");
+            let in_title = title.to_lowercase().contains(&qlow);
+            let (count, snippets) = scan(&text, &q);
+            if count == 0 && !in_title { continue; }
+            out.push(json!({ "kind": kind, "id": item["id"], "title": title,
+                "icon": item.get("icon").cloned().filter(|i| !i.is_null()).unwrap_or(Value::Null),
+                "count": count, "titleMatch": in_title, "snippets": snippets }));
+            if out.len() >= MAX_DOCS { return Ok(Value::Array(out)); }
+        }
     }
-    for c in list("notes") { add("note", &c, store::read_item(dir, "note", c["id"].as_str().unwrap_or(""))?); }
-    out.truncate(MAX_DOCS);
     Ok(Value::Array(out))
 }
 
