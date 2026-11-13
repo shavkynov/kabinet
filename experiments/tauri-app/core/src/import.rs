@@ -428,8 +428,11 @@ fn rtf_paragraphs(src: &[char]) -> Vec<Para> {
                     None => sheet_name.push_str(&text),
                     Some(k) => {
                         sheet_name.push_str(&text[..k]);
-                        if let Some(n) = sheet_num { sheet.insert(n, (sheet_name.trim().to_lowercase(), sheet_outline)); }
-                        sheet_num = None; sheet_name.clear(); sheet_outline = None;
+                        // take() и читает, и обнуляет оба поля: так сбрасываем состояние таблицы после каждого поля
+                        // и не оставляем присваиваний, которые компилятор считает мёртвыми (в конце разбора).
+                        let (num, outline) = (sheet_num.take(), sheet_outline.take());
+                        if let Some(n) = num { sheet.insert(n, (sheet_name.trim().to_lowercase(), outline)); }
+                        sheet_name.clear();
                     }
                 }
             } else if !(st.skip || st.hidden || text.is_empty()) {
