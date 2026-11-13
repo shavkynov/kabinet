@@ -74,7 +74,7 @@ pub fn search_project(dir: &Path, query: &str) -> R<Value> {
             "count": count, "titleMatch": in_title, "snippets": snippets }));
     };
     let list = |k: &str| view[k].as_array().cloned().unwrap_or_default();
-    for c in list("chapters") { add("chapter", &c, store::read_chapter(dir, c["id"].as_str().unwrap_or(""))?); }
+    for c in list("chapters") { add("chapter", &c, store::read_chapter_lenient(dir, c["id"].as_str().unwrap_or(""))?); }
     for (kind, key) in [("character", "characters"), ("place", "places"), ("item", "items")] {
         for c in list(key) { add(kind, &c, card_text(&store::read_item(dir, kind, c["id"].as_str().unwrap_or(""))?)); }
     }
@@ -129,7 +129,7 @@ pub fn replace_project(dir: &Path, find: &str, repl: &str, dry: bool) -> R<Value
     let mut note = |kind: &str, item: &Value, n: usize| { docs.push(json!({ "kind": kind, "id": item["id"], "title": item["title"], "count": n })); };
     for c in list("chapters") {
         let id = c["id"].as_str().unwrap_or("");
-        let (t, n) = replace_in_text(&store::read_chapter(dir, id)?, q, repl);
+        let (t, n) = replace_in_text(&store::read_chapter_lenient(dir, id)?, q, repl);
         if n == 0 { continue; }
         if !dry { store::write_chapter(dir, id, &t)?; }
         note("chapter", &c, n);

@@ -552,6 +552,17 @@ pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
     }
 }
 
+/// Чтение главы для сводных операций (счётчики, доска, поиск, замена, упоминания): отсутствующий файл считается пустым,
+/// чтобы одна пропавшая глава не останавливала остальные. Настоящие ошибки чтения по-прежнему возвращаются.
+pub fn read_chapter_lenient(dir: &Path, id: &str) -> R<String> {
+    let file = chapter_file(dir, id)?;
+    match fs::read_to_string(&file) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
+    }
+}
+
 pub fn write_chapter(dir: &Path, id: &str, text: &str) -> R<Value> {
     let meta = load_meta(dir)?;
     find_index(&meta, id)?; // пишем только в главы, которые есть в проекте
@@ -822,7 +833,7 @@ pub fn project_stats(dir: &Path) -> R<Value> {
     let mut chapters = Vec::new();
     for c in meta["chapters"].as_array().cloned().unwrap_or_default() {
         let id = c["id"].as_str().unwrap_or("");
-        let text = read_chapter(dir, id)?;
+        let text = read_chapter_lenient(dir, id)?;
         let (w, ch) = (count_words(&text), count_chars(&text));
         total += w;
         total_chars += ch;
@@ -1209,7 +1220,7 @@ pub fn board_data(dir: &Path) -> R<Value> {
     let meta = load_meta(dir)?;
     let mut out = Vec::new();
     for c in meta["chapters"].as_array().cloned().unwrap_or_default() {
-        let words = count_words(&read_chapter(dir, c["id"].as_str().unwrap_or(""))?);
+        let words = count_words(&read_chapter_lenient(dir, c["id"].as_str().unwrap_or(""))?);
         out.push(json!({
             "id": c["id"], "title": c["title"], "marker": c.get("marker").cloned().unwrap_or(Value::Null),
             "synopsis": c.get("synopsis").cloned().unwrap_or_else(|| json!("")), "words": words,

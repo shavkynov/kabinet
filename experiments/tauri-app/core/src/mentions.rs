@@ -98,7 +98,7 @@ pub fn card_mentions(dir: &Path, kind: &str, id: &str) -> R<Value> {
     if let Some(list) = view["chapters"].as_array() {
         for (i, c) in list.iter().enumerate() {
             let cid = c["id"].as_str().unwrap_or("");
-            let text = store::read_chapter(dir, cid)?;
+            let text = store::read_chapter_lenient(dir, cid)?;
             let count = count_in(&text, &re, &cap_keys);
             if count > 0 {
                 chapters.push(json!({ "id": cid, "title": c["title"], "n": i + 1, "count": count }));
