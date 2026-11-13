@@ -221,6 +221,7 @@ struct AppState {
     watcher: Mutex<Option<kabinet_core::watcher::Watcher>>,
     /// Окно уже дописало несохранённое и теперь закрывается по-настоящему.
     closing: std::sync::atomic::AtomicBool,
+    quit_requested: std::sync::atomic::AtomicBool,
     on_external: std::sync::OnceLock<Arc<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
@@ -277,9 +278,23 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
     let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
+        "app:close-cancel" => {
+            state.quit_requested.store(false, std::sync::atomic::Ordering::SeqCst);
+            state.closing.store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!(true))
+        }
         "app:exit" => {
+            let d = dav.clone();
+            tauri::async_runtime::spawn_blocking(move || d.link.stop()).await.map_err(|e| e.to_string())?;
             state.closing.store(true, std::sync::atomic::Ordering::SeqCst);
-            if let Some(w) = app.get_webview_window("main") { let _ = w.close(); }
+            if state.quit_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                app.exit(0);
+            } else if let Some(w) = app.get_webview_window("main") {
+                if let Err(e) = w.close() {
+                    state.closing.store(false, std::sync::atomic::Ordering::SeqCst);
+                    return Err(e.to_string());
+                }
+            } else { app.exit(0); }
             Ok(json!(true))
         }
         "app:setLang" => { LANG_EN.store(arg_str(a, 0).ok().as_deref() == Some("en"), std::sync::atomic::Ordering::SeqCst); chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
@@ -562,6 +577,19 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| { show_main(app); }))
         .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::default())
+        .plugin(tauri::plugin::Builder::<tauri::Wry, ()>::new("safe-close")
+            .on_event(|app, event| {
+                if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                    let st = app.state::<AppState>();
+                    if !st.closing.load(std::sync::atomic::Ordering::SeqCst) {
+                        if let Some(w) = app.get_webview_window("main") {
+                            api.prevent_exit();
+                            st.quit_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let _ = w.close();
+                        }
+                    }
+                }
+            }).build())
         .setup(|app| {
             let data = app.path().app_data_dir().map_err(|e| format!("Нет папки данных приложения: {}", e))?;
             let handle = app.handle().clone();
@@ -603,16 +631,9 @@ fn main() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let st = window.app_handle().state::<AppState>();
                 if !st.closing.load(std::sync::atomic::Ordering::SeqCst) {
-                    // Сначала окно дописывает несохранённое (app:close-requested), потом само просит закрыть (app:exit).
-                    // Если окно не ответило за 5 секунд, закрываем всё равно.
+                    // Закрываем только после подтверждения успешной записи из окна.
                     api.prevent_close();
                     let _ = window.emit("app:close-requested", ());
-                    let w = window.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(5));
-                        if let Some(st) = w.app_handle().try_state::<AppState>() { st.closing.store(true, std::sync::atomic::Ordering::SeqCst); }
-                        let _ = w.close();
-                    });
                     return;
                 }
                 if let Some(d) = window.app_handle().try_state::<Arc<DavApi>>() { d.link.stop(); }

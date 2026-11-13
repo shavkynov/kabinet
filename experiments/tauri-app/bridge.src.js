@@ -1,20 +1,59 @@
 'use strict';
+const { createCloseCoordinator } = require('./close-coordinator');
 // Мост окна к Rust: тот же набор функций window.kabinet, что давал preload.js в Electron.
 // Каждый вызов уходит в одну команду Rust `call(channel, args)`. Что ещё не перенесено, отвечает понятной ошибкой.
 (function () {
   const tauri = window.__TAURI__;
   const invoke = tauri && tauri.core && tauri.core.invoke;
-  async function call(channel, ...args) {
+  async function invokeCall(channel, ...args) {
     if (!invoke) throw new Error('Оболочка Tauri недоступна.');
-    try {
-      return await invoke('call', { channel, args });
-    } catch (err) {
-      throw new Error(typeof err === 'string' ? err : (err && err.message) || String(err));
+    try { return await invoke('call', { channel, args }); }
+    catch (err) { throw new Error(typeof err === 'string' ? err : (err && err.message) || String(err)); }
+  }
+  const deferredEvents = [];
+  const closeGuard = createCloseCoordinator({
+    prepare: async () => {
+      if (!window.kabinet || typeof window.kabinet.prepareClose !== 'function') throw new Error('Редактор ещё не готов к безопасному закрытию.');
+      return window.kabinet.prepareClose();
+    },
+    exit: () => invokeCall('app:exit'),
+    cancel: () => invokeCall('app:close-cancel'),
+    report: (error) => {
+      console.error('close canceled:', error);
+      window.alert('Закрытие отменено: изменения не сохранены. Окно и текст оставлены открытыми. ' + (error && error.message || String(error)));
+    },
+    lock: () => {
+      const body = document.body;
+      const previous = { body, inert: body && body.inert };
+      if (body) body.inert = true;
+      return previous;
+    },
+    unlock: (previous) => {
+      if (previous && previous.body) previous.body.inert = previous.inert;
+      for (const notify of deferredEvents.splice(0)) Promise.resolve().then(notify).catch(console.error);
+    },
+  });
+  const writeChannels = new Set(['chapter:write', 'item:write', 'chapter:writeMeta', 'stats:setDay']);
+  function call(channel, ...args) {
+    if (writeChannels.has(channel)) {
+      const detail = channel === 'item:write' ? args[1] : channel === 'chapter:writeMeta' ? Object.keys(args[1] || {}).sort().join(',') : null;
+      return closeGuard.write(JSON.stringify([channel, args[0], detail]), () => invokeCall(channel, ...args));
     }
+    return invokeCall(channel, ...args).then((result) => {
+      if (result && channel === 'chapter:delete') closeGuard.forget((key) => {
+        const [op, id] = JSON.parse(key);
+        return id === args[0] && (op === 'chapter:write' || op === 'chapter:writeMeta');
+      });
+      if (result && channel === 'item:delete') closeGuard.forget((key) => {
+        const [op, kind, id] = JSON.parse(key);
+        return op === 'item:write' && kind === args[0] && id === args[1];
+      });
+      if (result && ['project:create', 'project:openDialog', 'project:openRecent', 'project:close'].includes(channel)) closeGuard.forget();
+      return result;
+    });
   }
   // Двоичные данные приходят из Rust строкой base64; окну нужен Uint8Array, как Buffer из Electron.
   const fromB64 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
-  const closing = []; // записи, начатые при закрытии окна
   const none = () => {}; // события из меню Electron: меню на Tauri пока нет
   const plat = /Mac/i.test(navigator.platform) ? 'darwin' : /Win/i.test(navigator.platform) ? 'win32' : 'linux';
 
@@ -87,12 +126,12 @@
     readImage: (f) => call('image:read', f),
     pickImage: () => call('image:pick'),
     setTemplate: (k, n) => call('project:setTemplate', k, n),
-    // Запись при закрытии окна: синхронного вызова в Tauri нет. Записи копятся в списке, а перед закрытием окно ждёт их (см. ниже).
+    // Совместимый метод; безопасное закрытие использует асинхронный prepareClose и очередь записей.
     writeDocSync: (kind, id, text) => {
       const job = kind === 'chapter' ? call('chapter:write', id, text)
         : kind === 'chaptermeta' ? call('chapter:writeMeta', id, JSON.parse(text))
           : call('item:write', kind, id, text);
-      closing.push(job.catch((e) => console.error('final save failed:', e && e.message)));
+      return job;
     },
     popupMenu: (x, y) => call('app:popupMenu', x, y),
     reloadProject: () => call('project:reload'),
@@ -114,13 +153,13 @@
   const listen = tauri && tauri.event && tauri.event.listen;
   // Rust не закрывает окно сразу: просит сначала дописать несохранённое, ждёт записи и только потом закрывает.
   if (listen) {
-    listen('app:close-requested', async () => {
-      try { window.dispatchEvent(new Event('beforeunload')); await Promise.allSettled(closing); } catch (e) { console.error(e); }
-      call('app:exit').catch(() => {});
-    }).catch(() => {});
+    listen('app:close-requested', () => closeGuard.close()).catch((error) => console.error('close listener:', error));
   }
-  const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => cb(e.payload)).catch(() => {}); };
-  const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => cb()).catch(() => {}); };
+  const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => {
+    if (closeGuard.isClosing()) deferredEvents.push(() => cb(e.payload));
+    else cb(e.payload);
+  }).catch(() => {}); };
+  const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => { if (!closeGuard.isClosing()) cb(); }).catch(() => {}); };
   // Пункты главного меню (в Electron — send('ui:…')).
   const MENU = {
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',

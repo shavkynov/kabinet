@@ -97,18 +97,20 @@ function cmtMarkDirty() {
 async function flushComments() {
   clearTimeout(cmtTimer);
   cmtTimer = null;
-  if (!cmtDirty || !cmtChapter) return;
+  if (!cmtDirty || !cmtChapter) return true;
   const id = cmtChapter;
   const list = cmtList.map((c) => ({ ...c }));
   cmtDirty = false;
   try {
     await api.writeChapterMeta(id, { comments: list });
+    return true;
   } catch (err) {
     if (cmtChapter === id) cmtDirty = true;
     setStatus('error', 'Не удалось сохранить комментарии! Повтор через 3 с…');
     clearTimeout(cmtTimer);
     cmtTimer = setTimeout(flushComments, 3000);
     console.error('comments save failed:', err);
+    return false;
   }
 }
 

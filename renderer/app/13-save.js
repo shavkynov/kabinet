@@ -26,12 +26,14 @@ function markDirty() {
 // Возвращает false, если текст открытого документа записать не удалось: переходить к другому документу или закрывать проект нельзя.
 async function flush() {
   refreshCommentAnchors();
-  const saved = await flushDoc();
-  await flushNote();
-  await flushComments();
-  await flushChapMeta();
-  await flushPane2();
-  return saved;
+  const results = [];
+  results.push(await flushDoc());
+  results.push(await flushNote());
+  results.push(await flushComments());
+  results.push(await flushChapMeta());
+  results.push(await flushPane2());
+  return results.every((saved) => saved === true)
+    && !dirty && !noteDirty && !cmtDirty && !cmDirty && !p2.dirty && !failedWrite;
 }
 
 // Запись, которая не удалась (диск, права, закрытая папка). Повторяется с тем же текстом и в тот же документ,
@@ -73,6 +75,7 @@ async function flushDoc() {
 
 // При закрытии окна ждать ответа нельзя, поэтому пишем синхронно.
 window.addEventListener('beforeunload', () => {
+  if (window.__TAURI__) return; // Tauri уже дождался подтверждённого асинхронного сохранения.
   if (p2.dirty && p2.id) {
     try {
       api.writeDocSync('chapter', p2.id, pane2Markdown());
@@ -125,3 +128,13 @@ window.addEventListener('beforeunload', () => {
 });
 window.addEventListener('blur', () => { flush(); });
 
+
+if (window.__TAURI__) {
+  api.prepareClose = async () => {
+    openToken += 1;
+    p2.token += 1;
+    noteToken += 1;
+    cmToken += 1;
+    return flush();
+  };
+}
