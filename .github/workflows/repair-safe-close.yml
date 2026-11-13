@@ -1,0 +1,429 @@
+name: Проверка безопасного закрытия Tauri
+on:
+  push:
+    branches: [experiment/tauri-rust-finish]
+    paths: ['.github/workflows/repair-safe-close.yml']
+permissions:
+  contents: write
+concurrency:
+  group: repair-safe-close-finish
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/experiment/tauri-rust-finish'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+    steps:
+      - name: Сохранить исходные переводы строк
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Применить проверяемый патч
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          expected = {
+              'experiments/tauri-app/bridge.src.js': '0cbf84fc57285efe22b43777b1c9e8362781fc51',
+              'experiments/tauri-app/src-tauri/src/main.rs': '2290aa8ef69987b98a3b3394ffe3c09dce63eca9',
+              'renderer/app/13-save.js': '6c5b2deb874a207e363d309484685560cd7edc81',
+              'renderer/app/04-rightpanel.js': '2b6aa9cafd45df7ba137758211821ec0935d0d58',
+              'renderer/app/05-pane2.js': 'f8d04b9f6f349a503ce003913d33187d24812d40',
+              'renderer/app/16-notes.js': '24aa5d87ee776c79aad442c38558edb8aa84a650',
+              'renderer/app/34-comments.js': 'e68b4935f6e817ce43ae615500c3b50f32b0ba49',
+          }
+          for name, sha in expected.items():
+              raw = Path(name).read_bytes()
+              actual = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+              if actual != sha:
+                  raise RuntimeError(f'Исходник изменился: {name}. Запись отменена.')
+
+          def replace(name, old, new):
+              p = Path(name)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise RuntimeError(f'Нет единственного ожидаемого фрагмента: {name}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          helper = r''''use strict';
+          function createCloseCoordinator({ prepare, exit, cancel, report, lock = () => {}, unlock = () => {} }) {
+            let tail = Promise.resolve();
+            let closing = false;
+            const failures = new Map();
+            function write(key, run) {
+              const job = tail.then(run);
+              tail = job.then(() => { failures.delete(key); }, (error) => { failures.set(key, error); });
+              return job;
+            }
+            async function drain() {
+              let current;
+              do { current = tail; await current; } while (current !== tail);
+            }
+            function forget(predicate = () => true) {
+              for (const key of failures.keys()) if (predicate(key)) failures.delete(key);
+            }
+            async function close() {
+              if (closing) return false;
+              closing = true;
+              let previous;
+              let approved = false;
+              try {
+                previous = lock();
+                await drain();
+                const saved = await prepare();
+                await drain();
+                if (saved !== true || failures.size) {
+                  throw failures.values().next().value || new Error('Не все изменения удалось сохранить.');
+                }
+                await exit();
+                approved = true;
+                return true;
+              } catch (error) {
+                try { await cancel(); } catch (cancelError) { console.error('close cancel:', cancelError); }
+                report(error);
+                return false;
+              } finally {
+                if (!approved) { closing = false; unlock(previous); }
+              }
+            }
+            return { write, drain, forget, close, isClosing: () => closing };
+          }
+          module.exports = { createCloseCoordinator };
+          '''
+          bridge = 'experiments/tauri-app/bridge.src.js'
+          replace(bridge, "'use strict';\n", "'use strict';\nconst { createCloseCoordinator } = require('./close-coordinator');\n")
+          replace(bridge, '''  async function call(channel, ...args) {
+              if (!invoke) throw new Error('Оболочка Tauri недоступна.');
+              try {
+                return await invoke('call', { channel, args });
+              } catch (err) {
+                throw new Error(typeof err === 'string' ? err : (err && err.message) || String(err));
+              }
+            }''', '''  async function invokeCall(channel, ...args) {
+              if (!invoke) throw new Error('Оболочка Tauri недоступна.');
+              try { return await invoke('call', { channel, args }); }
+              catch (err) { throw new Error(typeof err === 'string' ? err : (err && err.message) || String(err)); }
+            }
+            const deferredEvents = [];
+            const closeGuard = createCloseCoordinator({
+              prepare: async () => {
+                if (!window.kabinet || typeof window.kabinet.prepareClose !== 'function') throw new Error('Редактор ещё не готов к безопасному закрытию.');
+                return window.kabinet.prepareClose();
+              },
+              exit: () => invokeCall('app:exit'),
+              cancel: () => invokeCall('app:close-cancel'),
+              report: (error) => {
+                console.error('close canceled:', error);
+                window.alert('Закрытие отменено: изменения не сохранены. Окно и текст оставлены открытыми. ' + (error && error.message || String(error)));
+              },
+              lock: () => {
+                const body = document.body;
+                const previous = { body, inert: body && body.inert };
+                if (body) body.inert = true;
+                return previous;
+              },
+              unlock: (previous) => {
+                if (previous && previous.body) previous.body.inert = previous.inert;
+                for (const notify of deferredEvents.splice(0)) Promise.resolve().then(notify).catch(console.error);
+              },
+            });
+            const writeChannels = new Set(['chapter:write', 'item:write', 'chapter:writeMeta', 'stats:setDay']);
+            function call(channel, ...args) {
+              if (writeChannels.has(channel)) {
+                const detail = channel === 'item:write' ? args[1] : channel === 'chapter:writeMeta' ? Object.keys(args[1] || {}).sort().join(',') : null;
+                return closeGuard.write(JSON.stringify([channel, args[0], detail]), () => invokeCall(channel, ...args));
+              }
+              return invokeCall(channel, ...args).then((result) => {
+                if (result && channel === 'chapter:delete') closeGuard.forget((key) => {
+                  const [op, id] = JSON.parse(key);
+                  return id === args[0] && (op === 'chapter:write' || op === 'chapter:writeMeta');
+                });
+                if (result && channel === 'item:delete') closeGuard.forget((key) => {
+                  const [op, kind, id] = JSON.parse(key);
+                  return op === 'item:write' && kind === args[0] && id === args[1];
+                });
+                if (result && ['project:create', 'project:openDialog', 'project:openRecent', 'project:close'].includes(channel)) closeGuard.forget();
+                return result;
+              });
+            }''')
+          replace(bridge, '  const closing = []; // записи, начатые при закрытии окна\n', '')
+          replace(bridge, '    // Запись при закрытии окна: синхронного вызова в Tauri нет. Записи копятся в списке, а перед закрытием окно ждёт их (см. ниже).',
+              '    // Совместимый метод; безопасное закрытие использует асинхронный prepareClose и очередь записей.')
+          replace(bridge, "      closing.push(job.catch((e) => console.error('final save failed:', e && e.message)));", '      return job;')
+          replace(bridge, '''    listen('app:close-requested', async () => {
+                try { window.dispatchEvent(new Event('beforeunload')); await Promise.allSettled(closing); } catch (e) { console.error(e); }
+                call('app:exit').catch(() => {});
+              }).catch(() => {});''', '''    listen('app:close-requested', () => closeGuard.close()).catch((error) => console.error('close listener:', error));''')
+          replace(bridge, "  const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => cb(e.payload)).catch(() => {}); };", '''  const subscribe = (event) => (cb) => { if (listen) listen(event, (e) => {
+              if (closeGuard.isClosing()) deferredEvents.push(() => cb(e.payload));
+              else cb(e.payload);
+            }).catch(() => {}); };''')
+          replace(bridge, "  const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => cb()).catch(() => {}); };", "  const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => { if (!closeGuard.isClosing()) cb(); }).catch(() => {}); };")
+
+          save = 'renderer/app/13-save.js'
+          replace(save, '''async function flush() {
+            refreshCommentAnchors();
+            const saved = await flushDoc();
+            await flushNote();
+            await flushComments();
+            await flushChapMeta();
+            await flushPane2();
+            return saved;
+          }''', '''async function flush() {
+            refreshCommentAnchors();
+            const results = [];
+            results.push(await flushDoc());
+            results.push(await flushNote());
+            results.push(await flushComments());
+            results.push(await flushChapMeta());
+            results.push(await flushPane2());
+            return results.every((saved) => saved === true)
+              && !dirty && !noteDirty && !cmtDirty && !cmDirty && !p2.dirty && !failedWrite;
+          }''')
+          replace(save, "window.addEventListener('beforeunload', () => {\n", "window.addEventListener('beforeunload', () => {\n  if (window.__TAURI__) return; // Tauri уже дождался подтверждённого асинхронного сохранения.\n")
+          with Path(save).open('a', encoding='utf-8', newline='\n') as out:
+              out.write('''\nif (window.__TAURI__) {
+            api.prepareClose = async () => {
+              openToken += 1;
+              p2.token += 1;
+              noteToken += 1;
+              cmToken += 1;
+              return flush();
+            };
+          }
+          ''')
+
+          functions = [
+              ('renderer/app/04-rightpanel.js', 'flushChapMeta', '\nfunction clearChapMeta', 'if (!cmDirty || !cmId) return;', "console.error('chapter meta save failed:', err);"),
+              ('renderer/app/05-pane2.js', 'flushPane2', '\nfunction fillP2Select', 'if (!p2.dirty || !p2.id) return;', "console.error('pane2 save failed:', err);"),
+              ('renderer/app/16-notes.js', 'flushNote', '\nfunction resetNote', 'if (!noteDirty || !noteId) return;', "console.error('note save failed:', err);"),
+              ('renderer/app/34-comments.js', 'flushComments', '\n/** Сверяет', 'if (!cmtDirty || !cmtChapter) return;', "console.error('comments save failed:', err);"),
+          ]
+          for name, function, end, guard, log in functions:
+              p = Path(name)
+              text = p.read_text(encoding='utf-8')
+              start = text.index(f'async function {function}() {{')
+              stop = text.index(end, start)
+              body = text[start:stop]
+              for old in [guard, '\n  } catch (err) {', log]:
+                  if body.count(old) != 1: raise RuntimeError(f'Неожиданный вид функции {function}')
+              body = body.replace(guard, guard.replace('return;', 'return true;'), 1)
+              body = body.replace('\n  } catch (err) {', '\n    return true;\n  } catch (err) {', 1)
+              body = body.replace(log, log + '\n    return false;', 1)
+              p.write_text(text[:start] + body + text[stop:], encoding='utf-8', newline='\n')
+
+          native = 'experiments/tauri-app/src-tauri/src/main.rs'
+          replace(native, '    closing: std::sync::atomic::AtomicBool,\n', '    closing: std::sync::atomic::AtomicBool,\n    quit_requested: std::sync::atomic::AtomicBool,\n')
+          replace(native, '''        "app:exit" => {
+                      state.closing.store(true, std::sync::atomic::Ordering::SeqCst);
+                      if let Some(w) = app.get_webview_window("main") { let _ = w.close(); }
+                      Ok(json!(true))
+                  }''', '''        "app:close-cancel" => {
+                      state.quit_requested.store(false, std::sync::atomic::Ordering::SeqCst);
+                      state.closing.store(false, std::sync::atomic::Ordering::SeqCst);
+                      Ok(json!(true))
+                  }
+                  "app:exit" => {
+                      let d = dav.clone();
+                      tauri::async_runtime::spawn_blocking(move || d.link.stop()).await.map_err(|e| e.to_string())?;
+                      state.closing.store(true, std::sync::atomic::Ordering::SeqCst);
+                      if state.quit_requested.load(std::sync::atomic::Ordering::SeqCst) {
+                          app.exit(0);
+                      } else if let Some(w) = app.get_webview_window("main") {
+                          if let Err(e) = w.close() {
+                              state.closing.store(false, std::sync::atomic::Ordering::SeqCst);
+                              return Err(e.to_string());
+                          }
+                      } else { app.exit(0); }
+                      Ok(json!(true))
+                  }''')
+          replace(native, '''                    // Сначала окно дописывает несохранённое (app:close-requested), потом само просит закрыть (app:exit).
+                              // Если окно не ответило за 5 секунд, закрываем всё равно.''', '''                    // Закрываем только после подтверждения успешной записи из окна.''')
+          replace(native, '''                    let w = window.clone();
+                              std::thread::spawn(move || {
+                                  std::thread::sleep(std::time::Duration::from_secs(5));
+                                  if let Some(st) = w.app_handle().try_state::<AppState>() { st.closing.store(true, std::sync::atomic::Ordering::SeqCst); }
+                                  let _ = w.close();
+                              });
+          ''', '')
+          replace(native, '        .manage(AppState::default())\n', '''        .manage(AppState::default())
+                  .plugin(tauri::plugin::Builder::new("safe-close")
+                      .on_event(|app, event| {
+                          if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                              let st = app.state::<AppState>();
+                              if !st.closing.load(std::sync::atomic::Ordering::SeqCst) {
+                                  if let Some(w) = app.get_webview_window("main") {
+                                      api.prevent_exit();
+                                      st.quit_requested.store(true, std::sync::atomic::Ordering::SeqCst);
+                                      let _ = w.close();
+                                  }
+                              }
+                          }
+                      }).build())
+          ''')
+
+          tests = r''''use strict';
+          const test = require('node:test');
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const vm = require('node:vm');
+          const { createCloseCoordinator } = require('../experiments/tauri-app/close-coordinator');
+          const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+          function fixture(overrides = {}) {
+            const events = [];
+            const guard = createCloseCoordinator({
+              prepare: async () => true,
+              exit: async () => { events.push('exit'); },
+              cancel: async () => { events.push('cancel'); },
+              report: () => { events.push('report'); },
+              lock: () => { events.push('lock'); return 'previous'; },
+              unlock: (previous) => { assert.equal(previous, 'previous'); events.push('unlock'); },
+              ...overrides,
+            });
+            return { guard, events };
+          }
+          test('close waits for an already running write', async () => {
+            const gate = deferred();
+            const f = fixture();
+            const write = f.guard.write('chapter', () => gate.promise);
+            const closing = f.guard.close();
+            await Promise.resolve(); await Promise.resolve();
+            assert.equal(f.events.includes('exit'), false);
+            gate.resolve(); await write;
+            assert.equal(await closing, true);
+            assert.deepEqual(f.events, ['lock', 'exit']);
+          });
+          test('failed writes cancel close and restore the interface', async () => {
+            const f = fixture();
+            await assert.rejects(f.guard.write('chapter', async () => { throw new Error('disk full'); }));
+            assert.equal(await f.guard.close(), false);
+            assert.deepEqual(f.events, ['lock', 'cancel', 'report', 'unlock']);
+            assert.equal(f.guard.isClosing(), false);
+          });
+          test('successful retry clears the failure for that document', async () => {
+            let guard;
+            const f = fixture({ prepare: async () => { await guard.write('chapter', async () => true); return true; } });
+            guard = f.guard;
+            await assert.rejects(guard.write('chapter', async () => { throw new Error('offline'); }));
+            assert.equal(await guard.close(), true);
+          });
+          test('duplicate close requests do not duplicate the flush', async () => {
+            const gate = deferred(); let calls = 0;
+            const f = fixture({ prepare: async () => { calls += 1; return gate.promise; } });
+            const first = f.guard.close();
+            assert.equal(await f.guard.close(), false);
+            gate.resolve(true);
+            assert.equal(await first, true);
+            assert.equal(calls, 1);
+            assert.equal(f.events.filter((x) => x === 'exit').length, 1);
+          });
+          test('writes queued during preparation are also awaited', async () => {
+            const gate = deferred(); let queued;
+            const f = fixture({ prepare: async () => { queued = f.guard.write('comments', () => gate.promise); return true; } });
+            const closing = f.guard.close();
+            await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+            assert.equal(f.events.includes('exit'), false);
+            gate.resolve(); await queued;
+            assert.equal(await closing, true);
+          });
+          test('preparation failure and exit failure never approve closing', async () => {
+            for (const options of [
+              { prepare: async () => false },
+              { prepare: async () => { throw new Error('renderer not ready'); } },
+              { exit: async () => { throw new Error('native close failed'); } },
+            ]) {
+              const f = fixture(options);
+              assert.equal(await f.guard.close(), false);
+              assert.equal(f.guard.isClosing(), false);
+              assert.equal(f.events.at(-1), 'unlock');
+            }
+          });
+          test('a failed write does not stop later queued writes', async () => {
+            const f = fixture(); const order = [];
+            const first = f.guard.write('old', async () => { order.push(1); throw new Error('failed'); });
+            const second = f.guard.write('new', async () => { order.push(2); return true; });
+            await assert.rejects(first); assert.equal(await second, true);
+            assert.deepEqual(order, [1, 2]);
+            f.guard.forget((key) => key === 'old');
+            assert.equal(await f.guard.close(), true);
+          });
+          const saveSource = fs.readFileSync(path.join(__dirname, '../renderer/app/13-save.js'), 'utf8');
+          for (const failed of ['flushDoc', 'flushNote', 'flushComments', 'flushChapMeta', 'flushPane2']) {
+            test('shutdown refuses a failure in ' + failed, async () => {
+              const context = {
+                api: {}, window: { __TAURI__: {}, addEventListener() {} },
+                dirty: false, noteDirty: false, cmtDirty: false, cmDirty: false,
+                p2: { dirty: false, token: 0 }, openToken: 0, noteToken: 0, cmToken: 0,
+                refreshCommentAnchors() {}, console,
+              };
+              for (const name of ['flushNote', 'flushComments', 'flushChapMeta', 'flushPane2']) context[name] = async () => name !== failed;
+              vm.createContext(context);
+              vm.runInContext(saveSource, context);
+              context.flushDoc = async () => failed !== 'flushDoc';
+              assert.equal(await context.api.prepareClose(), false);
+            });
+          }
+          test('Tauri beforeunload does not clear unsaved flags or issue fire-and-forget writes', () => {
+            const handlers = {}; let writes = 0;
+            const context = {
+              api: { writeDocSync: () => { writes += 1; } },
+              window: { __TAURI__: {}, addEventListener: (event, fn) => { handlers[event] = fn; } },
+              dirty: true, dirtyId: 'aaaaaa', dirtyKind: 'chapter',
+              p2: { id: 'bbbbbb', dirty: true }, cmtDirty: true, cmDirty: true, noteDirty: true,
+            };
+            vm.createContext(context); vm.runInContext(saveSource, context);
+            handlers.beforeunload();
+            assert.equal(writes, 0); assert.equal(context.dirty, true); assert.equal(context.p2.dirty, true);
+          });
+          test('native shutdown has a quit guard and no forced five-second close', () => {
+            const main = fs.readFileSync(path.join(__dirname, '../experiments/tauri-app/src-tauri/src/main.rs'), 'utf8');
+            assert.match(main, /RunEvent::ExitRequested/);
+            assert.match(main, /api\.prevent_exit\(\)/);
+            assert.match(main, /"app:close-cancel"/);
+            assert.doesNotMatch(main, /Если окно не ответило за 5 секунд/);
+            assert.doesNotMatch(main, /let w = window\.clone\(\);\s*std::thread::spawn/);
+          });
+          '''
+          for name, content in {
+              'experiments/tauri-app/close-coordinator.js': helper,
+              'test/tauri-safe-close.test.js': tests,
+          }.items():
+              with Path(name).open('x', encoding='utf-8', newline='\n') as out: out.write(content)
+      - name: Установить зависимости интерфейса
+        run: npm ci
+      - name: Новые и предыдущие регрессионные тесты
+        run: node --test test/tauri-safe-close.test.js test/tauri-chapter-read.test.js
+      - name: Основные JavaScript-тесты
+        run: npm test
+      - name: Проверка исходников
+        run: npm run check
+      - name: Собрать интерфейс Tauri
+        run: node experiments/tauri-app/build.cjs
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Все тесты ядра
+        run: cargo test --manifest-path experiments/tauri-app/core/Cargo.toml
+      - name: Проверить компиляцию нативной оболочки Windows
+        run: cargo check --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+      - name: Записать только проверенные изменения в рабочую ветку
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- experiments/tauri-app/bridge.src.js experiments/tauri-app/close-coordinator.js experiments/tauri-app/src-tauri/src/main.rs renderer/app/13-save.js renderer/app/04-rightpanel.js renderer/app/05-pane2.js renderer/app/16-notes.js renderer/app/34-comments.js test/tauri-safe-close.test.js
+          git diff --cached --check
+          git commit -m 'fix(storage): wait for all saves and cancel unsafe window or application exit'
+          git push origin HEAD:refs/heads/experiment/tauri-rust-finish
