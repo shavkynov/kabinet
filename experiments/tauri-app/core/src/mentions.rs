@@ -141,4 +141,26 @@ mod tests {
 
         let _ = fs::remove_dir_all(&base);
     }
+
+    #[test]
+    fn mentions_item_declined_like_place() {
+        let base = std::env::temp_dir().join(format!("kab-men-item-{}", std::process::id()));
+        let dir = base.join("Роман");
+        let _ = fs::remove_dir_all(&base);
+        let p = store::create_project(&dir, "Роман", None).unwrap();
+        let c1 = p["chapters"][0]["id"].as_str().unwrap().to_string();
+        store::write_chapter(&dir, &c1, "На столе лежало Кольцо. Блеск кольца привлекал. Кольцом можно было гордиться.").unwrap();
+        let id = store::add_item(&dir, "item", None).unwrap()["id"].as_str().unwrap().to_string();
+        store::rename_item(&dir, "item", &id, "кольцо").unwrap();
+        store::write_item(&dir, "item", &id, "{}").unwrap();
+
+        let r = card_mentions(&dir, "item", &id).unwrap();
+        assert_eq!(r["protagonist"], false);
+        let got: Vec<(i64, i64)> = r["chapters"].as_array().unwrap().iter()
+            .map(|c| (c["n"].as_i64().unwrap(), c["count"].as_i64().unwrap())).collect();
+        // Предмет склоняется как место: «Кольцо», «кольца», «Кольцом».
+        assert_eq!(got, vec![(1, 3)]);
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }

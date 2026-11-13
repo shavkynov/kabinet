@@ -31,3 +31,19 @@ test('cardMentions: главы, псевдонимы, слово целиком,
   assert.deepEqual(r.chapters, []);
   assert.equal(project.cardIndex(dir)[0].protagonist, true);
 });
+
+test('cardMentions: предмет склоняется как место, а не как «item» (регрессия «кольцо»)', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kabinet-men-')), 'Роман');
+  const p = project.createProject(dir, 'Роман');
+  const c1 = p.chapters[0].id;
+  project.writeChapter(dir, c1, 'На столе лежало Кольцо. Блеск кольца привлекал. Кольцом можно было гордиться.');
+  const id = project.addItem(dir, 'item').id;
+  project.renameItem(dir, 'item', id, 'кольцо');
+  project.writeItem(dir, 'item', id, JSON.stringify({}));
+
+  const r = cardMentions(dir, 'item', id);
+  assert.equal(r.protagonist, false);
+  assert.equal(r.chapters.length, 1, 'ожидалась ровно одна глава с упоминаниями предмета');
+  assert.equal(r.chapters[0].n, 1);
+  assert.equal(r.chapters[0].count, 3, 'предмет должен склоняться как место: «Кольцо», «кольца», «Кольцом»');
+});
