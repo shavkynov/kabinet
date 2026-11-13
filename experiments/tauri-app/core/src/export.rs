@@ -446,6 +446,14 @@ const CSS: &str = "\n  @page { margin: 22mm 20mm; }\n  body { font-family: Georg
 const INDENT_CSS: &str = "\n  p { margin: 0; text-indent: 1.5em; }\n  h2 + p, h3 + p, blockquote + p { text-indent: 0; }\n";
 
 /// format: md | txt | html | rtf | docx. Возвращает байты файла.
+/// Страница для печати в PDF: та же вёрстка, что у HTML, плюс поля A4 и автоматическое открытие окна печати.
+pub fn print_page(html: &str) -> String {
+    const HEAD: &str = "<style>@page{size:A4;margin:20mm}@media print{.noprint{display:none}}</style>";
+    const NOTE: &str = "<p class=\"noprint\" style=\"font:14px sans-serif;background:#fff6d6;padding:10px 14px;margin:0 0 16px\">В окне печати выберите «Сохранить как PDF». Если оно не открылось, нажмите Ctrl+P (на Mac — ⌘P).</p>";
+    const SCRIPT: &str = "<script>addEventListener('load',function(){setTimeout(function(){print()},400)})</script>";
+    html.replacen("</head>", &format!("{}</head>", HEAD), 1).replacen("<body", &format!("<body data-print=\"1\""), 1).replacen("</body>", &format!("{}</body>", SCRIPT), 1).replacen("<h1 class=\"book\">", &format!("{}<h1 class=\"book\">", NOTE), 1)
+}
+
 pub fn build_export(dir: &Path, format: &str, lang: &str, indent: bool, chapter_numbers: bool) -> R<Vec<u8>> {
     let view = store::open_project(dir)?;
     let stories = view["mode"].as_str() == Some("stories");
@@ -550,6 +558,8 @@ mod tests {
         let (a, l) = split_align(&["-> привет <-".to_string()]).unwrap();
         assert_eq!((a, l), (Align::Center, vec!["привет".to_string()]));
         assert!(build_export(Path::new("/нет"), "pdf", "ru", false, false).is_err());
+        let page = print_page("<html><head></head><body class=\"x\"><h1 class=\"book\">К</h1></body></html>");
+        assert!(page.contains("@page{size:A4") && page.contains("print()") && page.contains("Сохранить как PDF") && page.contains("<body data-print"));
     }
 }
 
