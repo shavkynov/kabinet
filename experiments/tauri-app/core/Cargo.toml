@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
 serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 sha1 = "0.10"

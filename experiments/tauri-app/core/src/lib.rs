@@ -9,6 +9,7 @@ pub mod export;
 pub mod exporttarget;
 pub mod foldersync;
 pub mod import;
+pub mod media;
 pub mod remote;
 pub mod searchreplace;
 pub mod store;

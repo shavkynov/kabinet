@@ -13,6 +13,8 @@ const declension = require('../../src/declension');
       throw new Error(typeof err === 'string' ? err : (err && err.message) || String(err));
     }
   }
+  // Двоичные данные приходят из Rust строкой base64; окну нужен Uint8Array, как Buffer из Electron.
+  const fromB64 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
   const none = () => {}; // события из меню Electron: меню на Tauri пока нет
   const plat = /Mac/i.test(navigator.platform) ? 'darwin' : /Win/i.test(navigator.platform) ? 'win32' : 'linux';
 
@@ -77,7 +79,7 @@ const declension = require('../../src/declension');
     setDayWords: (d, w) => call('stats:setDay', d, w),
     statsSummary: (d, w) => call('stats:summary', d, w),
     projectBoard: () => call('project:board'),
-    readSound: (s, f) => call('sounds:read', s, f),
+    readSound: async (s, f) => fromB64(await call('sounds:read', s, f)),
     addSounds: (s) => call('sounds:add', s),
     removeSound: (s, f) => call('sounds:remove', s, f),
     cardIndex: async () => {
@@ -97,7 +99,7 @@ const declension = require('../../src/declension');
     reloadProject: () => call('project:reload'),
     dav: (op, ...args) => call(`dav:${op}`, ...args),
     setTheme: (t) => call('ui:setTheme', t),
-    listFonts: () => call('fonts:list'),
+    listFonts: async () => (await call('fonts:list')).map((f) => ({ ...f, data: fromB64(f.data) })),
     addFonts: () => call('fonts:add'),
     removeFont: (f) => call('fonts:remove', f),
     listSounds: () => call('sounds:list'),

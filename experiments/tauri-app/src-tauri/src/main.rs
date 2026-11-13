@@ -5,6 +5,7 @@ use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
 use kabinet_core::{backup, export, exporttarget, import, searchreplace, store};
 use kabinet_core::check::CheckApi;
+use kabinet_core::media;
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -313,7 +314,30 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         "project:setCharLimit" => store::set_char_limit(&current_dir(&state)?, a.get(0)),
         "project:board" => store::board_data(&current_dir(&state)?),
         "image:read" => store::read_image(&current_dir(&state)?, &arg_str(a, 0)?),
-        "fonts:list" => Ok(json!([])),
+        "fonts:list" | "fonts:add" | "fonts:remove" | "sounds:list" | "sounds:read" | "sounds:add" | "sounds:remove" | "sounds:openFolder" => {
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            match channel.as_str() {
+                "fonts:list" => tauri::async_runtime::spawn_blocking(move || Ok(json!(media::fonts_list(&data)))).await.map_err(|e| e.to_string())?,
+                "fonts:add" => {
+                    let picked = rfd::AsyncFileDialog::new().set_title("Добавить шрифты").add_filter("Шрифты", &["ttf", "otf", "woff", "woff2"]).pick_files().await;
+                    let Some(files) = picked else { return Ok(json!([])) };
+                    let paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+                    Ok(json!(media::fonts_add(&data, &paths)?))
+                }
+                "fonts:remove" => { media::fonts_remove(&data, &arg_str(a, 0)?)?; Ok(json!(true)) }
+                "sounds:list" => Ok(media::sounds_list(&data)),
+                "sounds:read" => { let (s, f) = (arg_str(a, 0)?, arg_str(a, 1)?); tauri::async_runtime::spawn_blocking(move || media::sound_read(&data, &s, &f).map(Value::String)).await.map_err(|e| e.to_string())? }
+                "sounds:add" => {
+                    let slot = arg_str(a, 0)?;
+                    let picked = rfd::AsyncFileDialog::new().set_title("Загрузить звук").add_filter("Звук", &["wav", "mp3", "ogg", "m4a", "aac"]).pick_files().await;
+                    let Some(files) = picked else { return Ok(json!([])) };
+                    let paths: Vec<PathBuf> = files.iter().map(|f| f.path().to_path_buf()).collect();
+                    Ok(json!(media::sounds_add(&data, &slot, &paths)?))
+                }
+                "sounds:remove" => { media::sound_remove(&data, &arg_str(a, 0)?, &arg_str(a, 1)?)?; Ok(json!(true)) }
+                _ => { open_path(&media::sounds_folder(&data)?); Ok(json!(true)) }
+            }
+        }
         "trash:restore" => store::restore_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:purge" => store::purge_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:empty" => store::empty_trash(&current_dir(&state)?),

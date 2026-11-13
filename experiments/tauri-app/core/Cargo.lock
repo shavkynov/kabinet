@@ -501,6 +501,7 @@ dependencies = [
 name = "kabinet-core"
 version = "0.38.0"
 dependencies = [
+ "base64",
  "chrono",
  "encoding_rs",
  "fancy-regex",
