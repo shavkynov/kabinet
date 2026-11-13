@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const FOLDERS: [&str; 8] = ["Главы", "Персонажи", "Места", "Предметы", "Заметки", "Изображения", "Корзина", CONFLICT_DIR];
+pub const FOLDERS: [&str; 9] = ["Главы", "Персонажи", "Места", "Предметы", "Заметки", "Изображения", "Картинки", "Корзина", CONFLICT_DIR];
 const MASS_DELETE_MIN: usize = 5;
 
 fn root_re() -> Regex { Regex::new(r"^project.*\.json$|^stats\.json$").unwrap() }
@@ -701,5 +701,66 @@ mod tests {
         assert!(s.get("Кабинет/Роман/Главы/qqqqqq.md").is_none());
         assert!(s.names().iter().any(|n| n.contains("Конфликты/") && n.contains("(было в папке)")));
         assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "моя".as_bytes());
+    }
+
+    #[test]
+    fn image_folders_keep_syncable_path_filters() {
+        for folder in ["Картинки", "Изображения"] {
+            assert!(is_syncable(&format!("{folder}/abcdef.png")));
+            assert!(!is_syncable(&format!("{folder}/.hidden.png")));
+            assert!(!is_syncable(&format!("{folder}/abcdef.png.tmp")));
+            assert!(!is_syncable(&format!("{folder}/nested/abcdef.png")));
+        }
+    }
+
+    #[test]
+    fn added_tauri_image_survives_export_import_and_incremental_sync() {
+        let s = FakeServer::new();
+        let base = tmpdir("image-roundtrip");
+        let a = base.join("a");
+        project(&a, &[("aaaaaa", "текст")]);
+        let source = base.join("source.png");
+        let bytes = b"\x89PNG\r\n\x1a\n\x00\xff";
+        fs::write(&source, bytes).unwrap();
+        let file = crate::store::add_image(&a, &source).unwrap();
+        let rel = format!("Картинки/{file}");
+        let expected = crate::store::read_image(&a, &file).unwrap();
+        assert!(walk_local(&a).contains_key(&rel));
+        let mut sa = sync_of(&a, &s, "image-a");
+        assert!(sa.export_all().unwrap().contains(&rel));
+        assert_eq!(s.get(&format!("Кабинет/Роман/{rel}")).unwrap(), bytes);
+        let b = base.join("b");
+        let mut sb = sync_of(&b, &s, "image-b");
+        assert!(sb.import_all().unwrap().contains(&rel));
+        assert_eq!(crate::store::read_image(&b, &file).unwrap(), expected);
+        let updated = b"\x89PNG\r\n\x1a\n\x00\xfe\x01";
+        fs::write(a.join(&rel), updated).unwrap();
+        assert!(sa.push(&[rel.clone()]).unwrap().pushed.contains(&rel));
+        assert!(sb.sync().unwrap().pulled.contains(&rel));
+        assert_eq!(fs::read(b.join(&rel)).unwrap(), updated);
+        assert_eq!(crate::store::read_image(&b, &file).unwrap(), crate::store::read_image(&a, &file).unwrap());
+    }
+
+    #[test]
+    fn both_image_folders_preserve_distinct_files_with_the_same_name() {
+        let s = FakeServer::new();
+        let base = tmpdir("image-compat");
+        let a = base.join("a");
+        project(&a, &[("aaaaaa", "текст")]);
+        for folder in ["Картинки", "Изображения"] { fs::create_dir_all(a.join(folder)).unwrap(); }
+        fs::write(a.join("Картинки/abcdef.png"), b"\x00\xfftauri").unwrap();
+        fs::write(a.join("Изображения/abcdef.png"), b"\x00\xfeexisting").unwrap();
+        let mut sa = sync_of(&a, &s, "compat-a");
+        sa.export_all().unwrap();
+        let b = base.join("b");
+        let mut sb = sync_of(&b, &s, "compat-b");
+        sb.import_all().unwrap();
+        for folder in ["Картинки", "Изображения"] {
+            let rel = format!("{folder}/abcdef.png");
+            assert_eq!(fs::read(b.join(&rel)).unwrap(), fs::read(a.join(&rel)).unwrap());
+            assert_eq!(s.get(&format!("Кабинет/Роман/{rel}")).unwrap(), fs::read(a.join(&rel)).unwrap());
+        }
+        let res = sb.sync().unwrap();
+        assert!(res.conflicts.is_empty() && res.pulled.is_empty() && res.pushed.is_empty());
     }
 }
