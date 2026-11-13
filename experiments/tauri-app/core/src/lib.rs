@@ -8,6 +8,7 @@ pub mod exporttarget;
 pub mod foldersync;
 pub mod import;
 pub mod remote;
+pub mod searchreplace;
 pub mod store;
 pub mod syncguard;
 pub mod webdav;

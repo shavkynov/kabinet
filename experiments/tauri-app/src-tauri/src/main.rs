@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::{backup, export, exporttarget, import, store};
+use kabinet_core::{backup, export, exporttarget, import, searchreplace, store};
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -197,6 +197,21 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         "trash:restore" => store::restore_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:purge" => store::purge_trash(&current_dir(&state)?, &arg_str(a, 0)?),
         "trash:empty" => store::empty_trash(&current_dir(&state)?),
+        "project:search" => {
+            let dir = current_dir(&state)?;
+            let q = arg_str(a, 0)?;
+            tauri::async_runtime::spawn_blocking(move || searchreplace::search_project(&dir, &q)).await.map_err(|e| e.to_string())?
+        }
+        "project:replace" => {
+            let dir = current_dir(&state)?;
+            let (find, repl) = (arg_str(a, 0)?, arg_str(a, 1).unwrap_or_default());
+            let dry = a.get(2).map(|v| v.as_bool().unwrap_or(false) || v.as_i64() == Some(1)).unwrap_or(false);
+            let app2 = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if !dry { backup_now(&app2, &dir)?; } // если копия не удалась, ничего не меняем
+                searchreplace::replace_project(&dir, &find, &repl, dry)
+            }).await.map_err(|e| e.to_string())?
+        }
         "backup:now" => {
             let dir = current_dir(&state)?;
             Ok(match backup_now(&app, &dir)? { Some(n) => json!(n), None => Value::Null })
