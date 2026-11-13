@@ -17,6 +17,8 @@ pub struct Req {
 pub struct Resp {
     pub status: u16,
     pub body: Vec<u8>,
+    /// Заголовок Location у ответов-переадресаций (сами переходы клиент не выполняет).
+    pub location: Option<String>,
 }
 
 pub trait Http: Send {
@@ -63,10 +65,11 @@ impl Http for UreqHttp {
             Err(e) => return Err(e.to_string()),
         };
         let status = resp.status();
+        let location = resp.header("location").map(String::from);
         let mut body = Vec::new();
         use std::io::Read;
         resp.into_reader().take(256 * 1024 * 1024).read_to_end(&mut body).map_err(|e| e.to_string())?;
-        Ok(Resp { status, body })
+        Ok(Resp { status, body, location })
     }
 }
 
@@ -306,6 +309,11 @@ impl<H: Http> WebDav<H> {
     pub fn ensure_root(&mut self) -> R<()> { self.mkdir_root() }
 }
 
+impl<H: Http> crate::remote::Folder for WebDav<H> {
+    fn check(&mut self) -> R<bool> { WebDav::check(self) }
+    fn ensure_root(&mut self) -> R<()> { WebDav::ensure_root(self) }
+}
+
 impl<H: Http> Remote for WebDav<H> {
     fn list(&mut self, rel: &str) -> R<Vec<Item>> {
         let parts = segs(rel);
@@ -436,7 +444,7 @@ mod tests {
     #[test]
     fn auth_errors_are_readable() {
         struct Deny(u16);
-        impl Http for Deny { fn request(&self, _: Req) -> Result<Resp, String> { Ok(Resp { status: self.0, body: vec![] }) } }
+        impl Http for Deny { fn request(&self, _: Req) -> Result<Resp, String> { Ok(Resp { status: self.0, body: vec![], location: None }) } }
         let mut d = WebDav::new(Deny(401), "https://x.ru", "u", "p", "").unwrap();
         assert!(d.check().unwrap_err().contains("логин"));
         let mut d = WebDav::new(Deny(507), "https://x.ru", "u", "p", "").unwrap();
@@ -458,7 +466,7 @@ mod tests {
         use std::sync::atomic::{AtomicU32, Ordering};
         struct Flaky(AtomicU32);
         impl Http for Flaky { fn request(&self, _: Req) -> Result<Resp, String> {
-            if self.0.fetch_add(1, Ordering::SeqCst) < 2 { Ok(Resp { status: 503, body: vec![] }) } else { Ok(Resp { status: 200, body: b"ok".to_vec() }) }
+            if self.0.fetch_add(1, Ordering::SeqCst) < 2 { Ok(Resp { status: 503, body: vec![], location: None }) } else { Ok(Resp { status: 200, body: b"ok".to_vec(), location: None }) }
         } }
         let mut r = Retrying::new(Flaky(AtomicU32::new(0)));
         r.pause_ms = 0;

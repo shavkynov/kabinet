@@ -30,5 +30,14 @@
       "../../../build/icon.png",
       "../../../build/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "kabinet"
+        ]
+      }
+    }
   }
 }

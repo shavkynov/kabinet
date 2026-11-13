@@ -333,12 +333,12 @@ mod tests {
         fn request(&self, r: Req) -> Result<Resp, String> {
             let n = self.calls.fetch_add(1, Ordering::SeqCst);
             self.bodies.lock().unwrap().push(String::from_utf8_lossy(&r.body.unwrap()).to_string());
-            if self.fail_first_429 && n == 0 { return Ok(Resp { status: 429, body: vec![] }); }
+            if self.fail_first_429 && n == 0 { return Ok(Resp { status: 429, body: vec![], location: None }); }
             let body = json!({ "matches": [
                 { "offset": 0, "length": 6, "message": "Ошибка", "rule": { "id": "MORFOLOGIK_RULE_RU_RU", "category": { "id": "TYPOS" } }, "replacements": [{ "value": "Привет" }, { "value": "Првиет" }] },
                 { "offset": 6, "length": 4, "message": "Знаки", "rule": { "id": "COMMA_X", "category": { "id": "PUNCTUATION" } }, "replacements": [] }
             ]});
-            Ok(Resp { status: 200, body: body.to_string().into_bytes() })
+            Ok(Resp { status: 200, body: body.to_string().into_bytes(), location: None })
         }
     }
     fn opts() -> Opts { Opts { server: "".into(), lang: "ru".into(), disabled_rules: vec![], hidden_kinds: vec![], words: vec![], max_chunk: MAX_CHUNK, gap_ms: Some(0), retry_wait_ms: Some(0) } }

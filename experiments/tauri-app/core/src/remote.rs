@@ -18,3 +18,17 @@ pub trait Remote: Send {
     fn remove(&mut self, rel: &str) -> R<()>;
     fn mkdir(&mut self, rel: &str) -> R<()>;
 }
+
+/// Папка, которой можно подключиться и в которой можно создать корень: общее для WebDAV и Яндекс Диска.
+pub trait Folder: Remote {
+    fn check(&mut self) -> R<bool>;
+    fn ensure_root(&mut self) -> R<()>;
+}
+
+impl Remote for Box<dyn Folder> {
+    fn list(&mut self, rel: &str) -> R<Vec<Item>> { (**self).list(rel) }
+    fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { (**self).read(rel) }
+    fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { (**self).write(rel, bytes) }
+    fn remove(&mut self, rel: &str) -> R<()> { (**self).remove(rel) }
+    fn mkdir(&mut self, rel: &str) -> R<()> { (**self).mkdir(rel) }
+}

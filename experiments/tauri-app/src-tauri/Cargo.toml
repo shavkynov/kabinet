@@ -12,6 +12,7 @@ tauri = { version = "2", features = [] }
 serde_json = { version = "1", features = ["preserve_order"] }
 rand = "0.8"
 rfd = "0.15"
+tauri-plugin-deep-link = "2"
 kabinet-core = { path = "../core" }
 
 # Пароли WebDAV хранятся в защищённом хранилище системы: Credential Manager (Windows), Связка ключей (macOS).
@@ -20,3 +21,7 @@ keyring = { version = "3", features = ["windows-native"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+
+# Одна копия программы: ссылка kabinet://… из браузера доходит до уже запущенной.
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

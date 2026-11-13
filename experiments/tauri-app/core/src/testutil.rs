@@ -46,7 +46,7 @@ impl Http for FakeServer {
         let u = url::Url::parse(&req.url).map_err(|e| e.to_string())?;
         let path = percent_encoding::percent_decode_str(u.path()).decode_utf8_lossy().trim_end_matches('/').to_string();
         f.log.push(format!("{} {}", req.method, path));
-        let r = |status: u16, body: Vec<u8>| Ok(Resp { status, body });
+        let r = |status: u16, body: Vec<u8>| Ok(Resp { status, body, location: None });
         match req.method.as_str() {
             "PROPFIND" => {
                 let known = path.is_empty() || f.dirs.contains(&path) || f.files.contains_key(&path);

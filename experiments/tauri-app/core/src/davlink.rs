@@ -3,7 +3,9 @@
 //! замок «kabinet.lock» раз в минуту. Проходы идут строго по одному.
 use crate::foldersync::{is_syncable, FolderSync, SyncResult};
 use crate::store::{write_atomic, R};
+use crate::remote::Folder;
 use crate::webdav::{self, Http, WebDav};
+use crate::yandexdisk::{self, is_oauth_user, YandexDisk};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -50,7 +52,7 @@ pub enum Event {
     Changed(Vec<String>),
 }
 
-type Rm = WebDav<Box<dyn Http>>;
+type Rm = Box<dyn Folder>;
 type HttpFactory = Arc<dyn Fn() -> Box<dyn Http> + Send + Sync>;
 type OnEvent = Arc<dyn Fn(Event) + Send + Sync>;
 
@@ -92,7 +94,9 @@ fn now_ms() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_m
 fn link_key(dir: &Path) -> String { dir.to_string_lossy().to_string() }
 
 fn dav_of(http: Box<dyn Http>, acc: &Acc, root: Option<&str>) -> R<Rm> {
-    WebDav::new(http, &acc.url, &acc.user, &acc.pass, root.unwrap_or(&acc.root))
+    let root = root.unwrap_or(&acc.root);
+    if is_oauth_user(&acc.user) { return Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?)); }
+    Ok(Box::new(WebDav::new(http, &acc.url, &acc.user, &acc.pass, root)?))
 }
 
 fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEvent) -> Option<SyncResult> {
@@ -294,13 +298,14 @@ impl DavLink {
 
     /// Вход на сервер: проверка логина и пароля.
     pub fn login(&self, url: &str, user: &str, pass: &str) -> R<Acc> {
-        let acc = Acc { url: webdav::normalize_url(url)?, user: user.to_string(), pass: pass.to_string(), root: String::new(), label: String::new() };
+        let acc = Acc { url: if is_oauth_user(user) { url.to_string() } else { webdav::normalize_url(url)? }, user: user.to_string(), pass: pass.to_string(), root: String::new(), label: String::new() };
         dav_of((self.make_http)(), &acc, Some(""))?.check()?;
         Ok(acc)
     }
 
     pub fn browse(&self, acc: &Acc, at: &str) -> R<Vec<Value>> {
-        let v = webdav::browse_folders((self.make_http)(), &acc.url, &acc.user, &acc.pass, at)?;
+        let v = if is_oauth_user(&acc.user) { yandexdisk::browse_folders((self.make_http)(), &acc.pass, at)? }
+            else { webdav::browse_folders((self.make_http)(), &acc.url, &acc.user, &acc.pass, at)? };
         Ok(v.into_iter().map(|(name, path)| json!({ "name": name, "path": path })).collect())
     }
 
@@ -458,7 +463,7 @@ mod tests {
     #[test]
     fn bad_password_is_reported_without_linking() {
         struct Deny;
-        impl Http for Deny { fn request(&self, _: crate::webdav::Req) -> Result<crate::webdav::Resp, String> { Ok(crate::webdav::Resp { status: 401, body: vec![] }) } }
+        impl Http for Deny { fn request(&self, _: crate::webdav::Req) -> Result<crate::webdav::Resp, String> { Ok(crate::webdav::Resp { status: 401, body: vec![], location: None }) } }
         let data = tmpdir("data");
         let d = DavLink::new(&data, Arc::new(PlainSecret), "Т", Arc::new(|| Box::new(Deny) as Box<dyn Http>), Arc::new(|_| {}));
         assert!(d.login("https://x.ru", "u", "bad").unwrap_err().contains("логин"));

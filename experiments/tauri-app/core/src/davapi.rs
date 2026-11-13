@@ -2,21 +2,25 @@
 //! Пароль окну не отдаётся: после входа остаётся только номер сеанса.
 use crate::davlink::{Acc, DavLink};
 use crate::store::{safe_folder_name, R};
-use crate::webdav::PRESETS;
+use crate::webdav::{Http, UreqHttp, PRESETS};
+use crate::yandexdisk::is_oauth_user;
+use crate::yandexoauth::YandexAuth;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub struct DavApi {
     pub link: DavLink,
+    /// Вход в Яндекс через браузер: окну отдаётся только билет, токен остаётся здесь.
+    pub yandex: Arc<YandexAuth>,
     sessions: Mutex<HashMap<String, Acc>>,
 }
 
 fn s(args: &[Value], i: usize) -> String { args.get(i).and_then(|v| v.as_str()).unwrap_or("").to_string() }
 
 impl DavApi {
-    pub fn new(link: DavLink) -> Self { DavApi { link, sessions: Mutex::new(HashMap::new()) } }
+    pub fn new(link: DavLink) -> Self { DavApi { link, yandex: Arc::new(YandexAuth::new(Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))), sessions: Mutex::new(HashMap::new()) } }
 
     fn new_session(&self, mut acc: Acc, label: &str) -> String {
         let id: String = (0..8).map(|_| format!("{:02x}", rand::random::<u8>())).collect();
@@ -54,6 +58,9 @@ impl DavApi {
                 let url = if preset.url.is_empty() { form["url"].as_str().unwrap_or("") } else { preset.url };
                 let (user, pass) = (form["user"].as_str().unwrap_or(""), form["pass"].as_str().unwrap_or(""));
                 if user.is_empty() || pass.is_empty() { return Err("Введите логин и пароль.".into()); }
+                // Вход через браузер: вместо пароля — одноразовый билет, настоящие данные берём из ядра.
+                let creds;
+                let pass = if is_oauth_user(user) { creds = self.yandex.take_ticket(pass, user)?; creds.as_str() } else { pass };
                 let acc = self.link.login(url, user, pass)?;
                 Ok(json!({ "session": self.new_session(acc, preset.name), "label": preset.name }))
             }
@@ -132,6 +139,13 @@ mod tests {
         a.link.stop();
         assert_eq!(a.call("detach", &[], Some(&dir)).unwrap(), json!(true));
         assert!(a.call("browse", &[json!("нет такого")], None).unwrap_err().contains("устарел"));
+    }
+
+    #[test]
+    fn yandex_login_needs_a_ticket_from_the_core() {
+        let a = api(&FakeServer::new(), &tmpdir("data"));
+        let r = a.call("login", &[json!({ "preset": "yandex", "user": "oauth-yandex:0123456789abcdef0123456789abcdef", "pass": "выдуманный-билет" })], None);
+        assert_eq!(r.unwrap_err(), "Подключение устарело. Войдите в Яндекс заново.");
     }
 
     #[test]

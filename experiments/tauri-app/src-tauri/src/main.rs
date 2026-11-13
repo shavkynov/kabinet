@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Пароль облака лежит в связке ключей системы; в файле связей остаётся только ссылка «kr:…».
 struct KeyringSecret;
@@ -73,7 +74,8 @@ fn natural_key(name: &str) -> Vec<(bool, u64, String)> {
 }
 
 fn open_url(url: &str) {
-    #[cfg(windows)] { let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn(); }
+    // Не через «cmd /C start»: в адресе входа Яндекса есть «&», и cmd принял бы его за конец команды.
+    #[cfg(windows)] { let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(url).spawn(); }
     #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
 }
@@ -431,6 +433,11 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             reveal(&file);
             Ok(json!(file.to_string_lossy()))
         }
+        "dav:yandexOAuth" => {
+            let y = dav.yandex.clone();
+            tauri::async_runtime::spawn_blocking(move || y.run(&|u| { open_url(u); true })).await.map_err(|e| e.to_string())?
+        }
+        "dav:yandexCancel" => { dav.yandex.cancel(); Ok(json!(true)) }
         "dav:open" => {
             let (session, root) = (arg_str(a, 0)?, arg_str(a, 1)?);
             let Some(parent) = pick_folder("Где сохранить копию проекта на этом компьютере?").await else { return Ok(Value::Null) };
@@ -468,8 +475,16 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
     }
 }
 
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") { let _ = w.unminimize(); let _ = w.show(); let _ = w.set_focus(); }
+}
+
 fn main() {
     tauri::Builder::default()
+        // Второй запуск (например, возврат из браузера по ссылке kabinet://) не открывает вторую копию:
+        // ссылка передаётся уже работающей, а окно выходит вперёд.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| { show_main(app); }))
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::default())
         .setup(|app| {
             let data = app.path().app_data_dir().map_err(|e| format!("Нет папки данных приложения: {}", e))?;
@@ -484,6 +499,18 @@ fn main() {
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
                 Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);
             app.manage(Arc::new(DavApi::new(link)));
+            // Возврат из браузера после входа в Яндекс: ссылка kabinet://oauth/yandex?… Чужие ссылки ядро игнорирует.
+            #[cfg(any(windows, target_os = "linux"))]
+            { let _ = app.deep_link().register_all(); }
+            let (dav_for_links, app_for_links) = (app.state::<Arc<DavApi>>().inner().clone(), app.handle().clone());
+            let take = move |urls: Vec<String>| {
+                for u in urls {
+                    let (y, a) = (dav_for_links.yandex.clone(), app_for_links.clone());
+                    std::thread::spawn(move || { if y.receive(&u) { show_main(&a); } });
+                }
+            };
+            if let Ok(Some(start)) = app.deep_link().get_current() { take(start.iter().map(|u| u.to_string()).collect()); }
+            app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
             app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(45)) as Box<dyn Http>))));
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.

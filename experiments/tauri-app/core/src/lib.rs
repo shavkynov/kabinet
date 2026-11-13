@@ -16,6 +16,8 @@ pub mod store;
 pub mod syncguard;
 pub mod watcher;
 pub mod webdav;
+pub mod yandexdisk;
+pub mod yandexoauth;
 
 #[cfg(test)]
 pub mod testutil;
