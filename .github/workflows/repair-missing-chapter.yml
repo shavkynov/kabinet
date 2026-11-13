@@ -1,0 +1,263 @@
+name: Проверка и исправление чтения отсутствующей главы
+
+on:
+  push:
+    branches: [experiment/tauri-rust-finish]
+    paths: ['.github/workflows/repair-missing-chapter.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-missing-chapter-finish
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/experiment/tauri-rust-finish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Применить точечные изменения к проверенным исходникам
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          expected = {
+              'experiments/tauri-app/core/src/store.rs': '40c0a3528dc7c5fc21b24ca609be3b48ccfd253c',
+              'renderer/app/05-pane2.js': 'c347ef702194e5507e86adee1620030118c6326d',
+              'renderer/app/14-lists.js': '7783b598b1b869390cab724f1de9fa85599be85d',
+              'renderer/app/31-sync.js': '335af18aceebe25ce6a0b4ecbf167cc098f3b3f3',
+          }
+          for name, sha in expected.items():
+              raw = Path(name).read_bytes()
+              actual = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+              if actual != sha:
+                  raise RuntimeError(f'Исходник изменился: {name}. Автоматическое исправление остановлено.')
+
+          def replace_once(name, old, new):
+              p = Path(name)
+              text = p.read_text(encoding='utf-8')
+              if text.count(old) != 1:
+                  raise RuntimeError(f'Ожидался один точный фрагмент: {name}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          replace_once('experiments/tauri-app/core/src/store.rs',
+              '''pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
+              let file = chapter_file(dir, id)?;
+              match fs::read_to_string(&file) {
+                  Ok(s) => Ok(s),
+                  Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+                  Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
+              }
+          }''',
+              '''pub fn read_chapter(dir: &Path, id: &str) -> R<String> {
+              let file = chapter_file(dir, id)?;
+              match fs::read_to_string(&file) {
+                  Ok(s) => Ok(s),
+                  Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(format!(
+                      "Файл главы «{}.md» не найден в папке «Главы». Дождитесь завершения синхронизации или восстановите файл из резервной копии. Пустая глава вместо него не создана.", id)),
+                  Err(e) => Err(format!("Не удалось прочитать главу: {}", e)),
+              }
+          }''')
+
+          replace_once('renderer/app/14-lists.js',
+              '  if (id === currentId && kind === currentKind) return;',
+              '  if (id === currentId && kind === currentKind && !keepView) return;')
+          replace_once('renderer/app/14-lists.js',
+              '''    updateAllSelections();
+            } catch (err) {
+              showError(err.message);
+            }
+          }
+
+          async function addDoc(kind) {''',
+              '''    updateAllSelections();
+              return true;
+            } catch (err) {
+              showError(err.message);
+              return false;
+            }
+          }
+
+          async function addDoc(kind) {''')
+
+          replace_once('renderer/app/05-pane2.js',
+              '''    $('#p2Scroll').scrollTop = keepView ? top : 0;
+            } catch (err) {
+              showError(err.message);
+            }
+          }
+
+          async function closePane2() {''',
+              '''    $('#p2Scroll').scrollTop = keepView ? top : 0;
+              return true;
+            } catch (err) {
+              showError(err.message);
+              return false;
+            }
+          }
+
+          async function closePane2() {''')
+
+          replace_once('renderer/app/31-sync.js',
+              '''      currentKind = null;
+                currentId = null;
+                await openDoc(kind, id, true); // чужая правка не должна выбрасывать в начало главы
+                reloaded = true;''',
+              '''      // Состояние прежнего документа сохраняется, пока новое чтение не завершилось успешно.
+                reloaded = (await openDoc(kind, id, true)) || reloaded;''')
+          replace_once('renderer/app/31-sync.js',
+              '''      const id = p2.id;
+                p2.id = null;
+                await openPane2(id, true);
+                reloaded = true;''',
+              '''      const id = p2.id;
+                reloaded = (await openPane2(id, true)) || reloaded;''')
+
+          rust_tests = r'''use kabinet_core::store;
+          use std::fs;
+          use std::path::PathBuf;
+
+          struct Project(PathBuf, String);
+          impl Project {
+              fn new() -> Self {
+                  let dir = std::env::temp_dir().join(format!("kabinet-missing-{}-{:016x}", std::process::id(), rand::random::<u64>()));
+                  let view = store::create_project(&dir, "Проверка главы", None).unwrap();
+                  let id = view["chapters"][0]["id"].as_str().unwrap().to_string();
+                  Self(dir, id)
+              }
+              fn file(&self) -> PathBuf { self.0.join("Главы").join(format!("{}.md", self.1)) }
+          }
+          impl Drop for Project {
+              fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+          }
+
+          #[test]
+          fn existing_empty_chapter_is_still_valid() {
+              let p = Project::new();
+              assert_eq!(store::read_chapter(&p.0, &p.1).unwrap(), "");
+              store::write_chapter(&p.0, &p.1, "Авторский текст").unwrap();
+              assert_eq!(store::read_chapter(&p.0, &p.1).unwrap(), "Авторский текст");
+          }
+
+          #[test]
+          fn missing_chapter_is_an_error_without_recreating_or_changing_project() {
+              let p = Project::new();
+              let metadata = fs::read(p.0.join("project.json")).unwrap();
+              fs::remove_file(p.file()).unwrap();
+              let error = store::read_chapter(&p.0, &p.1).unwrap_err();
+              assert!(error.contains(&p.1) && error.contains("не найден"));
+              assert!(!p.file().exists());
+              assert_eq!(fs::read(p.0.join("project.json")).unwrap(), metadata);
+          }
+
+          #[test]
+          fn invalid_identifiers_and_unreadable_text_do_not_become_empty_chapters() {
+              let p = Project::new();
+              assert!(store::read_chapter(&p.0, "../outside").is_err());
+              fs::write(p.file(), [0xff, 0xfe, 0xff]).unwrap();
+              assert!(store::read_chapter(&p.0, &p.1).is_err());
+              assert_eq!(fs::read(p.file()).unwrap(), vec![0xff, 0xfe, 0xff]);
+          }
+          '''
+          js_tests = r''''use strict';
+          const test = require('node:test');
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const vm = require('node:vm');
+
+          function fixture(failRead) {
+            const errors = [], statuses = [], rendered = [];
+            const context = {
+              currentId: 'aaaaaa', currentKind: 'chapter', openToken: 0, dirty: false, noteId: null,
+              project: { name: 'Проверка', chapters: [{ id: 'aaaaaa', title: 'Первая' }, { id: 'bbbbbb', title: 'Вторая' }] },
+              console, setTimeout, clearTimeout, SAVE_DELAY_MS: 1000,
+              flush: async () => true,
+              api: {
+                readChapter: async () => { if (failRead) throw new Error('Файл главы не найден'); return ''; },
+                reloadProject: async () => context.project,
+              },
+              showError: (message) => errors.push(message),
+              setStatus: (kind, text) => statuses.push({ kind, text }),
+              setEditorContent: (text, editable, keepView) => rendered.push({ text, editable, keepView }),
+              closeGoalPop() {}, refreshGoalUI() {}, loadChapMeta() {}, refreshTotals() {},
+              document: { body: { classList: { toggle() {} } } },
+              $: () => ({ hidden: false, textContent: '', scrollTop: 0 }),
+            };
+            vm.createContext(context);
+            const source = ['05-pane2.js', '14-lists.js', '31-sync.js']
+              .map((name) => fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app', name), 'utf8')).join('\n');
+            vm.runInContext(source + '\nglobalThis.subject = { openDoc, openPane2, applyExternal, panel: p2 };', context);
+            return { context, errors, statuses, rendered, subject: context.subject };
+          }
+
+          test('failed chapter reload retains document identity and contents', async () => {
+            const f = fixture(true);
+            assert.equal(await f.subject.openDoc('chapter', 'aaaaaa', true), false);
+            assert.equal(f.context.currentId, 'aaaaaa');
+            assert.equal(f.context.currentKind, 'chapter');
+            assert.equal(f.errors.length, 1);
+            assert.equal(f.rendered.length, 0);
+          });
+
+          test('existing empty chapter can be reloaded', async () => {
+            const f = fixture(false);
+            assert.equal(await f.subject.openDoc('chapter', 'aaaaaa', true), true);
+            assert.deepEqual(f.rendered, [{ text: '', editable: true, keepView: true }]);
+            assert.equal(f.context.currentId, 'aaaaaa');
+          });
+
+          test('external failed reload keeps the active document and does not report success', async () => {
+            const f = fixture(true);
+            await f.subject.applyExternal(['Главы/aaaaaa.md']);
+            assert.equal(f.context.currentId, 'aaaaaa');
+            assert.equal(f.context.currentKind, 'chapter');
+            assert.equal(f.errors.length, 1);
+            assert.equal(f.rendered.length, 0);
+            assert.equal(f.statuses.length, 0);
+          });
+
+          test('external failed reload keeps the second panel identity', async () => {
+            const f = fixture(true);
+            f.subject.panel.id = 'bbbbbb';
+            await f.subject.applyExternal(['Главы/bbbbbb.md']);
+            assert.equal(f.subject.panel.id, 'bbbbbb');
+            assert.equal(f.context.currentId, 'aaaaaa');
+            assert.equal(f.errors.length, 1);
+            assert.equal(f.statuses.length, 0);
+          });
+          '''
+          for name, content in {
+              'experiments/tauri-app/core/tests/chapter_missing.rs': rust_tests,
+              'test/tauri-chapter-read.test.js': js_tests,
+          }.items():
+              with Path(name).open('x', encoding='utf-8', newline='\n') as output:
+                  output.write(content)
+      - name: Проверки JavaScript
+        run: node --test test/tauri-chapter-read.test.js
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Все тесты Rust-ядра
+        run: cargo test --manifest-path experiments/tauri-app/core/Cargo.toml
+      - name: Записать только проверенные исправления в рабочую ветку
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- experiments/tauri-app/core/src/store.rs renderer/app/05-pane2.js renderer/app/14-lists.js renderer/app/31-sync.js experiments/tauri-app/core/tests/chapter_missing.rs test/tauri-chapter-read.test.js
+          git diff --cached --check
+          git commit -m 'fix(storage): report missing chapters and preserve editors on reload failure'
+          git push origin HEAD:refs/heads/experiment/tauri-rust-finish
