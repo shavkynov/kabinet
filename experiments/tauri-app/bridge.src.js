@@ -129,13 +129,7 @@ const { nameRegex, isCapital } = require('../../src/namematch');
     readSound: async (s, f) => fromB64(await call('sounds:read', s, f)),
     addSounds: (s) => call('sounds:add', s),
     removeSound: (s, f) => call('sounds:remove', s, f),
-    cardIndex: async () => {
-      const list = await call('cards:index');
-      return list.map((c) => ({
-        ...c,
-        forms: c.inflect ? declension.nameForms(c.title, c.aliases, { kind: c.kind === 'item' ? 'place' : c.kind }) : [], // склонение остаётся на JS, как в Electron
-      }));
-    },
+    cardIndex: async () => call('cards:index'), // падежные формы `forms` считает Rust (declension.rs)
     cardMentions,
     readImage: (f) => call('image:read', f),
     pickImage: () => call('image:pick'),

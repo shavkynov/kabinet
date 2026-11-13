@@ -1052,7 +1052,7 @@ pub fn set_template(dir: &Path, kind: &str, names: Option<&Value>) -> R<Value> {
     Ok(view(dir, &meta))
 }
 
-/// Индекс карточек для подсветки имён в тексте. Падежные формы (`forms`) добавляет окно: склонение остаётся на JS.
+/// Индекс карточек для подсветки имён в тексте. Падежные формы (`forms`) считаются здесь, на Rust.
 pub fn card_index(dir: &Path) -> R<Value> {
     let meta = load_meta(dir)?;
     let mut out = Vec::new();
@@ -1072,11 +1072,19 @@ pub fn card_index(dir: &Path) -> R<Value> {
                     if (n == "общее описание" || n == "general description") && !v.is_empty() { short = v; break; }
                 }
             }
+            let title = item["title"].as_str().unwrap_or("").to_string();
+            let aliases: Vec<String> = card["aliases"].as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let inflect = card.get("inflect") != Some(&Value::Bool(false));
+            let decl_kind = if kind == "item" { "place" } else { kind };
+            let forms = if inflect { crate::declension::name_forms(&title, &aliases, decl_kind) } else { Vec::new() };
             out.push(json!({
                 "kind": kind, "id": id, "title": item["title"], "icon": item.get("icon").cloned().unwrap_or_else(|| json!("")),
                 "short": short.chars().take(400).collect::<String>(),
                 "aliases": card["aliases"], "ignore": card["ignore"], "image": card["image"],
-                "protagonist": card["protagonist"], "inflect": card.get("inflect") != Some(&Value::Bool(false)),
+                "protagonist": card["protagonist"], "inflect": inflect,
+                "forms": forms,
             }));
         }
     }

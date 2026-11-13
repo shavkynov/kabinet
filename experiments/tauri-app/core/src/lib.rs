@@ -4,6 +4,7 @@ pub mod backup;
 pub mod check;
 pub mod davapi;
 pub mod davlink;
+pub mod declension;
 pub mod dict;
 pub mod export;
 pub mod exporttarget;
