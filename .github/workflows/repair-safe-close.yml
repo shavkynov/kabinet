@@ -2,7 +2,7 @@ name: Проверка безопасного закрытия Tauri
 on:
   push:
     branches: [experiment/tauri-rust-finish]
-    paths: ['.github/workflows/repair-safe-close.yml']
+    paths: ['.github/workflows/repair-safe-close.yml', 'test/save-failure.test.js']
 permissions:
   contents: write
 concurrency:
@@ -402,7 +402,7 @@ jobs:
       - name: Установить зависимости интерфейса
         run: npm ci
       - name: Новые и предыдущие регрессионные тесты
-        run: node --test test/tauri-safe-close.test.js test/tauri-chapter-read.test.js
+        run: node --test test/save-failure.test.js test/tauri-safe-close.test.js test/tauri-chapter-read.test.js
       - name: Основные JavaScript-тесты
         run: npm test
       - name: Проверка исходников

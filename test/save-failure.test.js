@@ -23,7 +23,8 @@ function setup() {
     setTimeout: () => 0, clearTimeout() {},
     isTextKind: () => true, getMarkdown: () => ctx.editor, cardView: { toJSON: () => '{}' },
     noteSyncConflict() {}, refreshIndex() {}, refreshCommentAnchors() {},
-    flushNote: async () => {}, flushComments: async () => {}, flushChapMeta: async () => {}, flushPane2: async () => {},
+    // Успешное сохранение, в том числе без изменений, подтверждается явным true.
+    flushNote: async () => true, flushComments: async () => true, flushChapMeta: async () => true, flushPane2: async () => true,
     SAVE_DELAY_MS: 1500,
   };
   vm.createContext(ctx);
