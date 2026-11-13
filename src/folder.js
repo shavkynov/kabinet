@@ -175,6 +175,11 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
   }
 
   const readLocal = (rel) => new Uint8Array(fs.readFileSync(path.join(dir, rel)));
+  // Хэш локального файла на диске; undefined, если файла уже нет. Нужен, чтобы заметить сохранение,
+  // случившееся после снятия снимка walkLocal, но до обработки файла в проходе.
+  const localHash = (rel) => {
+    try { return hashBytes(readLocal(rel)); } catch { return undefined; }
+  };
 
   /** Чужую версию наружу не выбрасываем: складываем её в «Конфликты» и локально, и в папке. */
   async function keepForeign(rel, bytes, label) {
@@ -324,60 +329,73 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     }
 
     for (const rel of rels) {
-      const r = remote.has(rel) ? remote.get(rel).hash : undefined;
-      const l = local.get(rel);
-      const b = state[rel];
-      if (r === undefined && l === undefined) { delete state[rel]; continue; }
-      if (r !== undefined && r === l) { state[rel] = r; continue; }
+      // Решение по файлу принимаем заново, если перечитывание локального файла показало, что снимок l
+      // устарел (сохранение во время прохода). Внутренний цикл завершается на каждой обычной ветке.
+      for (;;) {
+        const r = remote.has(rel) ? remote.get(rel).hash : undefined;
+        const l = local.get(rel);
+        const b = state[rel];
+        if (r === undefined && l === undefined) { delete state[rel]; break; }
+        if (r !== undefined && r === l) { state[rel] = r; break; }
 
-      if (r !== undefined && l !== undefined) {
-        if (b === r) { await adapter.write(rel, readLocal(rel)); state[rel] = l; res.pushed.push(rel); continue; }
-        if (b === l) {
-          writeFileAtomic(path.join(dir, rel), Buffer.from(await remoteBytes(remote.get(rel), rel)));
-          state[rel] = r;
-          res.pulled.push(rel);
-          continue;
+        if (r !== undefined && l !== undefined) {
+          if (b === r) { await adapter.write(rel, readLocal(rel)); state[rel] = l; res.pushed.push(rel); break; }
+          if (b === l) {
+            // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
+            // перечитаем его: сохранение во время этого прохода уже изменило файл (без await между проверкой и записью).
+            const foreign = await remoteBytes(remote.get(rel), rel);
+            const fresh = localHash(rel);
+            if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
+            writeFileAtomic(path.join(dir, rel), Buffer.from(foreign));
+            state[rel] = r;
+            res.pulled.push(rel);
+            break;
+          }
+          const foreign = await remoteBytes(remote.get(rel), rel);
+          await keepForeign(rel, foreign, labelOf(rel));
+          const withWords = rel === 'project.json' ? dictLib.mergeMetaWords(readLocal(rel), foreign) : null; // слова, добавленные на другом устройстве, не теряем
+          if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
+          await adapter.write(rel, readLocal(rel));
+          state[rel] = withWords ? hashBytes(withWords) : l;
+          res.pushed.push(rel);
+          res.conflicts.push(rel);
+          break;
         }
-        const foreign = await remoteBytes(remote.get(rel), rel);
-        await keepForeign(rel, foreign, labelOf(rel));
-        const withWords = rel === 'project.json' ? dictLib.mergeMetaWords(readLocal(rel), foreign) : null; // слова, добавленные на другом устройстве, не теряем
-        if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
-        await adapter.write(rel, readLocal(rel));
-        state[rel] = withWords ? hashBytes(withWords) : l;
-        res.pushed.push(rel);
-        res.conflicts.push(rel);
-        continue;
-      }
 
-      if (r !== undefined) { // снаружи есть, у нас нет
-        if (b === undefined) {
-          const target = path.join(dir, rel);
-          fs.mkdirSync(path.dirname(target), { recursive: true });
-          writeFileAtomic(target, Buffer.from(await remoteBytes(remote.get(rel), rel)));
-          state[rel] = r;
-          res.pulled.push(rel);
-        } else {
-          if (r !== b) await keepForeign(rel, await remoteBytes(remote.get(rel), rel), labelOf(rel));
+        if (r !== undefined) { // снаружи есть, у нас нет
+          if (b === undefined) {
+            const target = path.join(dir, rel);
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            writeFileAtomic(target, Buffer.from(await remoteBytes(remote.get(rel), rel)));
+            state[rel] = r;
+            res.pulled.push(rel);
+          } else {
+            if (r !== b) await keepForeign(rel, await remoteBytes(remote.get(rel), rel), labelOf(rel));
+            try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
+            delete state[rel];
+            res.pulled.push(rel);
+          }
+          break;
+        }
+
+        // у нас есть, снаружи нет
+        if (b === undefined) { // создали у нас: отправляем
+          const parent = path.dirname(rel);
+          if (parent !== '.') await adapter.mkdir(parent);
+          await adapter.write(rel, readLocal(rel));
+          state[rel] = l;
+          res.pushed.push(rel);
+        } else if (l === b) { // удалили на другом устройстве и мы не правили: убираем у себя
+          // Перед удалением перечитаем файл: сохранение во время прохода могло изменить его.
+          const fresh = localHash(rel);
+          if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
           try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
           delete state[rel];
           res.pulled.push(rel);
+        } else { // снаружи удалили, а мы правили: свой текст остаётся и уйдёт наружу при выгрузке
+          res.conflicts.push(rel);
         }
-        continue;
-      }
-
-      // у нас есть, снаружи нет
-      if (b === undefined) { // создали у нас: отправляем
-        const parent = path.dirname(rel);
-        if (parent !== '.') await adapter.mkdir(parent);
-        await adapter.write(rel, readLocal(rel));
-        state[rel] = l;
-        res.pushed.push(rel);
-      } else if (l === b) { // удалили на другом устройстве и мы не правили: убираем у себя
-        try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
-        delete state[rel];
-        res.pulled.push(rel);
-      } else { // снаружи удалили, а мы правили: свой текст остаётся и уйдёт наружу при выгрузке
-        res.conflicts.push(rel);
+        break;
       }
     }
 
