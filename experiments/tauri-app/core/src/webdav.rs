@@ -33,10 +33,12 @@ pub struct UreqHttp {
 }
 
 impl UreqHttp {
-    pub fn new() -> Self {
+    pub fn new() -> Self { Self::with_timeout(120) }
+
+    pub fn with_timeout(secs: u64) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(15))
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(secs))
             .redirects(0)
             .build();
         UreqHttp { agent }

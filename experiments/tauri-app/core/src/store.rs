@@ -799,6 +799,20 @@ pub fn count_chars(md: &str) -> usize {
     out.chars().filter(|c| *c != '*' && *c != '_').map(|c| c.len_utf16()).sum()
 }
 
+/// Слова личного словаря проекта; None, если у проекта своего списка ещё нет.
+pub fn project_words(dir: &Path) -> R<Option<Vec<String>>> {
+    let meta = load_meta(dir)?;
+    Ok(meta.get("words").and_then(|w| w.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()))
+}
+
+pub fn set_project_words(dir: &Path, words: &[String]) -> R<Vec<String>> {
+    let mut meta = load_meta(dir)?;
+    let clean = crate::dict::clean_words(&words.iter().map(|w| Value::String(w.clone())).collect::<Vec<_>>());
+    meta.insert("words".into(), json!(clean));
+    save_meta(dir, &meta)?;
+    Ok(clean)
+}
+
 pub fn project_stats(dir: &Path) -> R<Value> {
     let meta = load_meta(dir)?;
     let mut total = 0usize;

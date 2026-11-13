@@ -94,17 +94,7 @@ pub struct SyncResult {
 
 // ---------- слова словаря (src/dict.js) ----------
 
-fn clean_words(raw: &[Value]) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for x in raw {
-        let w = x.as_str().map(|s| s.trim().to_string()).unwrap_or_default();
-        if w.is_empty() || w.encode_utf16().count() > 80 || w.chars().any(|c| (c as u32) < 0x20) || !seen.insert(w.clone()) { continue; }
-        out.push(w);
-        if out.len() >= 5000 { break; }
-    }
-    out
-}
+use crate::dict::clean_words;
 
 /// Слова, добавленные на другом устройстве, не теряем. Новый текст нашего project.json или None.
 pub fn merge_meta_words(local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {

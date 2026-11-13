@@ -4,6 +4,7 @@
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
 use kabinet_core::{backup, export, exporttarget, import, searchreplace, store};
+use kabinet_core::check::CheckApi;
 use kabinet_core::webdav::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -239,12 +240,23 @@ async fn pick_folder(title: &str) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, Arc<DavApi>>, channel: String, args: Vec<Value>) -> Result<Value, String> {
+async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, Arc<DavApi>>, chk: State<'_, Arc<CheckApi>>, channel: String, args: Vec<Value>) -> Result<Value, String> {
     let a = &args;
     let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
-        "app:setLang" | "ui:setTheme" | "app:about" => Ok(json!(true)),
+        "app:setLang" => { chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
+        "ui:setTheme" | "app:about" => Ok(json!(true)),
+        c if c.starts_with("check:") => {
+            let op = c["check:".len()..].to_string();
+            let chk: Arc<CheckApi> = chk.inner().clone();
+            let cur = state.current.lock().map_err(|_| "Внутренняя ошибка состояния.".to_string())?.clone();
+            let args = args.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let h = app.clone();
+                chk.call(&op, &args, cur.as_deref(), &move |done, total| { let _ = h.emit("check:progress", json!({ "done": done, "total": total })); })
+            }).await.map_err(|e| e.to_string())?
+        }
         "recents:list" => Ok(store::recents_list(&recents_file(&app)?)),
         "recents:remove" => { store::recents_remove(&recents_file(&app)?, &arg_str(a, 0)?)?; Ok(json!(true)) }
         "project:current" => match state.current.lock().map_err(|_| "Внутренняя ошибка состояния.".to_string())?.clone() {
@@ -437,6 +449,7 @@ fn main() {
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
                 Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);
             app.manage(Arc::new(DavApi::new(link)));
+            app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(45)) as Box<dyn Http>))));
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.
             let h = app.handle().clone();

@@ -1,8 +1,10 @@
 //! Ядро Кабинета без оболочки окна: хранение проекта, WebDAV, синхронизация с папкой.
 //! Всё здесь проверяется обычными тестами `cargo test`, без Tauri и без сети.
 pub mod backup;
+pub mod check;
 pub mod davapi;
 pub mod davlink;
+pub mod dict;
 pub mod export;
 pub mod exporttarget;
 pub mod foldersync;

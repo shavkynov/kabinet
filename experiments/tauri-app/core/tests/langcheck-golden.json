@@ -1,0 +1,757 @@
+{
+ "paras": [
+  "Привет мир",
+  "",
+  "   ",
+  "Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье?",
+  "Ещё абзац 😀 с эмодзи и словом",
+  "Последний"
+ ],
+ "max": 120,
+ "chunks": [
+  {
+   "text": "Привет мир\n",
+   "parts": [
+    {
+     "para": 0,
+     "start": 0,
+     "len": 10,
+     "off": 0
+    }
+   ]
+  },
+  {
+   "text": "Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье?\n",
+   "parts": [
+    {
+     "para": 3,
+     "start": 0,
+     "len": 115,
+     "off": 0
+    }
+   ]
+  },
+  {
+   "text": " Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье?\n",
+   "parts": [
+    {
+     "para": 3,
+     "start": 115,
+     "len": 116,
+     "off": 0
+    }
+   ]
+  },
+  {
+   "text": " Первое предложение тут. Второе предложение здесь! Третье? Первое предложение тут. Второе предложение здесь! Третье?\n",
+   "parts": [
+    {
+     "para": 3,
+     "start": 231,
+     "len": 116,
+     "off": 0
+    }
+   ]
+  },
+  {
+   "text": "Ещё абзац 😀 с эмодзи и словом\nПоследний\n",
+   "parts": [
+    {
+     "para": 4,
+     "start": 0,
+     "len": 30,
+     "off": 0
+    },
+    {
+     "para": 5,
+     "start": 0,
+     "len": 9,
+     "off": 31
+    }
+   ]
+  }
+ ],
+ "matches": [
+  [
+   {
+    "offset": 0,
+    "length": 6,
+    "message": "Ошибка",
+    "shortMessage": "Орф",
+    "rule": {
+     "id": "MORFOLOGIK_RULE_RU_RU",
+     "category": {
+      "id": "TYPOS"
+     },
+     "issueType": "misspelling"
+    },
+    "replacements": [
+     {
+      "value": "Привет"
+     },
+     {
+      "value": "Привет"
+     },
+     {
+      "value": "а"
+     },
+     {
+      "value": "б"
+     },
+     {
+      "value": "в"
+     },
+     {
+      "value": "г"
+     },
+     {
+      "value": "д"
+     },
+     {
+      "value": "е"
+     }
+    ]
+   },
+   {
+    "offset": 7,
+    "length": 3,
+    "message": "Запятая",
+    "rule": {
+     "id": "COMMA_PARENTHETICAL",
+     "category": {
+      "id": "MISC"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 9,
+    "length": 1,
+    "message": "Пробел",
+    "rule": {
+     "id": "X",
+     "category": {
+      "id": "TYPOGRAPHY"
+     }
+    },
+    "replacements": [
+     {
+      "value": "—"
+     }
+    ]
+   },
+   {
+    "offset": 3,
+    "length": 0,
+    "message": "пусто",
+    "rule": {
+     "id": "Z",
+     "category": {
+      "id": "GRAMMAR"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 10,
+    "length": 1,
+    "message": "перенос",
+    "rule": {
+     "id": "S",
+     "category": {
+      "id": "STYLE"
+     }
+    },
+    "replacements": []
+   }
+  ],
+  [
+   {
+    "offset": 0,
+    "length": 6,
+    "message": "Ошибка",
+    "shortMessage": "Орф",
+    "rule": {
+     "id": "MORFOLOGIK_RULE_RU_RU",
+     "category": {
+      "id": "TYPOS"
+     },
+     "issueType": "misspelling"
+    },
+    "replacements": [
+     {
+      "value": "Привет"
+     },
+     {
+      "value": "Первое"
+     },
+     {
+      "value": "а"
+     },
+     {
+      "value": "б"
+     },
+     {
+      "value": "в"
+     },
+     {
+      "value": "г"
+     },
+     {
+      "value": "д"
+     },
+     {
+      "value": "е"
+     }
+    ]
+   },
+   {
+    "offset": 7,
+    "length": 3,
+    "message": "Запятая",
+    "rule": {
+     "id": "COMMA_PARENTHETICAL",
+     "category": {
+      "id": "MISC"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 20,
+    "length": 1,
+    "message": "Пробел",
+    "rule": {
+     "id": "X",
+     "category": {
+      "id": "TYPOGRAPHY"
+     }
+    },
+    "replacements": [
+     {
+      "value": "—"
+     }
+    ]
+   },
+   {
+    "offset": 3,
+    "length": 0,
+    "message": "пусто",
+    "rule": {
+     "id": "Z",
+     "category": {
+      "id": "GRAMMAR"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 115,
+    "length": 1,
+    "message": "перенос",
+    "rule": {
+     "id": "S",
+     "category": {
+      "id": "STYLE"
+     }
+    },
+    "replacements": []
+   }
+  ],
+  [
+   {
+    "offset": 0,
+    "length": 6,
+    "message": "Ошибка",
+    "shortMessage": "Орф",
+    "rule": {
+     "id": "MORFOLOGIK_RULE_RU_RU",
+     "category": {
+      "id": "TYPOS"
+     },
+     "issueType": "misspelling"
+    },
+    "replacements": [
+     {
+      "value": "Привет"
+     },
+     {
+      "value": " Перво"
+     },
+     {
+      "value": "а"
+     },
+     {
+      "value": "б"
+     },
+     {
+      "value": "в"
+     },
+     {
+      "value": "г"
+     },
+     {
+      "value": "д"
+     },
+     {
+      "value": "е"
+     }
+    ]
+   },
+   {
+    "offset": 7,
+    "length": 3,
+    "message": "Запятая",
+    "rule": {
+     "id": "COMMA_PARENTHETICAL",
+     "category": {
+      "id": "MISC"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 20,
+    "length": 1,
+    "message": "Пробел",
+    "rule": {
+     "id": "X",
+     "category": {
+      "id": "TYPOGRAPHY"
+     }
+    },
+    "replacements": [
+     {
+      "value": "—"
+     }
+    ]
+   },
+   {
+    "offset": 3,
+    "length": 0,
+    "message": "пусто",
+    "rule": {
+     "id": "Z",
+     "category": {
+      "id": "GRAMMAR"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 116,
+    "length": 1,
+    "message": "перенос",
+    "rule": {
+     "id": "S",
+     "category": {
+      "id": "STYLE"
+     }
+    },
+    "replacements": []
+   }
+  ],
+  [
+   {
+    "offset": 0,
+    "length": 6,
+    "message": "Ошибка",
+    "shortMessage": "Орф",
+    "rule": {
+     "id": "MORFOLOGIK_RULE_RU_RU",
+     "category": {
+      "id": "TYPOS"
+     },
+     "issueType": "misspelling"
+    },
+    "replacements": [
+     {
+      "value": "Привет"
+     },
+     {
+      "value": " Перво"
+     },
+     {
+      "value": "а"
+     },
+     {
+      "value": "б"
+     },
+     {
+      "value": "в"
+     },
+     {
+      "value": "г"
+     },
+     {
+      "value": "д"
+     },
+     {
+      "value": "е"
+     }
+    ]
+   },
+   {
+    "offset": 7,
+    "length": 3,
+    "message": "Запятая",
+    "rule": {
+     "id": "COMMA_PARENTHETICAL",
+     "category": {
+      "id": "MISC"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 20,
+    "length": 1,
+    "message": "Пробел",
+    "rule": {
+     "id": "X",
+     "category": {
+      "id": "TYPOGRAPHY"
+     }
+    },
+    "replacements": [
+     {
+      "value": "—"
+     }
+    ]
+   },
+   {
+    "offset": 3,
+    "length": 0,
+    "message": "пусто",
+    "rule": {
+     "id": "Z",
+     "category": {
+      "id": "GRAMMAR"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 116,
+    "length": 1,
+    "message": "перенос",
+    "rule": {
+     "id": "S",
+     "category": {
+      "id": "STYLE"
+     }
+    },
+    "replacements": []
+   }
+  ],
+  [
+   {
+    "offset": 0,
+    "length": 6,
+    "message": "Ошибка",
+    "shortMessage": "Орф",
+    "rule": {
+     "id": "MORFOLOGIK_RULE_RU_RU",
+     "category": {
+      "id": "TYPOS"
+     },
+     "issueType": "misspelling"
+    },
+    "replacements": [
+     {
+      "value": "Привет"
+     },
+     {
+      "value": "Ещё аб"
+     },
+     {
+      "value": "а"
+     },
+     {
+      "value": "б"
+     },
+     {
+      "value": "в"
+     },
+     {
+      "value": "г"
+     },
+     {
+      "value": "д"
+     },
+     {
+      "value": "е"
+     }
+    ]
+   },
+   {
+    "offset": 7,
+    "length": 3,
+    "message": "Запятая",
+    "rule": {
+     "id": "COMMA_PARENTHETICAL",
+     "category": {
+      "id": "MISC"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 20,
+    "length": 1,
+    "message": "Пробел",
+    "rule": {
+     "id": "X",
+     "category": {
+      "id": "TYPOGRAPHY"
+     }
+    },
+    "replacements": [
+     {
+      "value": "—"
+     }
+    ]
+   },
+   {
+    "offset": 3,
+    "length": 0,
+    "message": "пусто",
+    "rule": {
+     "id": "Z",
+     "category": {
+      "id": "GRAMMAR"
+     }
+    },
+    "replacements": []
+   },
+   {
+    "offset": 40,
+    "length": 1,
+    "message": "перенос",
+    "rule": {
+     "id": "S",
+     "category": {
+      "id": "STYLE"
+     }
+    },
+    "replacements": []
+   }
+  ]
+ ],
+ "mapped": [
+  [
+   {
+    "para": 0,
+    "offset": 0,
+    "length": 6,
+    "text": "Привет",
+    "message": "Ошибка",
+    "short": "Орф",
+    "ruleId": "MORFOLOGIK_RULE_RU_RU",
+    "kind": "spelling",
+    "replacements": [
+     "а",
+     "б",
+     "в",
+     "г"
+    ]
+   },
+   {
+    "para": 0,
+    "offset": 7,
+    "length": 3,
+    "text": "мир",
+    "message": "Запятая",
+    "short": "",
+    "ruleId": "COMMA_PARENTHETICAL",
+    "kind": "punctuation",
+    "replacements": []
+   },
+   {
+    "para": 0,
+    "offset": 9,
+    "length": 1,
+    "text": "р",
+    "message": "Пробел",
+    "short": "",
+    "ruleId": "X",
+    "kind": "typography",
+    "replacements": [
+     "—"
+    ]
+   }
+  ],
+  [
+   {
+    "para": 3,
+    "offset": 0,
+    "length": 6,
+    "text": "Первое",
+    "message": "Ошибка",
+    "short": "Орф",
+    "ruleId": "MORFOLOGIK_RULE_RU_RU",
+    "kind": "spelling",
+    "replacements": [
+     "Привет",
+     "а",
+     "б",
+     "в",
+     "г"
+    ]
+   },
+   {
+    "para": 3,
+    "offset": 7,
+    "length": 3,
+    "text": "пре",
+    "message": "Запятая",
+    "short": "",
+    "ruleId": "COMMA_PARENTHETICAL",
+    "kind": "punctuation",
+    "replacements": []
+   },
+   {
+    "para": 3,
+    "offset": 20,
+    "length": 1,
+    "text": "у",
+    "message": "Пробел",
+    "short": "",
+    "ruleId": "X",
+    "kind": "typography",
+    "replacements": [
+     "—"
+    ]
+   }
+  ],
+  [
+   {
+    "para": 3,
+    "offset": 115,
+    "length": 6,
+    "text": " Перво",
+    "message": "Ошибка",
+    "short": "Орф",
+    "ruleId": "MORFOLOGIK_RULE_RU_RU",
+    "kind": "spelling",
+    "replacements": [
+     "Привет",
+     "а",
+     "б",
+     "в",
+     "г"
+    ]
+   },
+   {
+    "para": 3,
+    "offset": 122,
+    "length": 3,
+    "text": " пр",
+    "message": "Запятая",
+    "short": "",
+    "ruleId": "COMMA_PARENTHETICAL",
+    "kind": "punctuation",
+    "replacements": []
+   },
+   {
+    "para": 3,
+    "offset": 135,
+    "length": 1,
+    "text": "т",
+    "message": "Пробел",
+    "short": "",
+    "ruleId": "X",
+    "kind": "typography",
+    "replacements": [
+     "—"
+    ]
+   }
+  ],
+  [
+   {
+    "para": 3,
+    "offset": 231,
+    "length": 6,
+    "text": " Перво",
+    "message": "Ошибка",
+    "short": "Орф",
+    "ruleId": "MORFOLOGIK_RULE_RU_RU",
+    "kind": "spelling",
+    "replacements": [
+     "Привет",
+     "а",
+     "б",
+     "в",
+     "г"
+    ]
+   },
+   {
+    "para": 3,
+    "offset": 238,
+    "length": 3,
+    "text": " пр",
+    "message": "Запятая",
+    "short": "",
+    "ruleId": "COMMA_PARENTHETICAL",
+    "kind": "punctuation",
+    "replacements": []
+   },
+   {
+    "para": 3,
+    "offset": 251,
+    "length": 1,
+    "text": "т",
+    "message": "Пробел",
+    "short": "",
+    "ruleId": "X",
+    "kind": "typography",
+    "replacements": [
+     "—"
+    ]
+   }
+  ],
+  [
+   {
+    "para": 4,
+    "offset": 0,
+    "length": 6,
+    "text": "Ещё аб",
+    "message": "Ошибка",
+    "short": "Орф",
+    "ruleId": "MORFOLOGIK_RULE_RU_RU",
+    "kind": "spelling",
+    "replacements": [
+     "Привет",
+     "а",
+     "б",
+     "в",
+     "г"
+    ]
+   },
+   {
+    "para": 4,
+    "offset": 7,
+    "length": 3,
+    "text": "ац ",
+    "message": "Запятая",
+    "short": "",
+    "ruleId": "COMMA_PARENTHETICAL",
+    "kind": "punctuation",
+    "replacements": []
+   },
+   {
+    "para": 4,
+    "offset": 20,
+    "length": 1,
+    "text": "и",
+    "message": "Пробел",
+    "short": "",
+    "ruleId": "X",
+    "kind": "typography",
+    "replacements": [
+     "—"
+    ]
+   }
+  ]
+ ]
+}

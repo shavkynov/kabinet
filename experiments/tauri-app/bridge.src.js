@@ -123,6 +123,7 @@ const declension = require('../../src/declension');
   };
   for (const [name, event] of Object.entries(MENU)) window.kabinet[name] = subscribeVoid(event);
   window.kabinet.onSetLang = subscribe('ui:setLang');
+  window.kabinet.onCheckProgress = subscribe('check:progress');
   window.kabinet.onDavEvent = subscribe('dav:event');
   window.kabinet.onExternalChange = subscribe('sync:changed');
 })();
