@@ -4,6 +4,12 @@ version = "0.38.0"
 edition = "2021"
 publish = false
 
+[features]
+# Plain cargo builds must use the same embedded-frontend protocol as CI.
+# Development builds that need the dev protocol can use --no-default-features.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
