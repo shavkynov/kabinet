@@ -157,10 +157,22 @@ pub fn restore_backup(dir: &Path, root: &Path, name: &str) -> R<Vec<String>> {
             return Err("Не удалось сохранить текущее состояние перед восстановлением. Восстановление остановлено, ничего не изменено.".into());
         }
     }
+    // Журнал для отката: прежнее содержимое каждого файла (None — файла не было).
+    let mut journal: Vec<(String, Option<Vec<u8>>)> = Vec::new();
     let mut restored = Vec::new();
     for rel in &files {
         let bytes = fs::read(backup.join(rel)).map_err(|e| format!("Не удалось прочитать «{}» из копии: {}. Восстановление остановлено.", rel, e))?;
-        crate::store::write_atomic_bytes(&dir.join(rel), &bytes)?;
+        journal.push((rel.clone(), fs::read(dir.join(rel)).ok()));
+        if let Err(e) = crate::store::write_atomic_bytes(&dir.join(rel), &bytes) {
+            // Откат: возвращаем уже записанные файлы к прежнему содержимому (журналируемый откат).
+            for (r, orig) in journal.iter().rev() {
+                match orig {
+                    Some(b) => { let _ = crate::store::write_atomic_bytes(&dir.join(r), b); }
+                    None => { let _ = fs::remove_file(dir.join(r)); }
+                }
+            }
+            return Err(format!("Не удалось записать «{}»: {}. Восстановление откачено, файлы прежние.", rel, e));
+        }
         restored.push(rel.replace('\\', "/"));
     }
     Ok(restored)
@@ -295,6 +307,23 @@ mod tests {
         assert!(!b.join("Корзина").exists(), "Корзина не копируется");
         assert!(!b.join("kabinet.lock").exists(), "замок не копируется");
         assert!(b.join("Главы/a.md").exists(), "главы копируются");
+    }
+
+    #[test]
+    fn restore_rolls_back_when_a_write_fails() {
+        let dir = tmpdir("restore-rollback").join("p");
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("Главы/a.md"), "исходный").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        let name = make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        // автор изменил метаданные, а главу заменил папкой (запись в неё не удастся)
+        fs::write(dir.join("project.json"), "{\"changed\":true}").unwrap();
+        fs::remove_file(dir.join("Главы/a.md")).unwrap();
+        fs::create_dir_all(dir.join("Главы/a.md")).unwrap();
+        let res = restore_backup(&dir, &root, &name);
+        assert!(res.is_err(), "сбой записи должен возвращать ошибку");
+        assert_eq!(fs::read_to_string(dir.join("project.json")).unwrap(), "{\"changed\":true}", "записанный файл откачен к прежнему");
     }
 
     #[cfg(windows)]
