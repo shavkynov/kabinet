@@ -22,8 +22,13 @@ mod meta_base {
     pub fn remember(path: &Path, hash: String) {
         BASE.with(|b| { b.borrow_mut().insert(path.to_path_buf(), hash); });
     }
-    pub fn take(path: &Path) -> Option<String> {
-        BASE.with(|b| b.borrow_mut().remove(path))
+    /// Читает базу, не удаляя: при отказе сохранения она нужна для повтора.
+    pub fn peek(path: &Path) -> Option<String> {
+        BASE.with(|b| b.borrow().get(path).cloned())
+    }
+    /// Снимает базу только после подтверждённой записи.
+    pub fn forget(path: &Path) {
+        BASE.with(|b| { b.borrow_mut().remove(path); });
     }
 }
 
@@ -416,7 +421,8 @@ pub fn save_meta(dir: &Path, meta: &Map<String, Value>) -> R<()> {
     let _guard = sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
     // Защита от затирания: сохраняем, только если на диске всё ещё версия, которую читали.
     // Если проход синхронизации успел скачать чужую версию — её кладём в «Конфликты», а не теряем.
-    if let Some(base) = meta_base::take(&p) {
+    // База остаётся, пока запись не подтверждена: при ошибке архивации или записи повтор снова сверит версию.
+    if let Some(base) = meta_base::peek(&p) {
         match fs::read(&p) {
             Ok(bytes) => {
                 let current = String::from_utf8_lossy(&bytes).into_owned();
@@ -438,7 +444,9 @@ pub fn save_meta(dir: &Path, meta: &Map<String, Value>) -> R<()> {
         }
     }
     if p.exists() { let _ = fs::copy(&p, format!("{}.bak", p.display())); }
-    write_atomic(&p, &text)
+    write_atomic(&p, &text)?;
+    meta_base::forget(&p);
+    Ok(())
 }
 
 fn items_view(meta: &Map<String, Value>, list: &str) -> Value {
