@@ -131,6 +131,41 @@ pub fn verify_backup(root: &Path, name: &str) -> R<bool> {
     Ok(computed == stored.trim())
 }
 
+/// Восстановить файлы из проверенной копии в проект. Копия сначала проверяется, текущее состояние
+/// сохраняется страховочной копией, файлы, которых в копии нет, не удаляются (новая работа не теряется).
+/// Возвращает список восстановленных путей. MVP: без атомарного переключения и координации с синхронизацией.
+pub fn restore_backup(dir: &Path, root: &Path, name: &str) -> R<Vec<String>> {
+    if !verify_backup(root, name)? {
+        return Err(format!("Копия «{}» повреждена. Восстановление остановлено, ничего не изменено.", name));
+    }
+    let backup = root.join(name);
+    let mut files = Vec::new();
+    list_files(&backup, Path::new(""), &mut files)?;
+    files.sort();
+    // Страховка: текущее состояние должно быть сохранено до изменений. Если make_backup вернул None
+    // (совпадает с последней копией), убеждаемся, что последняя копия соответствует текущему
+    // состоянию — иначе (имя копии совпало) восстановление не начинаем.
+    if make_backup(dir, root, None)?.is_none() {
+        let mut cur = Vec::new();
+        list_files(dir, Path::new(""), &mut cur)?;
+        cur.sort();
+        let sig = signature(dir, &cur)?;
+        let covered = list_backups(root).last()
+            .and_then(|last| fs::read_to_string(root.join(last).join(".sig")).ok())
+            .map(|s| s.trim() == sig).unwrap_or(false);
+        if !covered {
+            return Err("Не удалось сохранить текущее состояние перед восстановлением. Восстановление остановлено, ничего не изменено.".into());
+        }
+    }
+    let mut restored = Vec::new();
+    for rel in &files {
+        let bytes = fs::read(backup.join(rel)).map_err(|e| format!("Не удалось прочитать «{}» из копии: {}. Восстановление остановлено.", rel, e))?;
+        crate::store::write_atomic_bytes(&dir.join(rel), &bytes)?;
+        restored.push(rel.replace('\\', "/"));
+    }
+    Ok(restored)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,6 +245,26 @@ mod tests {
         let name2 = make_backup(&dir, &root, Some("2026-01-01 10-00-01")).unwrap().unwrap();
         fs::remove_file(root.join(&name2).join(".sig")).unwrap();
         assert!(verify_backup(&root, &name2).is_err(), "без .sig целостность нельзя подтвердить");
+    }
+
+    #[test]
+    fn restore_verified_backup_keeps_newer_files() {
+        let dir = tmpdir("restore").join("p");
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("Главы/a.md"), "исходный").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        let name = make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        // автор испортил главу и добавил новую
+        fs::write(dir.join("Главы/a.md"), "испорчено").unwrap();
+        fs::write(dir.join("Главы/b.md"), "новая").unwrap();
+        let restored = restore_backup(&dir, &root, &name).unwrap();
+        assert!(restored.contains(&"Главы/a.md".to_string()));
+        assert_eq!(fs::read_to_string(dir.join("Главы/a.md")).unwrap(), "исходный");
+        assert_eq!(fs::read_to_string(dir.join("Главы/b.md")).unwrap(), "новая", "новая работа не потеряна");
+        // повреждённая копия не восстанавливается
+        fs::write(root.join(&name).join("Главы/a.md"), "порча").unwrap();
+        assert!(restore_backup(&dir, &root, &name).is_err(), "повреждённая копия не должна восстанавливаться");
     }
 
     #[cfg(windows)]
