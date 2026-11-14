@@ -168,11 +168,18 @@ pub(crate) mod sync_hook {
     thread_local! {
         static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
         static REMOTE_HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+        static REMOTE_AFTER_HOOK: RefCell<Option<Hook>> = RefCell::new(None);
     }
     /// Вторая точка: в write_checked перед проверкой версии в облаке (имитирует запись с другого устройства).
     pub fn set_remote<F: FnOnce() + 'static>(f: F) { REMOTE_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
     pub fn fire_remote() {
         let hook = REMOTE_HOOK.with(|h| h.borrow_mut().take());
+        if let Some(hook) = hook { hook(); }
+    }
+    /// Третья точка: в write_checked после проверки версии, перед самой записью (гонка создания).
+    pub fn set_remote_after<F: FnOnce() + 'static>(f: F) { REMOTE_AFTER_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
+    pub fn fire_remote_after() {
+        let hook = REMOTE_AFTER_HOOK.with(|h| h.borrow_mut().take());
         if let Some(hook) = hook { hook(); }
     }
     pub fn set<F: FnOnce() + 'static>(f: F) { HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
@@ -317,6 +324,25 @@ impl<T: Remote> FolderSync<T> {
             if Some(h.as_str()) != expect && h != hash_bytes(data) {
                 self.keep_foreign(rel, b, &label_of(rel))?;
                 if !res.conflicts.contains(&rel.to_string()) { res.conflicts.push(rel.to_string()); }
+            }
+        }
+        #[cfg(test)]
+        sync_hook::fire_remote_after();
+        if expect.is_none() {
+            // Файла, по нашим сведениям, ещё нет: пишем без перезаписи. Если другое устройство успело
+            // создать его между проверкой и записью, create это обнаружит и чужое не будет затёрто молча.
+            match self.remote.create(rel, data) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    if fresh.is_none() {
+                        if let Some(b) = self.remote.read(rel)? {
+                            if hash_bytes(&b) != hash_bytes(data) {
+                                self.keep_foreign(rel, &b, &label_of(rel))?;
+                                if !res.conflicts.contains(&rel.to_string()) { res.conflicts.push(rel.to_string()); }
+                            }
+                        }
+                    }
+                }
             }
         }
         self.remote.write(rel, data)
@@ -615,11 +641,9 @@ impl<T: Remote> FolderSync<T> {
             let bytes = match self.remote.read(rel) { Ok(b) => b, Err(_) => continue };
             let r = bytes.as_ref().map(|b| hash_bytes(b));
             if r.as_ref() == Some(&l) { self.state.insert(rel.clone(), l); continue; }
-            if let (Some(rh), Some(b)) = (&r, &bytes) {
-                if self.state.get(rel) != Some(rh) { self.keep_foreign(rel, b, &label_of(rel))?; res.conflicts.push(rel.clone()); }
-            }
-            if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
-            self.remote.write(rel, &data)?;
+            // Та же проверка версии и безопасная запись, что и в основном проходе: чужое не затирается
+            // молча, а новый файл создаётся без перезаписи (create-only).
+            self.write_checked(rel, &data, self.state.get(rel).cloned().as_deref(), &mut res)?;
             self.state.insert(rel.clone(), l);
             res.pushed.push(rel.clone());
         }
@@ -1215,6 +1239,21 @@ mod tests {
         assert!(a.join("Главы/aaaaaa.md").exists(), "неполный список не должен удалять локальную главу");
         assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "текст");
         assert!(res.pulled.is_empty(), "ничего не должно быть удалено: {:?}", res.pulled);
+    }
+
+    /// Гонка создания: пока мы проверяли файл, другое устройство создало его — не затираем чужое молча.
+    #[test]
+    fn push_new_file_does_not_overwrite_concurrent_creation() {
+        let s = FakeServer::new();
+        let a = tmpdir("race-new").join("p");
+        project(&a, &[("aaaaaa", "наш текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        let s2 = s.clone();
+        sync_hook::set_remote_after(move || { s2.put("Кабинет/Роман/Главы/aaaaaa.md", "чужой текст".as_bytes()); });
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()), "гонка создания должна дать конфликт");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "наш текст".as_bytes(), "наша версия записана");
+        assert!(s.names().iter().any(|n| n.contains("Конфликты") && s.get(n).as_deref() == Some("чужой текст".as_bytes())), "чужая версия сохранена: {:?}", s.names());
     }
 
     /// Папка-ссылка (junction) не должна обходиться: иначе в синхронизацию попадут файлы вне проекта.
