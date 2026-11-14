@@ -21,6 +21,8 @@ const PASS: Duration = Duration::from_secs(30);
 const PUSH_DELAY: Duration = Duration::from_secs(4);
 /// Время жизни замка синхронизации: заведомо больше разумного прохода.
 const LOCK_TTL_MS: i64 = 10 * 60 * 1000;
+/// Граница ожидания потока при остановке: закрытие окна не должно висеть на join без границы.
+const STOP_BOUND: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Acc {
@@ -77,7 +79,15 @@ struct Work {
     shared: Arc<Shared>,
     sync: Arc<Mutex<FolderSync<Rm>>>,
     thread: Option<JoinHandle<()>>,
+    done: Option<std::sync::mpsc::Receiver<()>>,
     _watcher: Option<notify::RecommendedWatcher>,
+}
+
+/// Ограниченное ожидание потока: если он не успел за `STOP_BOUND`, отцепляем его — он доделает
+/// текущий проход (состояние сохраняется в конце) и выйдет сам; закрытие окна не блокируется.
+fn join_bounded(w: &mut Work) {
+    let finished = w.done.take().map(|rx| rx.recv_timeout(STOP_BOUND).is_ok()).unwrap_or(true);
+    if let Some(t) = w.thread.take() { if finished { let _ = t.join(); } }
 }
 
 pub struct DavLink {
@@ -211,7 +221,7 @@ impl DavLink {
         let work = self.cur.lock().unwrap().take();
         if let Some(mut w) = work {
             w.shared.stop.store(true, Ordering::SeqCst);
-            if let Some(t) = w.thread.take() { let _ = t.join(); }
+            join_bounded(&mut w);
         }
     }
 
@@ -241,6 +251,7 @@ impl DavLink {
                 Err(_) => None, // без наблюдения остаётся таймер
             }
         };
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
         let thread = {
             let (sh, sy, ev, device) = (shared.clone(), sync.clone(), self.on_event.clone(), self.device.clone());
             std::thread::spawn(move || {
@@ -255,9 +266,10 @@ impl DavLink {
                         last_pass = Instant::now();
                     }
                 }
+                let _ = done_tx.send(());
             })
         };
-        *self.cur.lock().unwrap() = Some(Work { dir: dir.to_path_buf(), shared, sync, thread: Some(thread), _watcher: watcher });
+        *self.cur.lock().unwrap() = Some(Work { dir: dir.to_path_buf(), shared, sync, thread: Some(thread), done: Some(done_rx), _watcher: watcher });
         true
     }
 
@@ -268,7 +280,7 @@ impl DavLink {
         let work = self.cur.lock().unwrap().take();
         let Some(mut w) = work else { return };
         w.shared.stop.store(true, Ordering::SeqCst);
-        if let Some(t) = w.thread.take() { let _ = t.join(); }
+        join_bounded(&mut w);
     }
 
     pub fn status(&self, dir: Option<&Path>) -> Value {
@@ -488,6 +500,30 @@ mod tests {
     }
 
     #[test]
+    fn stop_gives_up_on_a_stuck_thread_within_bound() {
+        let s = FakeServer::new();
+        let d = link(&tmpdir("data-stop"), &s, Default::default());
+        let dir = tmpdir("proj");
+        let sync = d.folder_sync(&dir, &acc()).unwrap();
+        let (_tx, rx) = std::sync::mpsc::channel::<()>(); // сигнала не будет: поток «завис»
+        let handle = std::thread::spawn(|| std::thread::sleep(Duration::from_secs(12)));
+        *d.cur.lock().unwrap() = Some(Work {
+            dir: dir.clone(),
+            shared: Arc::new(Shared {
+                stop: AtomicBool::new(false), busy: AtomicBool::new(false),
+                dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
+            }),
+            sync: Arc::new(Mutex::new(sync)),
+            thread: Some(handle),
+            done: Some(rx),
+            _watcher: None,
+        });
+        let t = Instant::now();
+        d.stop();
+        assert!(t.elapsed() < Duration::from_secs(8), "stop не должен ждать зависший поток без границы: {:?}", t.elapsed());
+    }
+
+    #[test]
     fn open_remote_copies_project() {
         let s = FakeServer::new();
         let data = tmpdir("data");
@@ -571,6 +607,7 @@ mod tests {
             }),
             sync: Arc::new(Mutex::new(sync)),
             thread: None,
+            done: None,
             _watcher: None,
         });
         d.sync_now().unwrap();
