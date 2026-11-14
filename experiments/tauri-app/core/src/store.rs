@@ -18,6 +18,27 @@ pub(crate) fn sync_save_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// Тестовая точка синхронизации меты: срабатывает после чтения `project.json` и до изменения/сохранения.
+/// Живёт только в unit-тестах (`cfg(test)`): в обычной сборке и в интеграционных тестах её нет.
+/// Точка стоит ДО записи: локальная команда не удерживает `sync_save_lock` во время ожидания.
+#[cfg(test)]
+pub(crate) mod meta_hook {
+    use std::cell::RefCell;
+    type Hook = Box<dyn FnOnce()>;
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+    }
+    pub fn set<F: FnOnce() + 'static>(f: F) {
+        HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+    }
+    pub fn fire() {
+        let hook = HOOK.with(|h| h.borrow_mut().take());
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+}
+
 const META: &str = "project.json";
 const CHAPTERS_DIR: &str = "Главы";
 const TRASH_DIR: &str = "Корзина";
@@ -513,6 +534,8 @@ pub fn import_chapters(dir: &Path, items: &[(String, String)]) -> R<Value> {
 
 pub fn rename_chapter(dir: &Path, id: &str, title: &str) -> R<Value> {
     let mut meta = load_meta(dir)?;
+    #[cfg(test)]
+    meta_hook::fire(); // ТЕСТОВАЯ ТОЧКА: после чтения project.json, до изменения и сохранения
     let i = find_index(&meta, id)?;
     let t = clean_title(Some(&json!(title)));
     if !t.is_empty() { chapters_mut(&mut meta)[i]["title"] = json!(t); }
@@ -1304,4 +1327,326 @@ pub fn read_image(dir: &Path, file: &str) -> R<Value> {
 fn base64(data: &[u8]) -> String {
     use ::base64::Engine as _;
     ::base64::engine::general_purpose::STANDARD.encode(data)
+}
+
+#[cfg(test)]
+mod meta_race_tests {
+    use super::*;
+    use crate::foldersync::FolderSync;
+    use crate::remote::{Item, Remote};
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
+
+    const LOCAL_TITLE: &str = "Локальное переименование во время синхронизации";
+    const CLOUD_TITLE: &str = "Переименование с другого устройства";
+    const LOCAL_GOAL: i64 = 123;
+    /// Таймаут — страховка от бесконечного зависания, а не доказательство порядка.
+    /// Порядок доказывается каналами/барьерами и контрольным чтением файла между шагами.
+    const TIMEOUT: Duration = Duration::from_secs(10);
+
+    struct TempProject(PathBuf);
+
+    impl TempProject {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "kabinet-meta-race-{}-{:016x}",
+                std::process::id(),
+                rand::random::<u64>()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempProject {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Подставная папка. Для проверок правила (B2–B4) в ней есть точки прохода:
+    /// `wait_on_read_project` — проход ждёт здесь, пока локальная команда не завершится;
+    /// `signal_on_write_chapter` — проход сообщает здесь, что project.json уже записан.
+    #[derive(Default)]
+    struct HookRemote {
+        files: BTreeMap<String, Vec<u8>>,
+        wait_on_read_project: Option<Arc<Barrier>>,
+        wait_fired: bool,
+        signal_on_write_chapter: Option<Arc<Barrier>>,
+        signal_fired: bool,
+    }
+
+    impl Remote for HookRemote {
+        fn list(&mut self, rel: &str) -> R<Vec<Item>> {
+            let prefix = if rel.is_empty() { String::new() } else { format!("{rel}/") };
+            let mut entries = BTreeMap::new();
+            for (path, bytes) in &self.files {
+                let Some(tail) = path.strip_prefix(&prefix) else { continue };
+                if tail.is_empty() {
+                    continue;
+                }
+                let (name, dir) = match tail.split_once('/') {
+                    Some((name, _)) => (name, true),
+                    None => (tail, false),
+                };
+                entries.entry(name.to_string()).or_insert_with(|| Item {
+                    name: name.to_string(),
+                    dir,
+                    size: if dir { -1 } else { bytes.len() as i64 },
+                    mtime: 0,
+                });
+            }
+            Ok(entries.into_values().collect())
+        }
+
+        fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> {
+            if rel == "project.json" {
+                if let Some(barrier) = self.wait_on_read_project.take() {
+                    self.wait_fired = true;
+                    barrier.wait();
+                }
+            }
+            Ok(self.files.get(rel).cloned())
+        }
+
+        fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> {
+            if rel.starts_with("Главы/") {
+                if let Some(barrier) = self.signal_on_write_chapter.take() {
+                    self.signal_fired = true;
+                    barrier.wait();
+                }
+            }
+            self.files.insert(rel.to_string(), bytes.to_vec());
+            Ok(())
+        }
+
+        fn remove(&mut self, rel: &str) -> R<()> {
+            self.files.remove(rel);
+            Ok(())
+        }
+
+        fn mkdir(&mut self, _rel: &str) -> R<()> {
+            Ok(())
+        }
+    }
+
+    fn remote_meta(remote: &HookRemote) -> Value {
+        serde_json::from_slice(remote.files.get("project.json").unwrap()).unwrap()
+    }
+
+    fn conflicts_text(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir.join("Конфликты"))
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter_map(|e| fs::read_to_string(e.path()).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Проект с одной главой, выгруженный в подставную папку.
+    fn setup(remote: HookRemote) -> (TempProject, String, FolderSync<HookRemote>) {
+        let project = TempProject::new();
+        let view = create_project(&project.0, "Meta race", None).unwrap();
+        let first = view["chapters"][0]["id"].as_str().unwrap().to_string();
+        write_chapter(&project.0, &first, "base first chapter").unwrap();
+        let mut sync = FolderSync::new(&project.0, remote, None);
+        sync.export_all().unwrap();
+        (project, first, sync)
+    }
+
+    /// Облако переименовало первую главу.
+    fn cloud_rename(sync: &mut FolderSync<HookRemote>) {
+        let mut cloud = remote_meta(&sync.remote);
+        cloud["chapters"][0]["title"] = json!(CLOUD_TITLE);
+        let bytes = serde_json::to_vec_pretty(&cloud).unwrap();
+        sync.remote.files.insert("project.json".into(), bytes);
+    }
+
+    /// ОСНОВНАЯ РЕГРЕССИЯ (красная на текущем коде, зелёная после lock-based исправления).
+    /// Настоящая команда `rename_chapter` читает мету, проход скачивает облачный project.json,
+    /// затем команда сохраняет прочитанную ранее устаревшую копию. Это НЕ безопасная
+    /// последовательная правка: облачная версия обязана остаться доступной.
+    #[test]
+    fn real_rename_during_sync_keeps_both_versions() {
+        let (project, first, mut sync) = setup(HookRemote::default());
+        cloud_rename(&mut sync);
+
+        let (loaded_tx, loaded_rx) = mpsc::channel::<()>();
+        let (resume_tx, resume_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let fired = Arc::new(AtomicBool::new(false));
+
+        let dir = project.0.clone();
+        let first2 = first.clone();
+        let f = fired.clone();
+        let command = thread::spawn(move || {
+            // Точка между чтением меты и её сохранением. Замка sync_save_lock команда здесь НЕ держит.
+            meta_hook::set(move || {
+                f.store(true, Ordering::SeqCst);
+                loaded_tx.send(()).expect("тест: канал loaded недоступен");
+                resume_rx
+                    .recv_timeout(TIMEOUT)
+                    .expect("тест: локальная команда ждала разрешения дольше таймаута");
+            });
+            let result = rename_chapter(&dir, &first2, LOCAL_TITLE);
+            done_tx.send(()).ok();
+            result.unwrap();
+        });
+
+        // 1) дождаться, что команда прочитала мету (иначе — понятная ошибка, а не зависание)
+        loaded_rx
+            .recv_timeout(TIMEOUT)
+            .expect("тест: локальная команда не прочитала мету вовремя");
+        // 2) пока команда ждёт, проход скачивает облачный project.json
+        sync.sync().unwrap();
+        // 3) доказательство порядка: на диске уже облачная версия, а команда ещё не сохранила
+        assert_eq!(
+            load_meta(&project.0).unwrap()["chapters"][0]["title"],
+            CLOUD_TITLE,
+            "проход должен записать облачную версию до сохранения локальной команды"
+        );
+        // 4) отпустить сохранение
+        resume_tx.send(()).expect("тест: канал resume недоступен");
+        // 5) дождаться завершения команды
+        done_rx
+            .recv_timeout(TIMEOUT)
+            .expect("тест: локальная команда не завершилась вовремя");
+        command.join().unwrap();
+
+        assert!(fired.load(Ordering::SeqCst), "тестовая точка не сработала");
+
+        // СОХРАННОСТЬ: своя правка в живой мете, облачная версия доступна в «Конфликты»
+        let local = load_meta(&project.0).unwrap();
+        assert_eq!(
+            local["chapters"][0]["title"], LOCAL_TITLE,
+            "локальная правка должна остаться в живой мете"
+        );
+        assert!(
+            conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)),
+            "облачная версия не должна теряться молча (ожидается копия в «Конфликты»)"
+        );
+
+        // 2-й проход: ничего не теряется
+        sync.sync().unwrap();
+        let local2 = load_meta(&project.0).unwrap();
+        assert_eq!(local2["chapters"][0]["title"], LOCAL_TITLE);
+        assert!(conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)));
+    }
+
+    /// ПРАВИЛО (разные поля, порядок «локальная команда раньше прохода»): обе стороны изменились
+    /// с момента прошлой синхронизации → конфликт; своя правка в живой мете, облачная версия целиком
+    /// доступна в «Конфликты»; второй проход ничего не теряет.
+    #[test]
+    fn goal_before_pass_keeps_cloud_title_in_conflicts() {
+        let barrier = Arc::new(Barrier::new(2));
+        let mut remote = HookRemote::default();
+        remote.wait_on_read_project = Some(barrier.clone());
+        let (project, first, mut sync) = setup(remote);
+        cloud_rename(&mut sync);
+        let finished = Arc::new(AtomicBool::new(false));
+
+        let dir = project.0.clone();
+        let first2 = first.clone();
+        let b = barrier.clone();
+        let f = finished.clone();
+        let command = thread::spawn(move || {
+            set_chapter_goal(&dir, &first2, Some(&json!(LOCAL_GOAL))).unwrap();
+            b.wait();
+            f.store(true, Ordering::SeqCst);
+        });
+        sync.sync().unwrap();
+        command.join().unwrap();
+
+        assert!(sync.remote.wait_fired, "точка ожидания прохода не сработала");
+        assert!(finished.load(Ordering::SeqCst), "локальная команда не завершилась");
+
+        let local = load_meta(&project.0).unwrap();
+        assert_eq!(local["chapters"][0]["goal"], json!(LOCAL_GOAL), "локальная правка другого поля не применилась");
+        assert_ne!(local["chapters"][0]["title"], CLOUD_TITLE, "облачный title не должен молча попасть в живую мету");
+        assert!(
+            conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)),
+            "облачная версия должна оставаться доступной в «Конфликты»"
+        );
+
+        sync.sync().unwrap();
+        let local2 = load_meta(&project.0).unwrap();
+        assert_eq!(local2["chapters"][0]["goal"], json!(LOCAL_GOAL));
+        assert!(conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)));
+        assert_eq!(remote_meta(&sync.remote)["chapters"][0]["title"], local2["chapters"][0]["title"]);
+    }
+
+    /// ПРАВИЛО (одно поле, порядок «локальная команда раньше прохода»): обе версии поля остаются
+    /// доступными — своя в живой мете, чужая в «Конфликты».
+    #[test]
+    fn rename_before_pass_keeps_both_titles_accessible() {
+        let barrier = Arc::new(Barrier::new(2));
+        let mut remote = HookRemote::default();
+        remote.wait_on_read_project = Some(barrier.clone());
+        let (project, first, mut sync) = setup(remote);
+        cloud_rename(&mut sync);
+
+        let dir = project.0.clone();
+        let first2 = first.clone();
+        let b = barrier.clone();
+        let command = thread::spawn(move || {
+            rename_chapter(&dir, &first2, LOCAL_TITLE).unwrap();
+            b.wait();
+        });
+        sync.sync().unwrap();
+        command.join().unwrap();
+
+        assert!(sync.remote.wait_fired, "точка ожидания прохода не сработала");
+        let local = load_meta(&project.0).unwrap();
+        assert_eq!(local["chapters"][0]["title"], LOCAL_TITLE, "своя версия остаётся в живой мете");
+        assert!(
+            conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)),
+            "чужая версия того же поля должна оставаться доступной в «Конфликты»"
+        );
+
+        sync.sync().unwrap();
+        assert_eq!(load_meta(&project.0).unwrap()["chapters"][0]["title"], LOCAL_TITLE);
+        assert!(conflicts_text(&project.0).iter().any(|t| t.contains(CLOUD_TITLE)));
+    }
+
+    /// ПРАВИЛО (разные поля, безопасная последовательная правка): команда читает УЖЕ актуальную
+    /// (скачанную) мету и сохраняет обе правки. Здесь нет конфликта и нет потери.
+    #[test]
+    fn goal_after_pull_keeps_cloud_title() {
+        let barrier = Arc::new(Barrier::new(2));
+        let (project, first, mut sync) = setup(HookRemote::default());
+        // взводим сигнал ПОСЛЕ export_all, иначе барьер сработает на выгрузке проекта
+        sync.remote.signal_on_write_chapter = Some(barrier.clone());
+        cloud_rename(&mut sync);
+        write_chapter(&project.0, &first, "local chapter edit").unwrap(); // push главы после project.json
+
+        let dir = project.0.clone();
+        let first2 = first.clone();
+        let b = barrier.clone();
+        let command = thread::spawn(move || {
+            b.wait(); // ждём, пока проход запишет облачный project.json
+            set_chapter_goal(&dir, &first2, Some(&json!(LOCAL_GOAL))).unwrap();
+        });
+        let mut sync = thread::spawn(move || {
+            sync.sync().unwrap();
+            sync
+        })
+        .join()
+        .unwrap();
+        command.join().unwrap();
+
+        assert!(sync.remote.signal_fired, "точка сигнала прохода не сработала");
+        let local = load_meta(&project.0).unwrap();
+        assert_eq!(local["chapters"][0]["title"], CLOUD_TITLE, "облачная правка другого поля должна примениться");
+        assert_eq!(local["chapters"][0]["goal"], json!(LOCAL_GOAL), "локальная правка после pull должна примениться");
+
+        sync.sync().unwrap();
+        let local2 = load_meta(&project.0).unwrap();
+        assert_eq!(local2["chapters"][0]["title"], CLOUD_TITLE);
+        assert_eq!(remote_meta(&sync.remote)["chapters"][0]["title"], CLOUD_TITLE);
+        assert_eq!(remote_meta(&sync.remote)["chapters"][0]["goal"], json!(LOCAL_GOAL));
+    }
 }
