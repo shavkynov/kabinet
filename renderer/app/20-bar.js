@@ -56,10 +56,14 @@ function refreshBar() {
   if (chapter) {
     const limit = project.mode === 'stories' ? project.charLimit : null;
     const charsText = limit ? `${n(stats.chars)} / ${n(limit)}` : n(stats.chars);
-    info = `${n(stats.words)} ${wordsForm(stats.words)} · ${charsText} зн.`;
+    // Когда виден трекер цели, он уже показывает слова (или знаки, если цель в знаках): здесь их не повторяем.
+    const parts = [];
+    if (!(goalShown && goalMetric() === 'words')) parts.push(`${n(stats.words)} ${wordsForm(stats.words)}`);
+    if (!(goalShown && goalMetric() === 'chars')) parts.push(`${charsText} ${t('зн.')}`);
     if (project.mode === 'stories') { // авторские листы: 40 000 знаков с пробелами
-      info += ` · ${t('{0} а. л.', authorSheets(stats.chars).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}`;
+      parts.push(t('{0} а. л.', authorSheets(stats.chars).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 })));
     }
+    info = parts.join(' · ');
   }
   $('#barStats').textContent = info;
   $('#barStats').classList.toggle('on', goalShown);
@@ -81,7 +85,7 @@ function refreshBar() {
     split: !!p2.id,
     focus: document.body.classList.contains('focus-mode'),
   };
-  document.querySelectorAll('#toolbar button[data-act]').forEach((b) => {
+  document.querySelectorAll('#toolbar button[data-act], #notesDock button[data-act]').forEach((b) => {
     b.classList.toggle('active', !!on[b.dataset.act]);
   });
 }
