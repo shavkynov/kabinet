@@ -10,4 +10,6 @@ module.exports = {
   'Не удалось сохранить изменения. Удаление отменено, текст остался на экране': 'Could not save changes. Deletion was canceled; the text remains on screen.',
   'Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.': 'A copy in “Conflicts” already exists and has been modified. Saving was stopped to avoid overwriting it.',
   'Режим письма': 'Writing mode',
+  'Не удалось прочитать «{0}»: {1}. Синхронизация остановлена, чтобы не принять файл за удалённый.': 'Could not read “{0}”: {1}. Sync stopped so that the file is not mistaken for deleted.',
+  'папку проекта': 'the project folder',
 };

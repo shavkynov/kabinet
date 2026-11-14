@@ -202,7 +202,18 @@ pub fn parse_multistatus(xml: &str) -> Vec<DavEntry> {
         if abs_re.is_match(&href) {
             if let Ok(u) = url::Url::parse(&href) { href = u.path().to_string(); }
         }
-        if let Ok(d) = percent_decode_str(&href).decode_utf8() { href = d.into_owned(); }
+        // Декодируем по частям пути: %2F внутри имени не должен превращаться в разделитель и подменять файл.
+        let mut decoded = Vec::new();
+        let mut bad = false;
+        for part in href.split('/') {
+            match percent_decode_str(part).decode_utf8() {
+                Ok(d) if d.contains('/') || d.contains('\0') => { bad = true; break; }
+                Ok(d) => decoded.push(d.into_owned()),
+                Err(_) => decoded.push(part.to_string()),
+            }
+        }
+        if bad { continue; }
+        href = decoded.join("/");
         let dir = coll_re.is_match(block);
         let size = size_re.captures(block).and_then(|c| c[1].parse().ok()).unwrap_or(0);
         let mtime = mod_re.captures(block).and_then(|c| httpdate::parse_http_date(unxml(&c[1]).trim()).ok())
@@ -423,6 +434,15 @@ mod tests {
         assert!(v[0].dir);
         assert_eq!(v[1].href, "/dav/a&b.md");
         assert_eq!((v[1].size, v[1].mtime), (12, 1_700_000_000_000));
+    }
+
+    #[test]
+    fn multistatus_drops_names_with_encoded_slash() {
+        // %2F внутри имени: после общего декодирования стало бы вложенным путём «a/b.md» и подменило бы файл.
+        let xml = r#"<D:multistatus xmlns:D="DAV:"><D:response><D:href>/dav/a%2Fb.md</D:href></D:response><D:response><D:href>/dav/ok.md</D:href></D:response></D:multistatus>"#;
+        let v = parse_multistatus(xml);
+        assert_eq!(v.len(), 1, "{:?}", v);
+        assert_eq!(v[0].href, "/dav/ok.md");
     }
 
     #[test]

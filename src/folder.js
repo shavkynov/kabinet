@@ -30,11 +30,23 @@ const FOLDERS = ['Главы', 'Персонажи', 'Места', 'Предме
 const MASS_DELETE_MIN = 5;
 const ROOT_FILES = /^project.*\.json$|^stats\.json$/;
 
+/**
+ * Имя файла, безопасное на всех платформах. Облако (или чужая папка) может прислать имя с обратным слешем,
+ * двоеточием, именем устройства Windows и т. п.: на Windows такое имя выходит за папку проекта или пишет в
+ * поток/устройство. Такие файлы не синхронизируем.
+ */
+function isSafeFileName(name) {
+  if (!name || name.endsWith('.') || name.endsWith(' ')) return false;
+  if (/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(name)) return false;
+  const stem = name.split('.')[0].trimEnd().toUpperCase();
+  return !(/^(CON|PRN|AUX|NUL)$/.test(stem) || /^(COM|LPT)[1-9]$/.test(stem));
+}
+
 function isSyncable(rel) {
   const parts = String(rel).split('/').filter(Boolean);
   if (!parts.length) return false;
   const name = parts[parts.length - 1];
-  if (name.startsWith('.') || name.endsWith('.tmp') || name === '.DS_Store') return false;
+  if (name.startsWith('.') || name.endsWith('.tmp') || name === '.DS_Store' || !isSafeFileName(name)) return false;
   if (parts.length === 1) return ROOT_FILES.test(name);
   return parts.length === 2 && FOLDERS.includes(parts[0]);
 }
@@ -42,22 +54,41 @@ function isSyncable(rel) {
 const hashBytes = (bytes) => crypto.createHash('sha1').update(bytes).digest('hex');
 
 /** Снимок локального проекта: относительный путь → хэш содержимого. */
+/**
+ * Снимок локальной папки. Ошибку чтения НЕ принимаем за «файла нет»: иначе нечитаемый файл (нет прав, блокировка,
+ * ещё не скачан из iCloud) выглядел бы удалённым, и удаление ушло бы в облако. Не ошибка: папки нет совсем (ENOENT)
+ * или файл исчез между чтением каталога и файла.
+ */
 function walkLocal(dir) {
   const out = new Map();
+  const fail = (what, err) => new Error(`Не удалось прочитать «${what}»: ${err.message}. Синхронизация остановлена, чтобы не принять файл за удалённый.`);
   const add = (rel) => {
     try {
       out.set(rel, hashBytes(new Uint8Array(fs.readFileSync(path.join(dir, rel)))));
-    } catch { /* файл исчез между чтением папки и проверкой */ }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw fail(rel, err);
+    }
   };
-  try {
-    for (const name of fs.readdirSync(dir)) if (isSyncable(name)) add(name);
-  } catch { /* нет доступа */ }
-  for (const folder of FOLDERS) {
+  const list = (full, what, mustExist) => {
     try {
-      for (const name of fs.readdirSync(path.join(dir, folder))) {
-        if (isSyncable(`${folder}/${name}`)) add(`${folder}/${name}`);
-      }
-    } catch { /* папки может не быть */ }
+      return fs.readdirSync(full, { withFileTypes: true });
+    } catch (err) {
+      if (err.code === 'ENOENT' && !mustExist) return [];
+      throw fail(what, err);
+    }
+  };
+  const isFile = (entry, full) => {
+    if (entry.isFile()) return true;
+    if (!entry.isSymbolicLink()) return false;
+    try { return fs.statSync(path.join(full, entry.name)).isFile(); } catch (err) {
+      if (err.code === 'ENOENT') return false; // битая ссылка
+      throw fail(entry.name, err);
+    }
+  };
+  for (const e of list(dir, 'папку проекта', true)) if (isFile(e, dir) && isSyncable(e.name)) add(e.name);
+  for (const folder of FOLDERS) {
+    const full = path.join(dir, folder);
+    for (const e of list(full, folder, false)) if (isFile(e, full) && isSyncable(`${folder}/${e.name}`)) add(`${folder}/${e.name}`);
   }
   return out;
 }

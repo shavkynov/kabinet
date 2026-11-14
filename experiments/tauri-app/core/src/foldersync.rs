@@ -19,10 +19,22 @@ fn root_re() -> &'static Regex {
     &RE
 }
 
+/// Имя файла, безопасное на всех платформах. Облако (или чужая папка) может прислать имя с обратным слешем,
+/// двоеточием, именем устройства Windows и т. п.: на Windows такое имя выходит за папку проекта или пишет в
+/// поток/устройство. Такие файлы не синхронизируем.
+pub fn is_safe_file_name(name: &str) -> bool {
+    if name.is_empty() || name.ends_with('.') || name.ends_with(' ') { return false; }
+    if name.chars().any(|c| c.is_control() || "\\/:*?\"<>|".contains(c)) { return false; }
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit() && stem.as_bytes()[3] != b'0');
+    !reserved
+}
+
 pub fn is_syncable(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').filter(|x| !x.is_empty()).collect();
     let Some(name) = parts.last() else { return false };
-    if name.starts_with('.') || name.ends_with(".tmp") { return false; }
+    if name.starts_with('.') || name.ends_with(".tmp") || !is_safe_file_name(name) { return false; }
     if parts.len() == 1 { return root_re().is_match(name); }
     parts.len() == 2 && FOLDERS.contains(&parts[0])
 }
@@ -34,24 +46,50 @@ pub fn hash_bytes(b: &[u8]) -> String {
 }
 
 /// Снимок локального проекта: относительный путь → хэш.
-pub fn walk_local(dir: &Path) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    let mut add = |rel: String| { if let Ok(b) = fs::read(dir.join(&rel)) { out.insert(rel, hash_bytes(&b)); } };
-    if let Ok(rd) = fs::read_dir(dir) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if e.path().is_file() && is_syncable(&name) { add(name); }
-        }
+/// Снимок локальной папки: путь → хеш. Ошибку чтения НЕ принимаем за «файла нет»: иначе нечитаемый файл
+/// (нет прав, блокировка, ещё не скачан из iCloud) выглядел бы удалённым, и удаление ушло бы в облако.
+/// Не ошибка: папки нет совсем (NotFound) или файл исчез между чтением каталога и файла.
+pub fn walk_local(dir: &Path) -> R<BTreeMap<String, String>> {
+    fn io_err(what: &str, e: &std::io::Error) -> String {
+        format!("Не удалось прочитать «{}»: {}. Синхронизация остановлена, чтобы не принять файл за удалённый.", what, e)
     }
-    for folder in FOLDERS {
-        if let Ok(rd) = fs::read_dir(dir.join(folder)) {
-            for e in rd.flatten() {
-                let name = format!("{}/{}", folder, e.file_name().to_string_lossy());
-                if e.path().is_file() && is_syncable(&name) { add(name); }
+    // Некоторые записи каталога можно пропустить, только если они действительно пропали.
+    fn list(path: &Path, what: &str, must_exist: bool) -> R<Vec<(String, bool)>> {
+        let rd = match fs::read_dir(path) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !must_exist => return Ok(Vec::new()),
+            Err(e) => return Err(io_err(what, &e)),
+        };
+        let mut out = Vec::new();
+        for entry in rd {
+            let entry = entry.map_err(|e| io_err(what, &e))?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            match fs::metadata(entry.path()) {
+                Ok(m) => out.push((name, m.is_file())),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // исчез по дороге (или битая ссылка)
+                Err(e) => return Err(io_err(&format!("{}/{}", what, name), &e)),
             }
         }
+        Ok(out)
     }
-    out
+    let mut out = BTreeMap::new();
+    let mut add = |rel: String| -> R<()> {
+        match fs::read(dir.join(&rel)) {
+            Ok(b) => { out.insert(rel, hash_bytes(&b)); Ok(()) }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io_err(&rel, &e)),
+        }
+    };
+    for (name, is_file) in list(dir, "папку проекта", true)? {
+        if is_file && is_syncable(&name) { add(name)?; }
+    }
+    for folder in FOLDERS {
+        for (name, is_file) in list(&dir.join(folder), folder, false)? {
+            let rel = format!("{}/{}", folder, name);
+            if is_file && is_syncable(&rel) { add(rel)?; }
+        }
+    }
+    Ok(out)
 }
 
 pub struct RemoteEntry {
@@ -333,7 +371,7 @@ impl<T: Remote> FolderSync<T> {
         let walked = walk_remote(&mut self.remote, Some(&cache));
         self.cache = cache;
         let mut remote = walked?;
-        let mut local = walk_local(&self.dir);
+        let mut local = walk_local(&self.dir)?;
         let mut res = SyncResult::default();
         let rr = root_re();
 
@@ -514,7 +552,7 @@ impl<T: Remote> FolderSync<T> {
     /// Выгрузить локальный проект поверх папки; чего у нас нет, уходит в «Конфликты» папки.
     pub fn replace_all(&mut self) -> R<usize> {
         let remote = walk_remote(&mut self.remote, None)?;
-        let local = walk_local(&self.dir);
+        let local = walk_local(&self.dir)?;
         let mut hidden = 0;
         for (rel, e) in &remote {
             if local.contains_key(rel) || rel.starts_with(&format!("{}/", CONFLICT_DIR)) { continue; }
@@ -554,7 +592,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Выгрузить локальный проект в пустую папку.
     pub fn export_all(&mut self) -> R<Vec<String>> {
-        let local = walk_local(&self.dir);
+        let local = walk_local(&self.dir)?;
         self.state.clear();
         self.cache.clear();
         for (rel, hash) in &local {
@@ -628,6 +666,72 @@ mod tests {
         assert!(live.contains("название, сохранённое во время прохода") || in_conflicts,
             "конфликтная ветка sync затёрла project.json, сохранённый во время слияния слов");
         assert!(live.contains("бета"), "наше слово словаря должно остаться в живой мете");
+    }
+
+    /// Имена из облака, которые на Windows выходят за папку проекта или занимают устройство, не принимаем.
+    #[test]
+    fn unsafe_remote_names_are_not_pulled() {
+        let s = FakeServer::new();
+        let a = tmpdir("unsafe-names").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "unsafe-names");
+        sa.export_all().unwrap();
+        for bad in ["Главы/x\\..\\..\\evil.md", "Главы/a:stream.md", "Главы/CON.md", "Главы/nul.txt", "Главы/trailing.md.", "Главы/a*b.md", "Главы/tab\tname.md", "project..\\x.json"] {
+            s.put(&format!("Кабинет/Роман/{}", bad), b"evil");
+        }
+        s.put("Кабинет/Роман/Главы/bbbbbb.md", b"good");
+        let res = sa.sync().unwrap();
+        assert_eq!(r(&a, "Главы/bbbbbb.md"), "good", "обычное имя должно скачаться");
+        let names: Vec<String> = fs::read_dir(a.join("Главы")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 2, "скачано лишнее: {:?} / {:?}", names, res.pulled);
+        assert!(!a.parent().unwrap().join("evil.md").exists());
+    }
+
+    /// Папку с главами заменили файлом: чтение каталога падает не «нет файла», а ошибкой. Раньше это считалось
+    /// «все главы удалены локально», и удаление уходило в облако.
+    #[test]
+    fn unreadable_local_folder_is_not_taken_for_deletion() {
+        let s = FakeServer::new();
+        let a = tmpdir("walk-err").join("p");
+        project(&a, &[("aaaaaa", "текст"), ("bbbbbb", "ещё")]);
+        let mut sa = sync_of(&a, &s, "walk-err");
+        sa.export_all().unwrap();
+        fs::remove_dir_all(a.join("Главы")).unwrap();
+        fs::write(a.join("Главы"), b"not a folder").unwrap();
+        let res = sa.sync();
+        assert!(res.is_err(), "проход должен остановиться, а не принять нечитаемую папку за пустую");
+        assert!(s.names().iter().any(|n| n.ends_with("Главы/aaaaaa.md")) && s.names().iter().any(|n| n.ends_with("Главы/bbbbbb.md")),
+            "главы в облаке удалены из-за ошибки чтения");
+    }
+
+    /// Нет прав на чтение файла (не root): файл не должен считаться удалённым.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_local_file_is_not_taken_for_deletion() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = FakeServer::new();
+        let a = tmpdir("walk-file").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "walk-file");
+        sa.export_all().unwrap();
+        let f = a.join("Главы/aaaaaa.md");
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(&f).is_ok() { fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap(); return; } // root читает всё: проверка неприменима
+        let res = sa.sync();
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(res.is_err());
+        assert!(s.names().iter().any(|n| n.ends_with("Главы/aaaaaa.md")), "файл в облаке удалён из-за ошибки чтения");
+    }
+
+    /// Контроль: папки с главами нет совсем (удалена) — это обычное удаление, не ошибка чтения.
+    #[test]
+    fn missing_local_folder_is_still_a_normal_deletion() {
+        let a = tmpdir("walk-missing").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        fs::remove_dir_all(a.join("Главы")).unwrap();
+        let local = walk_local(&a).unwrap();
+        assert!(local.keys().all(|k| !k.starts_with("Главы/")));
+        assert!(local.contains_key("project.json"));
     }
 
     fn fixed_second() { crate::syncguard::set_test_now(Some(chrono::TimeZone::with_ymd_and_hms(&chrono::Local, 2026, 11, 14, 12, 0, 0).single().unwrap())); }
@@ -919,7 +1023,7 @@ mod tests {
         let file = crate::store::add_image(&a, &source).unwrap();
         let rel = format!("Картинки/{file}");
         let expected = crate::store::read_image(&a, &file).unwrap();
-        assert!(walk_local(&a).contains_key(&rel));
+        assert!(walk_local(&a).unwrap().contains_key(&rel));
         let mut sa = sync_of(&a, &s, "image-a");
         assert!(sa.export_all().unwrap().contains(&rel));
         assert_eq!(s.get(&format!("Кабинет/Роман/{rel}")).unwrap(), bytes);
