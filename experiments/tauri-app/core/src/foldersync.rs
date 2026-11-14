@@ -219,9 +219,22 @@ impl<T: Remote> FolderSync<T> {
                 Ok(raw) => {
                     let v: Value = serde_json::from_str(&raw).map_err(|e| format!(
                         "Файл состояния синхронизации повреждён: {}. Синхронизация остановлена, чтобы не затереть данные; проверьте папку проекта.", e))?;
-                    if let Value::Object(o) = v {
-                        for (k, v) in o { if let Some(s) = v.as_str() { self.state.insert(k, s.to_string()); } }
+                    // Формат состояния: объект { "путь": "хэш-строка" } — так пишет save().
+                    // Синтаксически корректный, но иной JSON нельзя принимать за пустое/частичное
+                    // состояние: неполный снимок опасен (решения об удалении/перезаписи), и это
+                    // не «первая синхронизация». Валидируем целиком, затем заменяем state.
+                    let Some(obj) = v.as_object() else {
+                        return Err("Файл состояния синхронизации имеет неподдерживаемую структуру: ожидается объект «путь → хэш». Синхронизация остановлена, чтобы не затереть данные.".into());
+                    };
+                    let mut parsed = BTreeMap::new();
+                    for (k, v) in obj {
+                        let Some(hash) = v.as_str() else {
+                            return Err(format!(
+                                "Файл состояния синхронизации имеет неподдерживаемую структуру: для «{}» ожидается строка-хэш. Синхронизация остановлена, чтобы не затереть данные.", k));
+                        };
+                        parsed.insert(k.clone(), hash.to_string());
                     }
+                    self.state = parsed;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // состояния ещё нет: первая синхронизация
                 Err(e) => return Err(format!("Не удалось прочитать состояние синхронизации: {}. Синхронизация остановлена, чтобы не затереть данные.", e)),
@@ -1398,6 +1411,60 @@ mod tests {
         fs::write(&state, "{ битый").unwrap();
         let made = FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(state));
         assert!(made.is_err(), "повреждённое состояние должно блокировать синхронизацию");
+    }
+
+    /// Синтаксически корректный, но неподдерживаемый state (не-объект или нестроковые значения)
+    /// не должен приниматься за пустое/частичное состояние: конструктор возвращает ошибку,
+    /// байты state, локальный текст и облако не меняются, сетевых действий нет.
+    #[test]
+    fn unsupported_state_structure_blocks_sync_without_changes() {
+        let s = FakeServer::new();
+        let a = tmpdir("state-structure").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let dir = a.parent().unwrap().to_path_buf();
+        let state_file = dir.join("struct.state");
+        for raw in ["[]", "null", "\"x\"", "5", r#"{"project.json": 1}"#, r#"{"project.json": "hash", "Главы/aaaaaa.md": null}"#] {
+            fs::write(&state_file, raw).unwrap();
+            let log_before = s.0.lock().unwrap().log.len();
+            let made = FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(state_file.clone()));
+            let err = match made { Ok(_) => panic!("неподдерживаемый state принят как состояние: {raw}"), Err(e) => e };
+            assert!(err.contains("неподдерживаемую структуру"), "ошибка приложения: {err}");
+            assert_eq!(fs::read_to_string(&state_file).unwrap(), raw, "исходные байты state не меняются: {raw}");
+            assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "текст", "локальный текст не изменён: {raw}");
+            assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none(), "облако не тронуто: {raw}");
+            assert_eq!(s.0.lock().unwrap().log.len(), log_before, "конструктор не делает сетевых действий: {raw}");
+        }
+    }
+
+    /// Поддерживаемые структуры: отсутствие файла (первая синхронизация), {} (пустое сохранённое
+    /// состояние, так пишет save после reset) и корректный непустой объект.
+    #[test]
+    fn supported_state_structures_load() {
+        let s = FakeServer::new();
+        let a = tmpdir("state-supported").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let dir = a.parent().unwrap().to_path_buf();
+
+        let missing = dir.join("missing.state");
+        match FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(missing)) {
+            Ok(f) => assert!(f.state().is_empty(), "отсутствие state — пустое состояние первой синхронизации"),
+            Err(e) => panic!("отсутствие state не ошибка: {e}"),
+        }
+
+        let empty = dir.join("empty.state");
+        fs::write(&empty, "{}").unwrap();
+        match FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(empty)) {
+            Ok(f) => assert!(f.state().is_empty(), "{{}} — корректное пустое сохранённое состояние"),
+            Err(e) => panic!("корректное пустое состояние должно загружаться: {e}"),
+        }
+
+        let good = dir.join("good.state");
+        let hash = "a".repeat(40);
+        fs::write(&good, serde_json::to_string(&json!({ "Главы/aaaaaa.md": hash })).unwrap()).unwrap();
+        match FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(good)) {
+            Ok(f) => assert_eq!(f.state().get("Главы/aaaaaa.md").map(|s| s.as_str()), Some(hash.as_str()), "корректный непустой state загружен"),
+            Err(e) => panic!("корректный state должен загружаться: {e}"),
+        }
     }
 
     /// Ошибка записи состояния не выдаётся за успешную синхронизацию.
