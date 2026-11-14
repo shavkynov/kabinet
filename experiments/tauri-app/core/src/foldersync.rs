@@ -1264,6 +1264,24 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Недоступное облако останавливает синхронизацию; локальные файлы не трогаются.
+    #[test]
+    fn unavailable_cloud_stops_sync_without_local_changes() {
+        struct Offline;
+        impl crate::remote::Remote for Offline {
+            fn list(&mut self, _: &str) -> R<Vec<crate::remote::Item>> { Err("Нет связи".into()) }
+            fn read(&mut self, _: &str) -> R<Option<Vec<u8>>> { Err("Нет связи".into()) }
+            fn write(&mut self, _: &str, _: &[u8]) -> R<()> { Err("Нет связи".into()) }
+            fn remove(&mut self, _: &str) -> R<()> { Err("Нет связи".into()) }
+            fn mkdir(&mut self, _: &str) -> R<()> { Err("Нет связи".into()) }
+        }
+        let a = tmpdir("offline").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = FolderSync::new(&a, Offline, None).unwrap();
+        assert!(sa.sync().is_err(), "недоступное облако должно останавливать синхронизацию");
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "текст", "локальный файл не тронут");
+    }
+
     /// Асинхронное удаление в облаке (202 + операция) подтверждается опросом статуса.
     #[test]
     fn async_cloud_delete_is_confirmed_by_operation() {
