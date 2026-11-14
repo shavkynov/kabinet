@@ -193,27 +193,36 @@ fn arr<'a>(v: &'a Value, k: &str) -> &'a [Value] { v.get(k).and_then(|x| x.as_ar
 fn label_of(rel: &str) -> String { if rel.contains('/') { stem(rel) } else { rel.to_string() } }
 
 impl<T: Remote> FolderSync<T> {
-    pub fn new(dir: &Path, remote: T, state_file: Option<PathBuf>) -> Self {
+    pub fn new(dir: &Path, remote: T, state_file: Option<PathBuf>) -> R<Self> {
         let mut s = FolderSync { dir: dir.to_path_buf(), remote, state_file, state: BTreeMap::new(), cache: HashMap::new() };
-        s.load();
-        s
+        s.load()?;
+        Ok(s)
     }
 
     fn cache_file(&self) -> Option<PathBuf> { self.state_file.as_ref().map(|p| PathBuf::from(format!("{}.cache", p.display()))) }
 
-    fn load(&mut self) {
+    /// Загрузка состояния: отсутствие файла — это первая синхронизация (безопасно); порча или ошибка
+    /// чтения — Err, чтобы не принять повреждённое состояние за «первый запуск» и не затереть данные.
+    fn load(&mut self) -> R<()> {
         if let Some(f) = &self.state_file {
-            if let Ok(raw) = fs::read_to_string(f) {
-                if let Ok(Value::Object(o)) = serde_json::from_str::<Value>(&raw) {
-                    for (k, v) in o { if let Some(s) = v.as_str() { self.state.insert(k, s.to_string()); } }
+            match fs::read_to_string(f) {
+                Ok(raw) => {
+                    let v: Value = serde_json::from_str(&raw).map_err(|e| format!(
+                        "Файл состояния синхронизации повреждён: {}. Синхронизация остановлена, чтобы не затереть данные; проверьте папку проекта.", e))?;
+                    if let Value::Object(o) = v {
+                        for (k, v) in o { if let Some(s) = v.as_str() { self.state.insert(k, s.to_string()); } }
+                    }
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // состояния ещё нет: первая синхронизация
+                Err(e) => return Err(format!("Не удалось прочитать состояние синхронизации: {}. Синхронизация остановлена, чтобы не затереть данные.", e)),
             }
         }
-        let Some(cf) = self.cache_file() else { return };
-        let Ok(raw) = fs::read_to_string(cf) else { return };
-        let Ok(v) = serde_json::from_str::<Value>(&raw) else { return };
-        if v.get("version").and_then(|x| x.as_i64()) != Some(1) { return; }
-        let Some(files) = v.get("files").and_then(|x| x.as_object()) else { return };
+        // Кэш — производная величина: порча или ошибка чтения не опасны, просто перечитаем файлы.
+        let Some(cf) = self.cache_file() else { return Ok(()) };
+        let Ok(raw) = fs::read_to_string(cf) else { return Ok(()) };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else { return Ok(()) };
+        if v.get("version").and_then(|x| x.as_i64()) != Some(1) { return Ok(()) }
+        let Some(files) = v.get("files").and_then(|x| x.as_object()) else { return Ok(()) };
         let sig_re = Regex::new(r"^\d+:\d+$").unwrap();
         let hash_re = Regex::new(r"^[a-f0-9]{40}$").unwrap();
         for (rel, e) in files {
@@ -221,19 +230,24 @@ impl<T: Remote> FolderSync<T> {
             if !is_syncable(rel) || !sig_re.is_match(sig) || !hash_re.is_match(hash) || self.state.get(rel).map(|s| s.as_str()) != Some(hash) { continue; }
             self.cache.insert(rel.clone(), (sig.to_string(), hash.to_string()));
         }
+        Ok(())
     }
 
-    fn save(&self) {
-        let Some(f) = &self.state_file else { return };
-        if let Some(p) = f.parent() { let _ = fs::create_dir_all(p); }
+    /// Сохранение состояния: ошибка записи возвращается. Кэш — производная величина, его ошибка
+    /// не отменяет уже выполненную синхронизацию.
+    fn save(&self) -> R<()> {
+        let Some(f) = &self.state_file else { return Ok(()) };
+        if let Some(p) = f.parent() { fs::create_dir_all(p).map_err(|e| format!("Не удалось создать папку состояния синхронизации: {}.", e))?; }
         let st: serde_json::Map<String, Value> = self.state.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-        let _ = write_atomic_bytes(f, serde_json::to_string_pretty(&Value::Object(st)).unwrap().as_bytes());
+        write_atomic_bytes(f, serde_json::to_string_pretty(&Value::Object(st)).unwrap().as_bytes())
+            .map_err(|e| format!("Не удалось сохранить состояние синхронизации: {}. Повторите синхронизацию.", e))?;
         if let Some(cf) = self.cache_file() {
             let files: serde_json::Map<String, Value> = self.cache.iter()
                 .filter(|(rel, e)| self.state.get(*rel) == Some(&e.1))
                 .map(|(rel, e)| (rel.clone(), json!({ "sig": e.0, "hash": e.1 }))).collect();
             let _ = write_atomic_bytes(&cf, serde_json::to_string_pretty(&json!({ "version": 1, "files": files })).unwrap().as_bytes());
         }
+        Ok(())
     }
 
     pub fn state(&self) -> BTreeMap<String, String> { self.state.clone() }
@@ -572,7 +586,7 @@ impl<T: Remote> FolderSync<T> {
                 if !res.pushed.contains(rel) && !res.conflicts.contains(rel) { self.cache.insert(rel.clone(), (sig.clone(), e.hash.clone())); }
             }
         }
-        self.save();
+        self.save()?;
         Ok(res)
     }
 
@@ -602,7 +616,7 @@ impl<T: Remote> FolderSync<T> {
             self.state.insert(rel.clone(), l);
             res.pushed.push(rel.clone());
         }
-        self.save();
+        self.save()?;
         Ok(res)
     }
 
@@ -654,7 +668,7 @@ impl<T: Remote> FolderSync<T> {
             self.state.insert(rel.clone(), e.hash.clone());
             if let Some(sig) = &e.sig { self.cache.insert(rel.clone(), (sig.clone(), e.hash.clone())); }
         }
-        self.save();
+        self.save()?;
         Ok(remote.keys().cloned().collect())
     }
 
@@ -669,11 +683,11 @@ impl<T: Remote> FolderSync<T> {
             self.remote.write(rel, &data)?;
             self.state.insert(rel.clone(), hash.clone());
         }
-        self.save();
+        self.save()?;
         Ok(local.keys().cloned().collect())
     }
 
-    pub fn reset(&mut self) { self.state.clear(); self.cache.clear(); self.save(); }
+    pub fn reset(&mut self) -> R<()> { self.state.clear(); self.cache.clear(); self.save() }
 }
 
 #[cfg(test)]
@@ -689,7 +703,7 @@ mod tests {
         for (id, t) in ch { w(dir, &format!("Главы/{}.md", id), t); }
     }
     fn sync_of(dir: &Path, s: &FakeServer, st: &str) -> FolderSync<crate::yandexdisk::YandexDisk<FakeServer>> {
-        FolderSync::new(dir, dav_on(s, "/Кабинет/Роман"), Some(dir.parent().unwrap().join(format!("{}.state", st))))
+        FolderSync::new(dir, dav_on(s, "/Кабинет/Роман"), Some(dir.parent().unwrap().join(format!("{}.state", st)))).unwrap()
     }
 
     /// Слияние слов словаря в конфликтной ветке: сохранение меты между чтением и записью не должно теряться.
@@ -1119,6 +1133,33 @@ mod tests {
         sb.import_all().unwrap();
         let days: Value = serde_json::from_str(&r(&b, "stats.json")).unwrap();
         assert_eq!(days["days"]["2026-11-10"], 100, "статистика должна прийти с другого устройства");
+    }
+
+    /// Порча файла состояния не должна выдаваться за «первую синхронизацию»: иначе снимок пуст
+    /// и возможны опасные решения (слияние/удаление). Создание FolderSync возвращает ошибку.
+    #[test]
+    fn corrupt_state_file_blocks_sync_instead_of_first_sync() {
+        let s = FakeServer::new();
+        let a = tmpdir("state-corrupt").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let state = a.parent().unwrap().join("bad.state");
+        fs::write(&state, "{ битый").unwrap();
+        let made = FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(state));
+        assert!(made.is_err(), "повреждённое состояние должно блокировать синхронизацию");
+    }
+
+    /// Ошибка записи состояния не выдаётся за успешную синхронизацию.
+    #[test]
+    fn sync_reports_failed_state_save() {
+        let s = FakeServer::new();
+        let a = tmpdir("state-save-fail").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let state = a.parent().unwrap().join("state-later-dir");
+        let mut sa = FolderSync::new(&a, dav_on(&s, "/Кабинет/Роман"), Some(state.clone())).unwrap();
+        fs::create_dir(&state).unwrap(); // на месте файла состояния каталог: запись упадёт
+        let res = sa.sync();
+        assert!(res.is_err(), "ошибка записи состояния не должна выдаваться за успех");
+        assert!(s.get("Кабинет/Роман/project.json").is_some(), "работа до сохранения состояния выполнена");
     }
 
     #[test]

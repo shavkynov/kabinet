@@ -127,7 +127,7 @@ fn setup(arm_save: bool) -> (TempProject, String, FolderSync<MemoryRemote>) {
     let mut remote = MemoryRemote::default();
     remote.dir = project.0.clone();
     remote.arm_save = arm_save;
-    let mut sync = FolderSync::new(&project.0, remote, None);
+    let mut sync = FolderSync::new(&project.0, remote, None).unwrap();
     sync.export_all().unwrap();
 
     // Облако переименовало первую главу.

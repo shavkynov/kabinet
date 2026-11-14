@@ -101,7 +101,7 @@ fn fixture() -> (TempProject, FolderSync<MemoryRemote>) {
     remote.files.insert("project.json".into(), serde_json::to_vec(&meta).unwrap());
     remote.files.insert(FIRST.into(), b"base first chapter".to_vec());
     remote.files.insert(SECOND.into(), BASE.as_bytes().to_vec());
-    let mut sync = FolderSync::new(&project.0, remote, None);
+    let mut sync = FolderSync::new(&project.0, remote, None).unwrap();
     sync.import_all().unwrap();
     assert_eq!(store::read_chapter(&project.0, "bbbbbb").unwrap(), BASE);
     (project, sync)

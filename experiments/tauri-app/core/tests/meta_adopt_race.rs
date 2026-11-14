@@ -77,7 +77,7 @@ fn fixture() -> (TempProject, FolderSync<MemoryRemote>) {
     fs::write(dir.join("Главы/aaaaaa.md"), "наш текст").unwrap();
     fs::write(dir.join("Главы/bbbbbb.md"), "своя глава, которой нет в облаке").unwrap();
     fs::write(dir.join("Главы/cccccc.md"), "").unwrap();
-    let sync = FolderSync::new(dir, remote, None);
+    let sync = FolderSync::new(dir, remote, None).unwrap();
     (project, sync)
 }
 

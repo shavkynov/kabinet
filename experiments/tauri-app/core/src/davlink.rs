@@ -195,7 +195,7 @@ impl DavLink {
     }
 
     fn folder_sync(&self, dir: &Path, acc: &Acc) -> R<FolderSync<Rm>> {
-        Ok(FolderSync::new(dir, dav_of((self.make_http)(), acc, None)?, Some(self.state_file(dir, acc))))
+        FolderSync::new(dir, dav_of((self.make_http)(), acc, None)?, Some(self.state_file(dir, acc)))
     }
 
     // ---------- работа открытого проекта ----------

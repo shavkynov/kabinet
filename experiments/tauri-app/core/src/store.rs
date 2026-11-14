@@ -1500,7 +1500,7 @@ mod meta_race_tests {
         let view = create_project(&project.0, "Meta race", None).unwrap();
         let first = view["chapters"][0]["id"].as_str().unwrap().to_string();
         write_chapter(&project.0, &first, "base first chapter").unwrap();
-        let mut sync = FolderSync::new(&project.0, remote, None);
+        let mut sync = FolderSync::new(&project.0, remote, None).unwrap();
         sync.export_all().unwrap();
         (project, first, sync)
     }
