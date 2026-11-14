@@ -24,6 +24,8 @@ pub struct Fs {
     pub empty_page_at: Option<usize>,
     /// Удаление — асинхронная операция (202 + опрос статуса), как у Яндекса для непустых папок.
     pub async_deletes: bool,
+    /// Дублировать последнюю запись страницы (проверка устойчивости к дублям списка).
+    pub duplicate: bool,
     /// Отложенные операции удаления: id операции → путь, который будет удалён при успехе.
     pub pending_ops: BTreeMap<String, String>,
 }
@@ -77,6 +79,7 @@ impl Http for FakeServer {
                         } } }
                     }
                     let total = items.len();
+                    if f.duplicate { if let Some(last) = items.last().cloned() { items.push(last); } }
                     let lim: usize = q.get("limit").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1000).max(1);
                     let off: usize = q.get("offset").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
                     let page_size = f.page_limit.unwrap_or(lim).min(lim);

@@ -1264,6 +1264,20 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Дубли в списке облака не вызывают изменений и не теряют файлы.
+    #[test]
+    fn duplicate_listing_entry_is_handled_once() {
+        let s = FakeServer::new();
+        let a = tmpdir("dup").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().duplicate = true;
+        let res = sa.sync().unwrap();
+        assert!(res.pulled.is_empty() && res.pushed.is_empty(), "дубль в списке не должен вызывать изменений: {:?}", res.pulled.len() + res.pushed.len());
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "текст");
+    }
+
     /// Папка пропала из списка (404 посреди обхода) — локальные файлы не удаляются.
     #[test]
     fn folder_gone_from_listing_does_not_delete_local_files() {
