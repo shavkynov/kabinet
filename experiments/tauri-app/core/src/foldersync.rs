@@ -1264,6 +1264,19 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Папка пропала из списка (404 посреди обхода) — локальные файлы не удаляются.
+    #[test]
+    fn folder_gone_from_listing_does_not_delete_local_files() {
+        let s = FakeServer::new();
+        let a = tmpdir("folder-gone").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().dirs.remove("/Кабинет/Роман/Главы");
+        let _ = sa.sync();
+        assert!(a.join("Главы/aaaaaa.md").exists(), "пропажа папки из списка не должна удалять локальные файлы");
+    }
+
     /// Ошибка страницы списка останавливает обход, а не «файлов нет».
     #[test]
     fn list_page_error_is_reported() {
