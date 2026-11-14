@@ -267,6 +267,16 @@ mod tests {
         assert!(restore_backup(&dir, &root, &name).is_err(), "повреждённая копия не должна восстанавливаться");
     }
 
+    #[test]
+    fn restore_of_missing_backup_is_rejected_without_changes() {
+        let dir = tmpdir("restore-missing").join("p");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        assert!(restore_backup(&dir, &root, "2026-01-01 10-00-00").is_err(), "несуществующая копия не восстанавливается");
+        assert_eq!(fs::read_to_string(dir.join("project.json")).unwrap(), "{}", "проект не изменён");
+    }
+
     #[cfg(windows)]
     #[test]
     fn backup_does_not_follow_directory_junctions() {
