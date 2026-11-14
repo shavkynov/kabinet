@@ -26,6 +26,8 @@ pub struct Fs {
     pub async_deletes: bool,
     /// Дублировать последнюю запись страницы (проверка устойчивости к дублям списка).
     pub duplicate: bool,
+    /// «Сжимать» total на последующих страницах (нестабильный total у облака).
+    pub total_shrink: bool,
     /// Отложенные операции удаления: id операции → путь, который будет удалён при успехе.
     pub pending_ops: BTreeMap<String, String>,
 }
@@ -78,10 +80,11 @@ impl Http for FakeServer {
                             items.push(serde_json::json!({ "name": n, "type": "file", "size": data.len(), "modified": iso(*t) }));
                         } } }
                     }
-                    let total = items.len();
+                    let mut total = items.len();
                     if f.duplicate { if let Some(last) = items.last().cloned() { items.push(last); } }
                     let lim: usize = q.get("limit").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1000).max(1);
                     let off: usize = q.get("offset").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+                    if f.total_shrink && off > 0 { total = total.saturating_sub(2); }
                     let page_size = f.page_limit.unwrap_or(lim).min(lim);
                     let page: Vec<_> = if f.empty_page_at == Some(off) { vec![] } else { items.into_iter().skip(off).take(page_size).collect() };
                     js(serde_json::json!({ "type": "dir", "_embedded": { "total": total, "items": page } }))

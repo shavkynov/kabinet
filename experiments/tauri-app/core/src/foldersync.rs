@@ -1264,6 +1264,22 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Нестабильный total (сжатие) может дать неполный список, но локальные файлы не удаляются.
+    #[test]
+    fn unstable_total_does_not_delete_local_files() {
+        let s = FakeServer::new();
+        let a = tmpdir("shrink").join("p");
+        project(&a, &[("aaaaaa", "1"), ("bbbbbb", "2"), ("cccccc", "3"), ("dddddd", "4"), ("eeeeee", "5"), ("ffffff", "6")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().page_limit = Some(2);
+        s.0.lock().unwrap().total_shrink = true;
+        let _ = sa.sync();
+        for (id, text) in [("aaaaaa", "1"), ("bbbbbb", "2"), ("cccccc", "3"), ("dddddd", "4"), ("eeeeee", "5"), ("ffffff", "6")] {
+            assert_eq!(fs::read_to_string(a.join(format!("Главы/{}.md", id))).unwrap(), text, "сжатие total не должно удалять главу {}", id);
+        }
+    }
+
     /// Дубли в списке облака не вызывают изменений и не теряют файлы.
     #[test]
     fn duplicate_listing_entry_is_handled_once() {
