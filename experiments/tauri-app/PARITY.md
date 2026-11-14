@@ -23,17 +23,26 @@
 | Ссылки/junction не обходятся | — | `walk_local` (№ 6) | `walk_local_does_not_enter_linked_folder` | тест |
 | Гонка создания нового файла | — | `write_checked` create-only (№ 1) | `push_new_file_does_not_overwrite_concurrent_creation` | тест |
 | Create-only примитив | — | `Remote::create` (`overwrite=false`) | `create_only_does_not_overwrite_existing` | тест |
-| Замок синхронизации (серверное время) | нет | `genlock` (№ 1, примитив) | `lock_is_exclusive_*`, `expired_lock_is_taken_over` | тест (в движок не подключён) |
+| Замок синхронизации (серверное время) | нет | `genlock` + `run_pass` (№ 1) | `lock_is_exclusive_*`, `expired_lock_is_taken_over`, `sync_now_does_not_sync_when_another_device_holds_the_lock` | тест |
 | Остановка обмена без сетевого прохода | — | `davlink::stop` (№ 13) | `stop_does_not_force_network_pass_*` | тест |
 | Связь проекта (attach/pull/push) | — | `DavLink` | `attach_*`, `sync_now_pulls_*` | тест |
 | Корзина (восстановление карточки) | — | `store::restore_trash` | тест `store` | тест |
 | Durability (sync каталога после rename) | — | `write_atomic_bytes` + `sync_parent_dir` (№ 11) | полный набор; авария не воспроизводима | код |
-| Редактор и прочий UI | ProseMirror (`renderer/`) | тот же `renderer/` через `bridge` | GUI не запускался | не проверено |
-| Импорт/экспорт/вложения | `store`/`export`/`import` | портированы | отдельно не проверялось в этой сессии | не проверено |
+| Карточки (персонажи, места, предметы, заметки) | `store` (items) | `store::add_item/read_item/…` | unit-тесты модуля `store` | тест |
+| Поиск и замена | `searchreplace` | `searchreplace::replace_project` | unit-тесты модуля | тест |
+| Импорт глав (docx/rtf/md/txt) | `import` | `import` | unit-тесты модуля | тест |
+| Экспорт (docx/pdf/…, цели сохранения) | `export` | `export`/`exporttarget` | unit-тесты модулей | тест |
+| Вложения/изображения | — | `media` | unit-тесты модуля | тест |
+| Упоминания и ссылки | — | `mentions` | unit-тесты модуля | тест |
+| Анализ текста (проверка) | — | `check` | unit-тесты модуля | тест |
+| Склонения/созвучия/словарь | — | `declension`/`namematch`/`dict` | unit-тесты модулей | тест |
+| Редактор, форматирование, история (undo/redo) | ProseMirror (`renderer/`) | тот же `renderer/` через `bridge` | GUI Tauri не запускался | не проверено |
+| Настройки/шрифты/звуки/эмбиент | `renderer/` | тот же `renderer/` | GUI Tauri не запускался | не проверено |
 
 ## Ограничения доказательств
 
 - GUI Tauri в этой сессии не запускался; «тест» означает юнит-тест ядра, а не сквозную работу интерфейса.
+- Для модульных областей (карточки, поиск, импорт, экспорт, вложения, упоминания, анализ, язык) «тест» = у модуля есть unit-тесты; их полный просмотр в этой сессии не выполнялся.
 - Реальный Яндекс Диск не использовался — только поддельный Диск, воспроизводящий документированное поведение API.
 - macOS проверен только через CI (тесты ядра); Windows-специфичные тесты (junction, блокировка файла) на macOS не выполняются.
 - Аварийное выключение / перезапуск не воспроизводились (durability — только «код»).
