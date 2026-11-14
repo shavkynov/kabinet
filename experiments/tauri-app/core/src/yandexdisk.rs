@@ -469,6 +469,27 @@ mod tests {
         assert_eq!(s.get("Кабинет/Роман/g.txt").unwrap(), b"g");
     }
 
+    /// ХАРАКТЕРИЗАЦИЯ МОДЕЛИ Fake (не гарантия реального сервиса): две upload-ссылки с overwrite=false
+    /// выдаются до записи; Fake не переносит режим в PUT, поэтому вторая загрузка перезаписывает.
+    #[test]
+    fn create_only_fake_model_two_links_then_two_puts() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        let path = d.disk_path("x.txt").map_err(String::from).unwrap();
+        let q = [("path", path.as_str()), ("overwrite", "false")];
+        let (s1, b1) = d.send_raw("GET", "/resources/upload", &q).map_err(String::from).unwrap();
+        let (s2, b2) = d.send_raw("GET", "/resources/upload", &q).map_err(String::from).unwrap();
+        assert_eq!((s1, s2), (200, 200), "обе ссылки выданы до записи");
+        let href = |b: &[u8]| -> String { serde_json::from_slice::<Value>(b).unwrap()["href"].as_str().unwrap().to_string() };
+        let put = |d: &YandexDisk<crate::testutil::FakeServer>, url: String, bytes: &[u8]| -> u16 {
+            d.http.request(Req { method: "PUT".into(), url, headers: vec![], body: Some(bytes.to_vec()) }).unwrap().status
+        };
+        assert!((200..300).contains(&put(&d, href(&b1), b"first")), "первый PUT принят");
+        assert!((200..300).contains(&put(&d, href(&b2), b"second")), "второй PUT тоже принят");
+        assert_eq!(s.get("Кабинет/Роман/x.txt").unwrap(), b"second", "Fake: вторая загрузка перезаписала — модель не переносит create-only в PUT");
+    }
+
     #[test]
     fn guards() {
         assert!(is_oauth_user("oauth-yandex:0123456789abcdef0123456789abcdef") && !is_oauth_user("oauth-yandex:xyz") && !is_oauth_user("me@yandex.ru"));

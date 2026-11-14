@@ -106,6 +106,9 @@ mod tests {
     use super::*;
     use crate::remote::Folder;
     use crate::testutil::{dav_on, FakeServer};
+    use serde_json::Value;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::Duration;
 
     fn remote(s: &FakeServer) -> crate::yandexdisk::YandexDisk<FakeServer> {
         let mut r = dav_on(s, "/Кабинет/Роман");
@@ -268,5 +271,134 @@ mod tests {
         assert!(try_acquire(&mut a, "A", "tok-a", 100_000).unwrap());
         assert!(s.get("Кабинет/Роман/kabinet.lock").is_some(), "замок взят");
         assert_eq!(s.names().iter().filter(|n| n.contains("kabinet.probe.")).count(), 0, "своя проба убрана");
+    }
+
+    // ==== L2: диагностика конкурентных ограничений (характеризация, НЕ доказательство безопасности) ====
+    //
+    // Для каждого сценария порядок событий задан явно: операция приостанавливается в нужной точке,
+    // второй участник действует в промежутке, затем первая операция продолжается. Ожидания ограничены
+    // по времени (5 с). Производственная логика не меняется; тесты закрепляют ТЕКУЩЕЕ поведение.
+
+    struct Gate { reached: Arc<(Mutex<bool>, Condvar)>, released: Arc<(Mutex<bool>, Condvar)> }
+    impl Clone for Gate {
+        fn clone(&self) -> Self { Gate { reached: self.reached.clone(), released: self.released.clone() } }
+    }
+    impl Gate {
+        fn new() -> Self {
+            Gate { reached: Arc::new((Mutex::new(false), Condvar::new())), released: Arc::new((Mutex::new(false), Condvar::new())) }
+        }
+        /// Из приостанавливаемой операции: отметить достижение точки и ждать разрешения.
+        fn hold(&self) {
+            let (m, c) = &*self.reached;
+            *m.lock().unwrap() = true;
+            c.notify_all();
+            let (m, c) = &*self.released;
+            let mut g = m.lock().unwrap();
+            while !*g { g = c.wait_timeout(g, Duration::from_secs(5)).unwrap().0; }
+        }
+        /// Из главного потока: дождаться достижения точки (не дольше 5 с).
+        fn wait_reached(&self) {
+            let (m, c) = &*self.reached;
+            let mut g = m.lock().unwrap();
+            while !*g { g = c.wait_timeout(g, Duration::from_secs(5)).unwrap().0; }
+        }
+        fn allow(&self) {
+            let (m, c) = &*self.released;
+            *m.lock().unwrap() = true;
+            c.notify_all();
+        }
+    }
+
+    /// Тестовая обёртка Remote: пауза после чтения LOCK_FILE и/или замена замка в этот момент.
+    struct Wedge<T> { inner: T, gate: Option<Gate>, replace: Option<(String, String)> }
+    impl<T: crate::remote::Remote> crate::remote::Remote for Wedge<T> {
+        fn list(&mut self, rel: &str) -> R<Vec<crate::remote::Item>> { self.inner.list(rel) }
+        fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> {
+            let r = self.inner.read(rel)?;
+            if rel == LOCK_FILE {
+                if let Some((device, token)) = self.replace.take() { self.inner.write(rel, &body(&device, &token))?; }
+                if let Some(gate) = self.gate.take() { gate.hold(); }
+            }
+            Ok(r)
+        }
+        fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { self.inner.write(rel, bytes) }
+        fn create(&mut self, rel: &str, bytes: &[u8]) -> R<()> { self.inner.create(rel, bytes) }
+        fn create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> R<bool> { self.inner.create_if_absent(rel, bytes) }
+        fn remove(&mut self, rel: &str) -> R<()> { self.inner.remove(rel) }
+        fn mkdir(&mut self, rel: &str) -> R<()> { self.inner.mkdir(rel) }
+    }
+
+    fn lock_token(s: &FakeServer) -> Option<String> {
+        let b = s.get("Кабинет/Роман/kabinet.lock")?;
+        let v: Value = serde_json::from_slice(&b).ok()?;
+        v.get("token").and_then(|t| t.as_str()).map(|t| t.to_string())
+    }
+
+    /// L2.1 ХАРАКТЕРИЗАЦИЯ известного дефекта: два претендента на просроченный замок оба получают Ok(true).
+    /// Не доказывает безопасность; при исправлении тест заменить проверкой «ровно один получил замок».
+    #[test]
+    fn l2_1_two_claimants_of_expired_lock_both_win_characterization() {
+        let s = FakeServer::new();
+        let mut seed = remote(&s);
+        seed.write(LOCK_FILE, &body("old", "tok-old")).unwrap();
+        s.0.lock().unwrap().clock += 1_000_000; // TTL 100_000 — замок просрочен
+
+        let gate = Gate::new();
+        let mut a = Wedge { inner: remote(&s), gate: Some(gate.clone()), replace: None };
+        let t = std::thread::spawn(move || try_acquire(&mut a, "A", "tok-a", 100_000));
+        gate.wait_reached(); // A прочитал старое состояние и приостановлен ДО записи
+        let mut b = remote(&s);
+        let rb = try_acquire(&mut b, "B", "tok-b", 100_000); // B тоже видит старое состояние
+        gate.allow();
+        let ra = t.join().unwrap();
+
+        let writes = s.0.lock().unwrap().log.iter().filter(|l| *l == "PUT /Кабинет/Роман/kabinet.lock").count();
+        assert_eq!(ra.unwrap(), true, "A считает, что взял замок");
+        assert_eq!(rb.unwrap(), true, "B считает, что взял замок — двойное владение");
+        assert!(writes >= 2, "было не менее двух записей замка: {writes}");
+        assert_eq!(lock_token(&s).as_deref(), Some("tok-a"), "конечный владелец — A (последняя запись)");
+    }
+
+    /// L2.2 ХАРАКТЕРИЗАЦИЯ известного дефекта: release удаляет замок, заменённый на чужой токен между
+    /// чтением токена и remove. Не доказывает безопасность.
+    #[test]
+    fn l2_2_release_removes_lock_replaced_after_token_read_characterization() {
+        let s = FakeServer::new();
+        let mut a = remote(&s);
+        assert!(try_acquire(&mut a, "A", "tok-a", 100_000).unwrap());
+        let mut w = Wedge { inner: remote(&s), gate: None, replace: Some(("B".to_string(), "tok-b".to_string())) };
+        let res = release(&mut w, "tok-a");
+        assert!(res.is_ok(), "release вернул успех");
+        assert!(s.get("Кабинет/Роман/kabinet.lock").is_none(), "release удалил замок, принадлежавший B");
+    }
+
+    /// L2.3 ХАРАКТЕРИЗАЦИЯ: два экземпляра одного device оба считают, что владеют замком;
+    /// у прежнего владельца нет проверки владения до следующей записи.
+    #[test]
+    fn l2_3_same_device_two_instances_both_win_characterization() {
+        let s = FakeServer::new();
+        let mut a = remote(&s);
+        assert!(try_acquire(&mut a, "D", "tok-a", 100_000).unwrap());
+        let mut b = remote(&s);
+        assert_eq!(try_acquire(&mut b, "D", "tok-b", 100_000).unwrap(), true, "heartbeat чужого экземпляра того же device");
+        assert_eq!(lock_token(&s).as_deref(), Some("tok-b"), "токен заменён вторым экземпляром");
+        // у A нет примитива «проверить, что замок ещё мой»: единственная сверка токена — в release
+        assert!(release(&mut a, "tok-a").is_ok());
+        assert!(s.get("Кабинет/Роман/kabinet.lock").is_some(), "release прежнего токена не снимает чужой замок");
+    }
+
+    /// L2.4 ХАРАКТЕРИЗАЦИЯ: после отбора просроченного замка прежний владелец продолжает работу —
+    /// примитив genlock не перепроверяет владение перед операциями.
+    #[test]
+    fn l2_4_previous_owner_continues_after_ttl_characterization() {
+        let s = FakeServer::new();
+        let mut a = remote(&s);
+        assert!(try_acquire(&mut a, "A", "tok-a", 100_000).unwrap());
+        s.0.lock().unwrap().clock += 1_000_000; // TTL истёк
+        let mut b = remote(&s);
+        assert!(try_acquire(&mut b, "B", "tok-b", 100_000).unwrap(), "просроченный замок отобран");
+        // A продолжает защищаемую работу: primitives не блокируют запись по потерянному замку
+        a.write("Главы/aaaaaa.md", "запись после потери замка".as_bytes()).unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "запись после потери замка".as_bytes());
     }
 }
