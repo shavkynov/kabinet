@@ -236,3 +236,24 @@ fn caller_save_stops_and_keeps_known_hash_when_guard_cannot_read_the_file() {
     assert!(card.is_dir(), "файл карточки не перезаписан");
     assert_eq!(syncguard::known_hash(&card), known_card, "known_hash карточки не обновлён");
 }
+
+#[cfg(windows)]
+#[test]
+fn caller_save_stops_on_unreadable_existing_file_and_keeps_its_bytes() {
+    // Ошибка чтения СУЩЕСТВУЮЩЕГО файла (не NotFound) без chmod: файл открыт с запретом
+    // совместного доступа. Запись должна остановиться, прежние байты — сохраниться.
+    use std::os::windows::fs::OpenOptionsExt;
+    let p = Project::new("caller_locked_read");
+    store::write_chapter(&p.dir, &p.id, "исходный текст").unwrap();
+    store::read_chapter(&p.dir, &p.id).unwrap();
+    let file = p.chapter_file();
+    let known_before = syncguard::known_hash(&file);
+    let lock = fs::OpenOptions::new().read(true).share_mode(0).open(&file).expect("открыть файл с запретом совместного доступа");
+    let res = store::write_chapter(&p.dir, &p.id, "моя правка");
+    drop(lock);
+    let err = res.expect_err("write_chapter должен вернуть ошибку чтения, а не успех");
+    assert!(err.contains("Запись остановлена"), "ошибка защиты доходит до вызывающего: {}", err);
+    assert_eq!(fs::read_to_string(&file).unwrap(), "исходный текст", "файл не перезаписан, байты прежние");
+    assert_eq!(syncguard::known_hash(&file), known_before, "known_hash не обновлён после ошибки");
+    assert!(!p.dir.join("Конфликты").exists(), "конфликтная копия не создавалась");
+}
