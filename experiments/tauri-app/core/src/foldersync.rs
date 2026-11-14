@@ -348,6 +348,14 @@ impl<T: Remote> FolderSync<T> {
         self.remote.write(rel, data)
     }
 
+    fn remove_local(&self, rel: &str) -> R<()> {
+        match fs::remove_file(self.dir.join(rel)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("Не удалось удалить локальный файл «{}»: {}. Синхронизация остановлена, состояние не изменено.", rel, e)),
+        }
+    }
+
     fn keep_foreign(&mut self, rel: &str, bytes: &[u8], label: &str) -> R<String> { self.keep(rel, bytes, label, "с другого устройства") }
 
     fn adopt_remote_structure(&mut self, remote: &mut BTreeMap<String, RemoteEntry>, local: &mut BTreeMap<String, String>) -> R<()> {
@@ -576,7 +584,7 @@ impl<T: Remote> FolderSync<T> {
                         res.pulled.push(rel.clone());
                     } else {
                         if b.as_ref() != Some(rh) { let bytes = bytes?; self.keep_foreign(rel, &bytes, &label_of(rel))?; }
-                        let _ = fs::remove_file(self.dir.join(rel));
+                        self.remove_local(rel)?;
                         self.state.remove(rel);
                         res.pulled.push(rel.clone());
                     }
@@ -603,7 +611,7 @@ impl<T: Remote> FolderSync<T> {
                     }
                     // Прямое чтение подтверждает исчезновение: неполный список облака не должен приводить к удалению.
                     if self.remote.read(rel)?.is_some() { break; }
-                    let _ = fs::remove_file(self.dir.join(rel));
+                    self.remove_local(rel)?;
                     self.state.remove(rel);
                     res.pulled.push(rel.clone());
                 } else {
@@ -1254,6 +1262,26 @@ mod tests {
         assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()), "гонка создания должна дать конфликт");
         assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "наш текст".as_bytes(), "наша версия записана");
         assert!(s.names().iter().any(|n| n.contains("Конфликты") && s.get(n).as_deref() == Some("чужой текст".as_bytes())), "чужая версия сохранена: {:?}", s.names());
+    }
+
+    /// Неудачное локальное удаление не должно молча считаться успехом (файл занят другим процессом).
+    #[cfg(windows)]
+    #[test]
+    fn local_delete_failure_is_reported_not_hidden() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let s = FakeServer::new();
+        let a = tmpdir("del-lock").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        // облако удалило главу, а локальный файл держим открытым так, что удалить его нельзя
+        s.0.lock().unwrap().files.remove("/Кабинет/Роман/Главы/aaaaaa.md");
+        let f = a.join("Главы/aaaaaa.md");
+        let _lock = fs::OpenOptions::new().read(true).share_mode(1).open(&f).unwrap();
+        let res = sa.sync();
+        assert!(res.is_err(), "неудачное локальное удаление не должно молча считаться успехом: {:?}", res.as_ref().map(|r| r.pulled.clone()));
+        assert!(f.exists(), "файл на месте");
+        assert_eq!(fs::read_to_string(&f).unwrap(), "текст");
     }
 
     /// Папка-ссылка (junction) не должна обходиться: иначе в синхронизацию попадут файлы вне проекта.
