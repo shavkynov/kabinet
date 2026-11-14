@@ -396,8 +396,8 @@ body.focus-mode #chromeRight { display: none; }
   border-radius: 6px;
   font-size: 13px;
 }
-#toolbar button:hover { background: var(--sel); color: var(--text); }
-#toolbar button.active { background: var(--sel); color: var(--accent); }
+#toolbar button:hover, #notesDock button:hover { background: var(--sel); color: var(--text); }
+#toolbar button.active, #notesDock button.active { background: var(--sel); color: var(--accent); }
 #toolbar .sep { width: 1px; height: 16px; background: var(--line); margin: 0 6px; }
 #toolbar.disabled { opacity: .35; pointer-events: none; }
 
@@ -699,7 +699,7 @@ body.focus-mode #notesResizer { display: none; }
 #barSel { color: var(--accent); }
 .bar-btns { display: flex; gap: 2px; flex: none; }
 #toolbar .bar-btns button { font-size: 12px; min-width: 0; padding: 3px 8px; }
-#toolbar button[data-act].active { background: var(--sel); color: var(--accent); }
+#toolbar button[data-act].active, #notesDock button[data-act].active { background: var(--sel); color: var(--accent); }
 
 #fmtGroup { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 4px; }
 #fmtGroup button {
@@ -1212,3 +1212,33 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 #syncDialog .sync-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 38vh; overflow-y: auto; }
 #syncDialog .sync-main { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
 #syncDialog button.sync-row { text-align: left; padding: 10px 12px; }
+
+/* Нижняя полоса: панель сведений справа и заголовок «Корзина» слева одной высоты, их верхние линии лежат на одной прямой,
+   а текст по вертикали стоит по центру (высота не зависит от шрифта и движка окна). */
+:root { --foot-h: 34px; }
+#toolbar { box-sizing: border-box; height: var(--foot-h); padding-top: 0; padding-bottom: 0; }
+.bar-info { align-items: center; }
+/* Высота задана жёстко (а не min-height): эмодзи или шрифт другого движка не растянут полосу, и линии сверху совпадают. */
+#sideDock .sec-head { box-sizing: border-box; height: calc(var(--foot-h) - 1px); padding-top: 0; padding-bottom: 0; overflow: hidden; line-height: 1.2; }
+
+/* Полоса справа: тот же рост и верхняя линия, режимы письма вынесены из нижней панели. */
+#notesDock {
+  flex: none; position: sticky; bottom: 0; margin-top: auto; z-index: 2;
+  box-sizing: border-box; height: var(--foot-h); padding: 0 12px;
+  display: flex; align-items: center; gap: 2px; overflow: hidden;
+  border-top: 1px solid var(--line); background: var(--side);
+}
+#notesDock button {
+  background: none; border: none; color: var(--muted); border-radius: 6px;
+  font-size: 12px; min-width: 0; padding: 3px 8px; cursor: pointer; white-space: nowrap;
+}
+/* Пока панель справа открыта, режимы письма живут в ней; в нижней панели они остаются, если справа панели нет (и на телефоне). */
+body:not(.mob):not(.notes-hidden) #toolbar .env { display: none; }
+body.mob #notesDock { display: none; }
+
+/* Плашка цели в нижней панели: по высоте строго внутри полосы, отступы сверху и снизу равны. */
+:root { --goal-dock-h: 25px; }
+#goal.dock { left: 12px; bottom: calc((var(--foot-h) - 1px - var(--goal-dock-h)) / 2); }
+#goal.dock #goalBtn { box-sizing: border-box; height: var(--goal-dock-h); padding: 0 10px; gap: 3px; justify-content: center; border-radius: 8px; }
+#goal.dock #goalBar { height: 4px; }
+#goal.dock + #goalPop { bottom: calc(var(--foot-h) + 6px); }

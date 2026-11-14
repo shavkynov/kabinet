@@ -84,7 +84,7 @@ function showNothing() {
 
 // keepView: перечитать уже открытый документ, не сбрасывая лист и курсор (см. setEditorContent).
 async function openDoc(kind, id, keepView) {
-  if (id === currentId && kind === currentKind) return;
+  if (id === currentId && kind === currentKind && !keepView) return;
   const token = ++openToken;
   if (!(await flush())) { // предыдущий документ не записался: остаёмся в нём, текст не потеряется
     setStatus('error', 'Не удалось сохранить главу. Переход отменён, текст остался на экране');
@@ -117,8 +117,10 @@ async function openDoc(kind, id, keepView) {
     if (kind === 'chapter') loadChapMeta(id);
     else clearChapMeta();
     updateAllSelections();
+    return true;
   } catch (err) {
     showError(err.message);
+    return false;
   }
 }
 
@@ -148,7 +150,10 @@ async function deleteDoc(kind, id) {
   try {
     const idx = indexIn(kind, id);
     const removedTitle = (itemsOf(kind).find((c) => c.id === id) || {}).title || '';
-    await flush();
+    if (!(await flush())) {
+      setStatus('error', 'Не удалось сохранить изменения. Удаление отменено, текст остался на экране');
+      return;
+    }
     const updated = kind === 'chapter' ? await api.deleteChapter(id) : await api.deleteItem(kind, id);
     if (!updated) return; // отмена
     setStatus('ok', t('«{0}» перемещено в Корзину', removedTitle));

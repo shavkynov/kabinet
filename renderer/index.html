@@ -167,9 +167,9 @@
           <span id="barTotal"></span>
         </div>
         <div class="bar-btns">
-          <button type="button" data-act="typewriter" title="Печатная машинка (⌘⇧T)">Машинка</button>
-          <button type="button" data-act="sound" title="Звуки клавиш (⌘⇧M)">Звук</button>
-          <button type="button" data-act="ambient" title="Фоновый эмбиент (⌘⇧A)">Эмбиент</button>
+          <button type="button" data-act="typewriter" class="env" title="Печатная машинка (⌘⇧T)">Машинка</button>
+          <button type="button" data-act="sound" class="env" title="Звуки клавиш (⌘⇧M)">Звук</button>
+          <button type="button" data-act="ambient" class="env" title="Фоновый эмбиент (⌘⇧A)">Эмбиент</button>
           <button type="button" data-act="split" title="Вторая глава рядом, например для переписывания">Рядом</button>
           <button type="button" data-act="notes" title="Панель справа: синопсис и заметки">Справа</button>
           <button type="button" data-act="focus" title="Только лист (⌘⇧F, выход Esc)">Только лист</button>
@@ -245,6 +245,12 @@
         </div>
         <div class="sec-body"><textarea id="noteText" class="rtext" disabled placeholder="Выберите заметку слева или создайте новую"></textarea></div>
       </section>
+      <!-- нижняя полоса справа: той же высоты, что панель сведений и «Корзина»; здесь режимы письма -->
+      <div id="notesDock" role="toolbar" aria-label="Режим письма">
+        <button type="button" data-act="typewriter" title="Печатная машинка (⌘⇧T)">Машинка</button>
+        <button type="button" data-act="sound" title="Звуки клавиш (⌘⇧M)">Звук</button>
+        <button type="button" data-act="ambient" title="Фоновый эмбиент (⌘⇧A)">Эмбиент</button>
+      </div>
     </aside>
 
     <!-- комментарии: кнопка у выделения и маленькое поле ввода -->

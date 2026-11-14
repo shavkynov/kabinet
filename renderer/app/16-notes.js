@@ -8,7 +8,7 @@ let noteToken = 0;
 async function flushNote() {
   clearTimeout(noteTimer);
   noteTimer = null;
-  if (!noteDirty || !noteId) return;
+  if (!noteDirty || !noteId) return true;
   const id = noteId;
   const text = $('#noteText').value;
   noteDirty = false;
@@ -16,12 +16,14 @@ async function flushNote() {
     const res = await api.writeItem('note', id, text);
     setStatus('ok', 'Сохранено');
     noteSyncConflict(res);
+    return true;
   } catch (err) {
     noteDirty = true;
     setStatus('error', 'Не удалось сохранить заметку! Повтор через 3 с…');
     clearTimeout(noteTimer);
     noteTimer = setTimeout(flushNote, 3000);
     console.error('note save failed:', err);
+    return false;
   }
 }
 

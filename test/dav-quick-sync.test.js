@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../renderer/app/36-dav.js'), 'utf8');
-function setup(result = { linked: true, lastSync: 1 }) {
+function setup(result = { linked: true, lastSync: 1, status: 'done' }) {
   const calls = [], messages = [];
   const ctx = vm.createContext({
     project: {}, dirty: false, failedWrite: null, noteDirty: false, cmtDirty: false, cmDirty: false, p2: { dirty: false },
@@ -28,9 +28,17 @@ for (const [label, result, expected] of [
   ['busy', { linked: true, busy: true, lastSync: 1 }, 'Идёт обмен…'],
   ['conflict', { linked: true, conflict: true, lastSync: 1 }, 'Был конфликт: чужая версия текста лежит в папке «Конфликты» проекта.'],
   ['no completed sync', { linked: true, lastSync: 0 }, 'Ещё не обновлялось.'],
+  ['exchange stopped', { linked: true, status: 'stopped', lastSync: 0 }, 'Обмен остановлен.'],
+  ['exchange deferred', { linked: true, status: 'skipped', lastSync: 0 }, 'Обмен отложен: сейчас идёт другой обмен.'],
 ]) test(`F5: ${label} is not success`, async () => {
   const h = setup(result); await h.run();
   assert.equal(h.messages.at(-1).text, expected);
+});
+// Старый JS-backend (Electron/Android) не возвращает `status` — успех по-прежнему виден по lastSync.
+test('F5 works with a backend that has no status field', async () => {
+  const h = setup({ linked: true, lastSync: 1 });
+  await h.run();
+  assert.equal(h.messages.at(-1).text, 'Синхронизировано');
 });
 for (const flag of ['dirty', 'noteDirty', 'cmtDirty', 'cmDirty', 'pane2']) test(`F5 stops when ${flag} remains unsaved`, async () => {
   const h = setup();

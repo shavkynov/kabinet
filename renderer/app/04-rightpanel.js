@@ -12,19 +12,21 @@ function chapMetaValue() {
 async function flushChapMeta() {
   clearTimeout(cmTimer);
   cmTimer = null;
-  if (!cmDirty || !cmId) return;
+  if (!cmDirty || !cmId) return true;
   const id = cmId;
   const data = chapMetaValue();
   cmDirty = false;
   try {
     await api.writeChapterMeta(id, data);
     setStatus('ok', 'Сохранено');
+    return true;
   } catch (err) {
     cmDirty = true;
     setStatus('error', 'Не удалось сохранить синопсис! Повтор через 3 с…');
     clearTimeout(cmTimer);
     cmTimer = setTimeout(flushChapMeta, 3000);
     console.error('chapter meta save failed:', err);
+    return false;
   }
 }
 

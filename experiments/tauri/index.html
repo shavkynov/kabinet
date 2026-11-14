@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кабинет Test</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 960px; margin: auto; padding: 24px; }
+    .warning { border: 2px solid #b77800; padding: 12px; }
+    #toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    button { padding: 8px 12px; font: inherit; }
+    .tiptap { min-height: 320px; border: 1px solid #888; padding: 24px; font: 20px/1.65 Georgia, serif; overflow-wrap: anywhere; }
+    .tiptap:focus { outline: 2px solid #648bc5; outline-offset: 2px; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #888; padding: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Кабинет Test: проверка редактора</h1>
+  <p class="warning" role="note">Эксперимент. Текст существует только в памяти и пропадёт при закрытии окна. Не используйте для настоящей работы. Файлы проектов и облако не подключены.</p>
+  <div id="toolbar" role="group" aria-label="Форматирование">
+    <button type="button" data-command="bold">Жирный</button>
+    <button type="button" data-command="italic">Курсив</button>
+    <button type="button" data-command="undo">Отменить</button>
+    <button type="button" data-command="redo">Повторить</button>
+    <button type="button" data-command="alignCenter" aria-pressed="false">По центру</button>
+    <button type="button" data-command="alignRight" aria-pressed="false">По правому краю</button>
+  </div>
+  <div id="editor"></div>
+  <p id="status" role="status"></p>
+  <details>
+    <summary>Текущий Markdown в памяти</summary>
+    <pre id="markdown"></pre>
+  </details>
+  <script src="editor.js"></script>
+</body>
+</html>

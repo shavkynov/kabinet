@@ -1,0 +1,131 @@
+name: Кабинет на Tauri (сборка)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [experiment/tauri-rust, experiment/tauri-rust-finish]
+    paths:
+      - 'experiments/tauri-app/**'
+      - '.github/workflows/tauri-app.yml'
+      - 'renderer/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tauri-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Сборка (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            binary: experiments/tauri-app/src-tauri/target/release/kabinet-tauri.exe
+          - os: macos-15
+            binary: experiments/tauri-app/out/Kabinet-Tauri-macos.zip
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Интерфейс для Tauri
+        run: node experiments/tauri-app/build.cjs
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc -Vv
+      - name: Тесты Rust (ядро — проекты, Яндекс Диск, синхронизация)
+        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
+      - name: Сборка
+        run: cargo build --locked --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+      - name: Установщик Windows (NSIS)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: experiments/tauri-app
+        run: npx --yes @tauri-apps/cli@2 build --bundles nsis
+      - name: Установщик macOS (dmg)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: experiments/tauri-app
+        run: npx --yes @tauri-apps/cli@2 build --bundles dmg
+      - name: Cargo.lock оболочки не изменился при сборке
+        shell: bash
+        run: git diff --exit-code -- experiments/tauri-app/src-tauri/Cargo.lock
+
+      - name: Пакет .app для macOS (ссылка kabinet:// после входа в Яндекс работает только из пакета)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          APP="experiments/tauri-app/out/Kabinet-Tauri.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp experiments/tauri-app/src-tauri/target/release/kabinet-tauri "$APP/Contents/MacOS/kabinet-tauri"
+          cp build/icon.icns "$APP/Contents/Resources/icon.icns"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>kabinet-tauri</string>
+            <key>CFBundleIdentifier</key><string>ru.kabinet.writer.tauri</string>
+            <key>CFBundleName</key><string>Кабинет (Tauri, тест)</string>
+            <key>CFBundleDisplayName</key><string>Кабинет (Tauri, тест)</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.38.0</string>
+            <key>CFBundleVersion</key><string>0.38.0</string>
+            <key>LSMinimumSystemVersion</key><string>10.15</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>CFBundleURLTypes</key>
+            <array><dict>
+              <key>CFBundleURLName</key><string>ru.kabinet.writer.tauri</string>
+              <key>CFBundleURLSchemes</key><array><string>kabinet</string></array>
+            </dict></array>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+          codesign --force --deep -s - "$APP"
+          ditto -c -k --keepParent "$APP" experiments/tauri-app/out/Kabinet-Tauri-macos.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tauri-app-cargo-lock-${{ matrix.os }}-${{ github.sha }}
+          path: experiments/tauri-app/src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: kabinet-tauri-installer-windows-${{ github.sha }}
+          path: experiments/tauri-app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: kabinet-tauri-installer-macos-${{ github.sha }}
+          path: experiments/tauri-app/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kabinet-tauri-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 7

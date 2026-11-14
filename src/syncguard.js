@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { writeFileAtomic, hashText, knownHash } = require('./fsutil');
 
@@ -17,6 +18,31 @@ function stamp(d = new Date()) {
 }
 
 const safeName = (s) => String(s || '').replace(/[\\/:*?"<>|\n\r\t]/g, '-').replace(/^\.+/, '').trim().slice(0, 60) || 'без названия';
+
+// Полный SHA-256 содержимого различает версии даже при одинаковых времени и названии.
+// Ограничиваем байты имени с запасом под временный суффикс writeFileAtomic.
+function conflictName(label, ext, data, now = new Date(), suffix = 'с другого устройства') {
+  const digest = crypto.createHash('sha256').update(data).digest('hex');
+  const head = `${stamp(now)} `;
+  const tail = ` (${suffix}) ${digest}${ext}`;
+  let title = '';
+  for (const char of safeName(label)) {
+    if (Buffer.byteLength(head + title + char + tail, 'utf8') > 220) break;
+    title += char;
+  }
+  return head + title + tail;
+}
+
+/**
+ * Кандидаты имени конфликтной копии: обычное (время + название) и с SHA-256 содержимого.
+ * Второе нужно, если под обычным именем уже лежит другая версия (та же секунда, то же название).
+ */
+function conflictNames(label, suffix, ext, data, now = new Date()) {
+  return [
+    `${stamp(now)} ${safeName(label)} (${suffix})${ext}`,
+    conflictName(label, ext, data, now, suffix),
+  ];
+}
 
 /**
  * Вызывать перед записью файла. Возвращает имя сохранённой чужой версии или null, если конфликта нет.
@@ -35,8 +61,16 @@ function guardWrite(dir, file, newText, label, now = new Date()) {
   if (h === k || h === hashText(newText)) return null;
   const folder = path.join(dir, CONFLICT_DIR);
   fs.mkdirSync(folder, { recursive: true });
-  const name = `${stamp(now)} ${safeName(label)} (с другого устройства)${path.extname(file)}`;
-  writeFileAtomic(path.join(folder, name), disk);
+  const name = conflictName(label, path.extname(file), disk, now);
+  const target = path.join(folder, name);
+  try {
+    const saved = fs.readFileSync(target, 'utf8');
+    if (saved === disk) return name;
+    throw new Error('Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  writeFileAtomic(target, disk);
   return name;
 }
 
@@ -59,4 +93,4 @@ function assertNotPlaceholder(file) {
   }
 }
 
-module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName };
+module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName, conflictName, conflictNames };

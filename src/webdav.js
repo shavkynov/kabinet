@@ -65,7 +65,15 @@ function parseMultistatus(xml) {
     try {
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(href)) href = new URL(href).pathname;
     } catch { /* оставляем как есть */ }
-    try { href = decodeURIComponent(href); } catch { /* уже раскодирован */ }
+    // Декодируем по частям пути: %2F внутри имени не должен превращаться в разделитель и подменять файл.
+    let bad = false;
+    href = href.split('/').map((part) => {
+      let d = part;
+      try { d = decodeURIComponent(part); } catch { /* уже раскодирован */ }
+      if (d.includes('/') || d.includes('\0')) bad = true;
+      return d;
+    }).join('/');
+    if (bad) continue;
     const dir = /<(?:[\w.-]+:)?collection\s*\/?>/i.test(block);
     const sm = /<(?:[\w.-]+:)?getcontentlength[^>]*>(\d+)</i.exec(block);
     const mm = /<(?:[\w.-]+:)?getlastmodified[^>]*>([^<]*)</i.exec(block);

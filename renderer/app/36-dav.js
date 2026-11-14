@@ -126,6 +126,10 @@ async function davQuickSync() {
     if (project !== activeProject) return;
     if (!result || !result.linked) {
       setStatus('error', t('Проект не связан с сетевой папкой.'));
+    } else if (result.status === 'stopped') {
+      setStatus('ok', t('Обмен остановлен.'));
+    } else if (result.status === 'skipped') {
+      setStatus('ok', t('Обмен отложен: сейчас идёт другой обмен.'));
     } else if (result.error) {
       setStatus('error', t('Синхронизация: {0}', tdom(result.error)));
     } else if (result.busy) {
@@ -280,13 +284,13 @@ async function davAttach(root, mode) {
   if (res.exists && !res.status) {
     davShow(
       davEl('h2', '', t('В этой папке уже есть проект')),
-      davEl('p', 'sync-line', t('«Соединить»: правки с обеих сторон сохранятся, спорные тексты уйдут в папку «Конфликты». «Заменить папку»: в облако запишется проект с этого компьютера, а то, что там лежало, попадёт в «Конфликты» и не пропадёт.')),
+      davEl('p', 'sync-line', t('«Взять облако»: проект из папки станет основным, ваши локальные версии сохранятся в «Конфликты». «Выгрузить моё»: в папку уйдёт проект с этого компьютера, а то, что там лежало, сохранится в «Конфликты».')),
       (() => {
         const actions = davEl('div', 'dialog-actions');
         actions.append(
           davBtn(t('Назад'), () => davStepFolder('/')),
-          davBtn(t('Заменить папку'), () => davAttach(root, 'replace').catch((e) => showError(e.message))),
-          davBtn(t('Соединить'), () => davAttach(root, 'merge').catch((e) => showError(e.message)), 'primary'),
+          davBtn(t('Выгрузить моё'), () => davAttach(root, 'replace').catch((e) => showError(e.message))),
+          davBtn(t('Взять облако'), () => davAttach(root, 'cloud').catch((e) => showError(e.message)), 'primary'),
         );
         return actions;
       })(),

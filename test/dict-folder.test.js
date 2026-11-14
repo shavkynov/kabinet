@@ -46,12 +46,12 @@ async function scenario(localWords, remoteWords, blockBackup = false) {
     const conflicts = path.join(dir, 'Конфликты');
     if (blockBackup) {
       fs.writeFileSync(conflicts, 'blocked');
-      await assert.rejects(sync.sync(), 'dictionary-only replacement must stop when backup cannot be written');
+      await assert.rejects(sync.takeCloud(), 'dictionary-only replacement must stop when backup cannot be written');
       assert.equal(fs.readFileSync(file, 'utf8'), localBefore);
       assert.deepEqual(adapter.files.get('project.json'), remoteBefore);
       return;
     }
-    await sync.sync();
+    await sync.takeCloud();
     const names = fs.existsSync(conflicts) ? fs.readdirSync(conflicts).filter((name) => name.endsWith('.json')) : [];
     assert.equal(names.length, 1, 'dictionary-only local metadata must be preserved');
     const saved = fs.readFileSync(path.join(conflicts, names[0]), 'utf8');

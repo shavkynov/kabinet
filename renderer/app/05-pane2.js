@@ -47,7 +47,7 @@ function pane2Markdown() {
 async function flushPane2() {
   clearTimeout(p2.timer);
   p2.timer = null;
-  if (!p2.dirty || !p2.id) return;
+  if (!p2.dirty || !p2.id) return true;
   const id = p2.id;
   const text = pane2Markdown();
   p2.dirty = false;
@@ -56,12 +56,14 @@ async function flushPane2() {
     setStatus('ok', 'Сохранено');
     noteSyncConflict(res);
     refreshTotals();
+    return true;
   } catch (err) {
     p2.dirty = true;
     setStatus('error', 'Не удалось сохранить вторую панель! Повтор через 3 с…');
     clearTimeout(p2.timer);
     p2.timer = setTimeout(flushPane2, 3000);
     console.error('pane2 save failed:', err);
+    return false;
   }
 }
 
@@ -115,8 +117,10 @@ async function openPane2(id, keepView) {
     showPane2(true);
     fillP2Select();
     $('#p2Scroll').scrollTop = keepView ? top : 0;
+    return true;
   } catch (err) {
     showError(err.message);
+    return false;
   }
 }
 

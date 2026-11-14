@@ -101,12 +101,11 @@ function createBackend(host, { session } = {}) {
     return path.join(COPIES, `${name}-${key}`);
   }
 
-  // Копии лежат вне проекта и хранятся короче, чем на компьютере: память телефона не безгранична.
-  const BACKUP_OPTS = { keep: 20, keepDays: 14 };
+  // Копии лежат вне проекта; лимит общий для всех платформ — не более 30 копий на проект (src/backup.js).
 
   function autoBackup() {
     if (!currentDir) return null;
-    try { return backup.makeBackup(currentDir, { ...BACKUP_OPTS, root: backupRoot(currentDir) }); } catch (err) {
+    try { return backup.makeBackup(currentDir, { root: backupRoot(currentDir) }); } catch (err) {
       console.error('backup failed:', err);
       return null;
     }
@@ -482,7 +481,7 @@ function createBackend(host, { session } = {}) {
   handle('project:search', (query) => searcher.searchProject(requireDir(), query));
   handle('project:replace', (find, repl, dry) => {
     const dir = requireDir();
-    if (!dry) backup.makeBackup(dir, { ...BACKUP_OPTS, root: backupRoot(dir) });
+    if (!dry) backup.makeBackup(dir, { root: backupRoot(dir) });
     return replacer.replaceProject(dir, find, repl, { dry: !!dry });
   });
 
@@ -527,7 +526,7 @@ function createBackend(host, { session } = {}) {
       }
     }
     if (!items.length) throw new Error(skipped.join('\n') || t('В файлах нет текста.'));
-    backup.makeBackup(dir, { ...BACKUP_OPTS, root: backupRoot(dir) });
+    backup.makeBackup(dir, { root: backupRoot(dir) });
     const out = project.importChapters(dir, items);
     return { project: out.project, ids: out.ids, skipped };
   });

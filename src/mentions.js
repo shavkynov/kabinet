@@ -29,7 +29,9 @@ function generatedOf(title, card, kind, explicit) {
   const ignore = new Set((card.ignore || []).map((x) => String(x).trim().toLowerCase()));
   const keys = [];
   const capKeys = new Set();
-  for (const f of declension.nameForms(title, card.aliases || [], { kind })) {
+  // Как в cardIndex (src/project.js): предметы склоняются как места, иначе «кольцо», «зеркало» остаются без форм.
+  const declKind = kind === 'item' ? 'place' : kind;
+  for (const f of declension.nameForms(title, card.aliases || [], { kind: declKind })) {
     const key = f.toLowerCase();
     if (key.length < 2 || ignore.has(key) || explicit.includes(key)) continue;
     keys.push(key);

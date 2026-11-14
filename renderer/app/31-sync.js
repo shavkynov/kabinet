@@ -58,10 +58,8 @@ async function applyExternal(files) {
     } else if (itemsOf(currentKind).some((c) => c.id === currentId)) {
       const kind = currentKind;
       const id = currentId;
-      currentKind = null;
-      currentId = null;
-      await openDoc(kind, id, true); // чужая правка не должна выбрасывать в начало главы
-      reloaded = true;
+      // Состояние прежнего документа сохраняется, пока новое чтение не завершилось успешно.
+      reloaded = (await openDoc(kind, id, true)) || reloaded;
     }
   }
   if (p2.id && set.has(relFile('chapter', p2.id))) {
@@ -69,9 +67,7 @@ async function applyExternal(files) {
       kept = true;
     } else {
       const id = p2.id;
-      p2.id = null;
-      await openPane2(id, true);
-      reloaded = true;
+      reloaded = (await openPane2(id, true)) || reloaded;
     }
   }
   if (noteId && set.has(relFile('note', noteId))) {

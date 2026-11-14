@@ -7,9 +7,9 @@ const source=fs.readFileSync(path.join(__dirname,'../src/davlink.js'),'utf8');
 const tick=()=>new Promise((r)=>setImmediate(r));
 function setup(t){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kab-dav-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  const state={exports:0,imports:0,syncs:0,created:0,intervals:0,exists:false,ensureError:null,probeError:null,exportTask:()=>Promise.resolve(),syncTask:()=>Promise.resolve({pulled:[],conflicts:[]})};
+  const state={exports:0,imports:0,syncs:0,takes:0,created:0,intervals:0,exists:false,ensureError:null,probeError:null,exportTask:()=>Promise.resolve(),syncTask:()=>Promise.resolve({pulled:[],conflicts:[]})};
   const adapter={ensureRoot:async()=>{if(state.ensureError)throw state.ensureError;},read:async()=>null,write:async()=>{},remove:async()=>{}};
-  const folders={isSyncable:()=>true,createFolderSync:()=>{state.created++;return{hasProject:async()=>{if(state.probeError)throw state.probeError;return state.exists;},exportAll:async()=>{state.exports++;return state.exportTask();},sync:async()=>{state.syncs++;return state.syncTask();},replaceAll:async()=>{},importAll:async()=>{state.imports++;}};}};
+  const folders={isSyncable:()=>true,createFolderSync:()=>{state.created++;return{hasProject:async()=>{if(state.probeError)throw state.probeError;return state.exists;},exportAll:async()=>{state.exports++;return state.exportTask();},sync:async()=>{state.syncs++;return state.syncTask();},replaceAll:async()=>{},takeCloud:async()=>{state.takes++;},importAll:async()=>{state.imports++;}};}};
   const mod={exports:{}};
   const deps={'fs':{...fs,watch:()=>({on(){},close(){}})},'./webdav':{createWebDav:()=>adapter,normalizeUrl:(s)=>s,browseFolders:async()=>[]},'./folder':folders,'./cloud':{LOCK_FILE:'kabinet.lock'},'./fsutil':{writeFileAtomic:(p,s)=>fs.writeFileSync(p,s)},'./single-flight':{createSingleFlight}};
   vm.runInNewContext(source,{module:mod,exports:mod.exports,require:(id)=>deps[id]||require(id),console,TextEncoder,TextDecoder,
@@ -45,6 +45,16 @@ test('failed first export leaves no linked project and can be retried',async(t)=
 test('existing project in ask mode is not exported or linked',async(t)=>{
   const x=setup(t);x.state.exists=true;const result=await x.link.attach(x.dir,x.acc);
   assert.equal(result.exists,true);assert.equal(x.state.exports,0);assert.equal(x.state.intervals,0);assert.equal(x.link.status(x.dir).linked,false);
+});
+test('cloud mode takes the cloud copy and links the project',async(t)=>{
+  const x=setup(t);x.state.exists=true;
+  const result=await x.link.attach(x.dir,x.acc,'cloud');
+  assert.equal(x.state.takes,1);assert.equal(result.exists,true);assert.equal(x.link.status(x.dir).linked,true);
+});
+test('unknown mode for an existing folder is rejected without changes',async(t)=>{
+  const x=setup(t);x.state.exists=true;
+  await assert.rejects(x.link.attach(x.dir,x.acc,'merge'),/Выберите/);
+  assert.equal(x.state.exports,0);assert.equal(x.state.takes,0);assert.equal(x.link.status(x.dir).linked,false);
 });
 test('reconfiguration waits for an already running sync',async(t)=>{
   const x=setup(t);await x.link.attach(x.dir,x.acc);let finish;

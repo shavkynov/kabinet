@@ -181,6 +181,7 @@ function buildMenu(be, hw) {
     { label: t('Сохранить проект в ZIP'), run: () => be.exportZip().catch((e) => toast(e.message)), disabled: !has },
     { label: t('Шаблоны карточек…'), run: go('ui:openTemplates'), disabled: !has },
     { label: t('Сделать копию сейчас'), run: go('ui:backupNow'), disabled: !has },
+    { label: t('До 30 автоматических копий на проект. Хранятся внутри приложения на этом устройстве.'), disabled: true },
     { label: t('Копии проекта…'), run: run(async () => {
       const list = be.listCopies();
       if (!list.length) { toast(t('Копий пока нет.')); return; }
