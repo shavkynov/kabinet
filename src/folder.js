@@ -20,7 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { writeFileAtomic } = require('./fsutil');
 const { CONFLICT_DIR, conflictNames } = require('./syncguard');
-const dictLib = require('./dict');
+const { mergeMeta } = require('./meta-merge');
 
 // Что переносим в папку и обратно. «Копии» (резервные) и временные файлы не нужны:
 // на другом устройстве они только мешают. Замок kabinet.lock не входит: телефон пишет его
@@ -318,6 +318,12 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     if (hadRoot && !hasRoot) {
       throw new Error('В папке не видно файлов проекта (облако не отвечает или папка пуста). Синхронизация остановлена, ничего не удалено.');
     }
+    // То же с нашей стороны: если у нас пропал сам project.json (папка пуста, диск не подключён), то главы не «удалены»,
+    // и в облако это удаление не отправляется.
+    const hadLocalRoot = Object.keys(state).some((k) => /^project.*\.json$/.test(k));
+    if (hadLocalRoot && ![...local.keys()].some((k) => /^project.*\.json$/.test(k))) {
+      throw new Error('На этом устройстве не видно файлов проекта (папка пуста или диск не подключён). Синхронизация остановлена, в облаке ничего не удалено.');
+    }
 
     const rels = [...new Set([...remote.keys(), ...local.keys(), ...Object.keys(state)])]
       .filter((rel) => isSyncable(rel))
@@ -356,7 +362,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
           }
           const foreign = await remoteBytes(remote.get(rel), rel);
           await keepForeign(rel, foreign, labelOf(rel));
-          const withWords = rel === 'project.json' ? dictLib.mergeMetaWords(readLocal(rel), foreign) : null; // слова, добавленные на другом устройстве, не теряем
+          const withWords = rel === 'project.json' ? mergeMeta(readLocal(rel), foreign) : null; // главы, карточки и слова с другого устройства не теряем
           if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
           await adapter.write(rel, readLocal(rel));
           state[rel] = withWords ? hashBytes(withWords) : l;
@@ -372,10 +378,13 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
             writeFileAtomic(target, Buffer.from(await remoteBytes(remote.get(rel), rel)));
             state[rel] = r;
             res.pulled.push(rel);
-          } else {
-            if (r !== b) await keepForeign(rel, await remoteBytes(remote.get(rel), rel), labelOf(rel));
-            try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
+          } else if (r === b) { // мы удалили файл, а в облаке его не меняли: убираем и там
+            await adapter.remove(rel);
             delete state[rel];
+            res.removed.push(rel);
+          } else { // мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается
+            writeFileAtomic(path.join(dir, rel), Buffer.from(await remoteBytes(remote.get(rel), rel)));
+            state[rel] = r;
             res.pulled.push(rel);
           }
           break;
@@ -403,7 +412,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     }
 
     sigCache.clear();
-    for (const [rel, e] of remote) if (e.sig && !res.pushed.includes(rel) && !res.conflicts.includes(rel)) sigCache.set(rel, { sig: e.sig, hash: e.hash });
+    for (const [rel, e] of remote) if (e.sig && !res.pushed.includes(rel) && !res.conflicts.includes(rel) && !res.removed.includes(rel)) sigCache.set(rel, { sig: e.sig, hash: e.hash });
     save();
     return res;
   }

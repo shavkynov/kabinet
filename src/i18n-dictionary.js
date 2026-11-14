@@ -12,4 +12,5 @@ module.exports = {
   'Режим письма': 'Writing mode',
   'Не удалось прочитать «{0}»: {1}. Синхронизация остановлена, чтобы не принять файл за удалённый.': 'Could not read “{0}”: {1}. Sync stopped so that the file is not mistaken for deleted.',
   'папку проекта': 'the project folder',
+  'На этом устройстве не видно файлов проекта (папка пуста или диск не подключён). Синхронизация остановлена, в облаке ничего не удалено.': 'No project files are visible on this device (the folder is empty or the disk is not connected). Sync stopped; nothing was deleted in the cloud.',
 };

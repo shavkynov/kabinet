@@ -159,6 +159,57 @@ pub fn merge_meta_words(local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
     Some(serde_json::to_string_pretty(&Value::Object(obj)).ok()?.into_bytes())
 }
 
+const META_LISTS: [&str; 5] = ["chapters", "characters", "places", "items", "notes"];
+
+fn id_of(v: &Value) -> Option<&str> { v.get("id").and_then(|x| x.as_str()) }
+
+/// Слияние project.json, когда он разошёлся на двух устройствах: побеждает наш, но то, что появилось на другом
+/// (главы, карточки, заметки, слова словаря), не теряется. Запись с чужого устройства добавляется, если её id у нас нет
+/// ни в списках, ни в корзине (удалённое нами не воскрешаем). Новый текст нашего project.json или None.
+pub fn merge_meta(local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
+    let l: Value = serde_json::from_slice(local).ok()?;
+    let r: Value = serde_json::from_slice(remote).ok()?;
+    r.as_object()?;
+    let mut out = l.as_object()?.clone();
+    let ours = |key: &str| -> Vec<Value> { l.get(key).and_then(|x| x.as_array()).cloned().unwrap_or_default() };
+    let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for key in META_LISTS.iter().copied().chain(std::iter::once("trash")) {
+        for e in ours(key) { if let Some(id) = id_of(&e) { known.insert(id.to_string()); } }
+    }
+    let mut changed = false;
+    for key in META_LISTS {
+        let Some(remote_list) = r.get(key).and_then(|x| x.as_array()) else { continue };
+        let mut merged = ours(key);
+        let before = merged.len();
+        let mut prev: Option<String> = None;
+        for e in remote_list {
+            let Some(id) = id_of(e) else { continue };
+            if !known.contains(id) {
+                // рядом с тем, после чего запись стоит у автора на другом устройстве
+                let at = prev.as_ref().and_then(|p| merged.iter().position(|x| id_of(x) == Some(p.as_str()))).map(|i| i + 1).unwrap_or(0);
+                merged.insert(at, e.clone());
+                known.insert(id.to_string());
+                changed = true;
+            }
+            if merged.iter().any(|x| id_of(x) == Some(id)) { prev = Some(id.to_string()); }
+        }
+        if merged.len() != before { out.insert(key.to_string(), Value::Array(merged)); }
+    }
+    if let Some(remote_trash) = r.get("trash").and_then(|x| x.as_array()) {
+        let mut trash = ours("trash");
+        let have: std::collections::HashSet<String> = trash.iter().filter_map(|e| e.get("tid").and_then(|x| x.as_str()).map(String::from)).collect();
+        let before = trash.len();
+        for e in remote_trash {
+            let (Some(tid), Some(id)) = (e.get("tid").and_then(|x| x.as_str()), id_of(e)) else { continue };
+            if !have.contains(tid) && !known.contains(id) { trash.push(e.clone()); }
+        }
+        if trash.len() != before { out.insert("trash".into(), Value::Array(trash)); changed = true; }
+    }
+    let text = if changed { Some(serde_json::to_string_pretty(&Value::Object(out)).ok()?.into_bytes()) } else { None };
+    // слова словаря (добавленные на другом устройстве) сливаются тем же проходом
+    merge_meta_words(text.as_deref().unwrap_or(local), remote).or(text)
+}
+
 // ---------- движок ----------
 
 /// Тестовая точка конфликтной ветки sync: после чтения локального project.json, до записи результата слияния.
@@ -431,6 +482,12 @@ impl<T: Remote> FolderSync<T> {
         if had_root && !has_root {
             return Err("В папке не видно файлов проекта (облако не отвечает или папка пуста). Синхронизация остановлена, ничего не удалено.".into());
         }
+        // То же с нашей стороны: если у нас пропал сам project.json (папка пуста, диск не подключён), главы не «удалены»,
+        // и в облако это удаление не отправляется.
+        let project_re = Regex::new(r"^project.*\.json$").unwrap();
+        if self.state.keys().any(|k| project_re.is_match(k)) && !local.keys().any(|k| project_re.is_match(k)) {
+            return Err("На этом устройстве не видно файлов проекта (папка пуста или диск не подключён). Синхронизация остановлена, в облаке ничего не удалено.".into());
+        }
         let rels: BTreeSet<String> = remote.keys().chain(local.keys()).chain(self.state.keys()).filter(|r| is_syncable(r)).cloned().collect();
         let vanished = rels.iter().filter(|r| self.state.contains_key(*r) && !remote.contains_key(*r) && local.get(*r) == self.state.get(*r)).count();
         let tracked = self.state.keys().filter(|r| is_syncable(r)).count();
@@ -488,7 +545,7 @@ impl<T: Remote> FolderSync<T> {
                         let mine = self.read_local(rel)?;
                         #[cfg(test)]
                         if rel == "project.json" { sync_hook::fire(); } // ТЕСТОВАЯ ТОЧКА: после чтения, до записи результата
-                        let merged = if rel == "project.json" { merge_meta_words(&mine, &foreign) } else { None };
+                        let merged = if rel == "project.json" { merge_meta(&mine, &foreign) } else { None };
                         if let Some(w) = &merged { self.write_local(rel, w)?; }
                         merged
                     };
@@ -509,10 +566,17 @@ impl<T: Remote> FolderSync<T> {
                         self.write_local(rel, &bytes?)?;
                         self.state.insert(rel.clone(), rh.clone());
                         res.pulled.push(rel.clone());
-                    } else {
-                        if b.as_ref() != Some(rh) { let bytes = bytes?; self.keep_foreign(rel, &bytes, &label_of(rel))?; }
-                        self.remove_local(rel)?;
+                    } else if b.as_ref() == Some(rh) {
+                        // Мы удалили файл, а в облаке его не меняли: убираем и там. Ошибку удаления не выдаём за успех:
+                        // состояние не меняем, повторим при следующем проходе.
+                        self.ensure_not_cancelled()?;
+                        self.remote.remove(rel)?;
                         self.state.remove(rel);
+                        res.removed.push(rel.clone());
+                    } else {
+                        // Мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается.
+                        self.write_local(rel, &bytes?)?;
+                        self.state.insert(rel.clone(), rh.clone());
                         res.pulled.push(rel.clone());
                     }
                     break;
@@ -551,7 +615,7 @@ impl<T: Remote> FolderSync<T> {
         self.cache.clear();
         for (rel, e) in &remote {
             if let Some(sig) = &e.sig {
-                if !res.pushed.contains(rel) && !res.conflicts.contains(rel) { self.cache.insert(rel.clone(), (sig.clone(), e.hash.clone())); }
+                if !res.pushed.contains(rel) && !res.conflicts.contains(rel) && !res.removed.contains(rel) { self.cache.insert(rel.clone(), (sig.clone(), e.hash.clone())); }
             }
         }
         self.save()?;
@@ -724,6 +788,80 @@ mod tests {
     }
     fn sync_of(dir: &Path, s: &FakeServer, st: &str) -> FolderSync<crate::yandexdisk::YandexDisk<FakeServer>> {
         FolderSync::new(dir, dav_on(s, "/Кабинет/Роман"), Some(dir.parent().unwrap().join(format!("{}.state", st)))).unwrap()
+    }
+
+    fn meta_ids(bytes: &[u8], key: &str) -> Vec<String> {
+        let v: Value = serde_json::from_slice(bytes).unwrap();
+        v[key].as_array().map(|a| a.iter().filter_map(|e| e["id"].as_str().map(String::from)).collect()).unwrap_or_default()
+    }
+
+    /// Удаление главы на одном устройстве доходит до облака обычным проходом и не возвращается «Найденной главой».
+    #[test]
+    fn local_delete_reaches_cloud_in_ordinary_sync() {
+        let s = FakeServer::new();
+        let a = tmpdir("del-a").join("p");
+        let b = tmpdir("del-b").join("p");
+        project(&a, &[("aaaaaa", "один"), ("bbbbbb", "два")]);
+        let mut sa = sync_of(&a, &s, "del-a");
+        sa.export_all().unwrap();
+        let mut sb = sync_of(&b, &s, "del-b");
+        sb.import_all().unwrap();
+        fs::remove_file(a.join("Главы/bbbbbb.md")).unwrap();
+        let res = sa.sync().unwrap();
+        assert!(res.removed.iter().any(|x| x == "Главы/bbbbbb.md"), "{:?}", res.removed);
+        assert!(!s.names().iter().any(|n| n.ends_with("Главы/bbbbbb.md")), "файл остался в облаке");
+        sb.sync().unwrap();
+        assert!(!b.join("Главы/bbbbbb.md").exists(), "на втором устройстве глава не исчезла");
+        sa.sync().unwrap();
+        assert!(!a.join("Главы/bbbbbb.md").exists(), "глава вернулась на устройство, где её удалили");
+    }
+
+    /// Удалили на одном устройстве, а на другом успели дописать: дописанное возвращается, а не теряется.
+    #[test]
+    fn local_delete_does_not_beat_a_cloud_edit() {
+        let s = FakeServer::new();
+        let a = tmpdir("deledit-a").join("p");
+        let b = tmpdir("deledit-b").join("p");
+        project(&a, &[("aaaaaa", "один"), ("bbbbbb", "два")]);
+        let mut sa = sync_of(&a, &s, "deledit-a");
+        sa.export_all().unwrap();
+        let mut sb = sync_of(&b, &s, "deledit-b");
+        sb.import_all().unwrap();
+        w(&b, "Главы/bbbbbb.md", "два, дописано на втором устройстве");
+        sb.sync().unwrap();
+        fs::remove_file(a.join("Главы/bbbbbb.md")).unwrap();
+        sa.sync().unwrap();
+        assert_eq!(r(&a, "Главы/bbbbbb.md"), "два, дописано на втором устройстве");
+        assert!(s.names().iter().any(|n| n.ends_with("Главы/bbbbbb.md")));
+    }
+
+    /// У нас пропал project.json (диск не подключён): в облаке ничего не удаляем.
+    #[test]
+    fn missing_local_project_json_stops_sync_and_keeps_cloud() {
+        let s = FakeServer::new();
+        let a = tmpdir("noroot").join("p");
+        project(&a, &[("aaaaaa", "один"), ("bbbbbb", "два")]);
+        let mut sa = sync_of(&a, &s, "noroot");
+        sa.export_all().unwrap();
+        let before = s.names();
+        fs::remove_file(a.join("project.json")).unwrap();
+        fs::remove_dir_all(a.join("Главы")).unwrap();
+        assert!(sa.sync().is_err());
+        assert_eq!(s.names(), before);
+    }
+
+    /// Офлайн-правка на одном устройстве не стирает запись главы, добавленной на другом.
+    #[test]
+    fn meta_merge_keeps_remote_chapters_and_does_not_revive_trashed() {
+        let local = r#"{"name":"Роман","chapters":[{"id":"aaaaaa","title":"Начало"}],"trash":[{"tid":"t1","kind":"chapter","id":"bbbbbb","title":"Удалена"}]}"#;
+        let remote = r#"{"name":"Роман","chapters":[{"id":"aaaaaa","title":"Глава 1"},{"id":"bbbbbb","title":"Удалена"},{"id":"cccccc","title":"Работа"}]}"#;
+        let (local, remote) = (local.as_bytes(), remote.as_bytes());
+        let m = merge_meta(local, remote).unwrap();
+        assert_eq!(meta_ids(&m, "chapters"), vec!["aaaaaa", "cccccc"]);
+        let v: Value = serde_json::from_slice(&m).unwrap();
+        assert_eq!(v["chapters"][0]["title"], "Начало", "наше название остаётся");
+        assert_eq!(v["chapters"][1]["title"], "Работа", "название чужой главы сохранено");
+        assert!(merge_meta(local, local).is_none());
     }
 
     /// Слияние слов словаря в конфликтной ветке: сохранение меты между чтением и записью не должно теряться.
