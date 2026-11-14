@@ -12,6 +12,8 @@ pub struct Fs {
     pub log: Vec<String>,
     /// Если задано, список файлов скрывается (неполный ответ облака).
     pub hide_all_files: bool,
+    /// Файлы, которых нет в ответе списка, хотя они есть (проверка неполного списка).
+    pub hide: std::collections::BTreeSet<String>,
     pub fail_gets: bool,
     pub fail_deletes: bool,
 }
@@ -59,7 +61,7 @@ impl Http for FakeServer {
                     let mut items = vec![];
                     for d in &f.dirs { if let Some(n) = d.strip_prefix(&prefix) { if !n.contains('/') { items.push(serde_json::json!({ "name": n, "type": "dir" })); } } }
                     if !f.hide_all_files {
-                        for (p, (data, t)) in &f.files { if let Some(n) = p.strip_prefix(&prefix) { if !n.contains('/') {
+                        for (p, (data, t)) in &f.files { if f.hide.contains(p) { continue; } if let Some(n) = p.strip_prefix(&prefix) { if !n.contains('/') {
                             items.push(serde_json::json!({ "name": n, "type": "file", "size": data.len(), "modified": iso(*t) }));
                         } } }
                     }

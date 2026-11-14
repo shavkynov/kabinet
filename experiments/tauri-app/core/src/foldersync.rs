@@ -565,14 +565,18 @@ impl<T: Remote> FolderSync<T> {
                     self.state.insert(rel.clone(), lh);
                     res.pushed.push(rel.clone());
                 } else if Some(&lh) == b.as_ref() {
-                    // Перед удалением перечитаем файл: сохранение во время прохода могло изменить его.
-                    let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                    if let Some(fresh) = self.local_hash(rel)? {
-                        if fresh != lh {
-                            local.insert(rel.clone(), fresh);
-                            continue;
+                    // Перед удалением перечитаем локальный файл: сохранение во время прохода могло изменить его.
+                    {
+                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                        if let Some(fresh) = self.local_hash(rel)? {
+                            if fresh != lh {
+                                local.insert(rel.clone(), fresh);
+                                continue;
+                            }
                         }
                     }
+                    // Прямое чтение подтверждает исчезновение: неполный список облака не должен приводить к удалению.
+                    if self.remote.read(rel)?.is_some() { break; }
                     let _ = fs::remove_file(self.dir.join(rel));
                     self.state.remove(rel);
                     res.pulled.push(rel.clone());
@@ -1195,6 +1199,22 @@ mod tests {
         let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
         assert!(res.is_err(), "ошибка удаления в облаке должна возвращаться");
         assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "файл в облаке ещё не удалён");
+    }
+
+    /// Неполный список облака (файл пропал из списка, но не удалён) не должен удалять локальную главу.
+    #[test]
+    fn incomplete_listing_does_not_delete_local_chapter() {
+        let s = FakeServer::new();
+        let a = tmpdir("hidden-one").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        // Облако отдаёт неполный список: главы в списке нет, но прямая выдача файла работает.
+        s.0.lock().unwrap().hide.insert("/Кабинет/Роман/Главы/aaaaaa.md".to_string());
+        let res = sa.sync().unwrap();
+        assert!(a.join("Главы/aaaaaa.md").exists(), "неполный список не должен удалять локальную главу");
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "текст");
+        assert!(res.pulled.is_empty(), "ничего не должно быть удалено: {:?}", res.pulled);
     }
 
     /// Папка-ссылка (junction) не должна обходиться: иначе в синхронизацию попадут файлы вне проекта.
