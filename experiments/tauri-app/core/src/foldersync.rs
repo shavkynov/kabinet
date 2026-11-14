@@ -1264,6 +1264,29 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Ошибка страницы списка останавливает обход, а не «файлов нет».
+    #[test]
+    fn list_page_error_is_reported() {
+        let s = FakeServer::new();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "текст".as_bytes());
+        let mut r = dav_on(&s, "/Кабинет/Роман");
+        s.0.lock().unwrap().fail_list = true;
+        assert!(r.list("Главы").is_err(), "ошибка страницы должна возвращаться как ошибка");
+    }
+
+    /// Исчезновение всего списка облака останавливает синхронизацию, ничего не удаляя.
+    #[test]
+    fn disappearing_list_stops_before_deleting_anything() {
+        let s = FakeServer::new();
+        let a = tmpdir("all-gone").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().hide_all_files = true;
+        assert!(sa.sync().is_err(), "исчезновение всего списка останавливает синхронизацию");
+        assert!(a.join("Главы/aaaaaa.md").exists(), "локальные файлы не тронуты");
+    }
+
     /// Сбой прохода не портит состояние: повтор после устранения сбоя проходит.
     #[test]
     fn failed_pass_is_retried_and_succeeds() {

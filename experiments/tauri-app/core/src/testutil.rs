@@ -12,6 +12,8 @@ pub struct Fs {
     pub log: Vec<String>,
     /// Если задано, список файлов скрывается (неполный ответ облака).
     pub hide_all_files: bool,
+    /// Ошибка запроса страницы списка (500).
+    pub fail_list: bool,
     /// Файлы, которых нет в ответе списка, хотя они есть (проверка неполного списка).
     pub hide: std::collections::BTreeSet<String>,
     pub fail_gets: bool,
@@ -63,6 +65,7 @@ impl Http for FakeServer {
         let iso = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|d| d.to_rfc3339()).unwrap_or_default();
         match (u.host_str().unwrap_or(""), req.method.as_str(), u.path()) {
             ("cloud-api.yandex.net", "GET", "/v1/disk/resources") => {
+                if f.fail_list { return r(500, vec![]); }
                 if path.is_empty() || f.dirs.contains(&path) {
                     f.log.push(format!("LIST {}", path));
                     let prefix = format!("{}/", path);
