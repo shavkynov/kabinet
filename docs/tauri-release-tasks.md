@@ -35,7 +35,7 @@ S — локальная правка; M — несколько функций/�
 | 8 | Восстановление | XL | P1 | 7/6/11, координация 13 | PARTIAL — MVP восстановления файлов из проверенной копии (база `c66ff9a`); атомарного переключения, координации с sync и UI нет |
 | 13 | Остановка sync | L | P1 | 10, согласовать 1/2 | PARTIAL — управляемая остановка, кооперативная отмена, один слот прохода вместо реестра сессий (база `eac8a09`, упрощение по аудиту); GUI/закрытие окна вручную не проверены |
 | 14 | Rust lock | S | P2 | нет | PASS — `src-tauri/Cargo.lock` закоммичен, `--locked` в CI (база `ce13be7`) |
-| 15 | CI и выпуск | L | P2 | 14, финальная приёмка после P1 | PARTIAL — `bundle.active=true`; NSIS/dmg собираются в CI, артефакты загружаются; прогон и Releases/подпись/чистые ОС не подтверждены |
+| 15 | CI и выпуск | L | P2 | 14, финальная приёмка после P1 | PARTIAL — установщики NSIS x64 и dmg aarch64 собраны в CI (run 43611843767, success); Releases/подпись/чистая установка/Intel mac не проверены |
 | 12 | Паритет | XL по объёму | P2 | начать сейчас, завершить после исправлений | PARTIAL — таблица доказательств начата (`experiments/tauri-app/PARITY.md`); GUI/импорт/вложения не проверены |
 
 Потоки: A — 3→4→9; B — 11/6→7→8; C — проектирование 1/2/5, затем 10 и реализация 1/2/5/13; D — 14→15; E — инвентаризация 12 и независимая приёмка. Проектирование может идти до PASS зависимых задач; это не разрешение одновременно править общий файл.
@@ -483,6 +483,13 @@ davlink.rs — историческое имя; WebDAV удалён. stop_work/s
 
 tauri-app.yml уже делает Rust tests, exe и macOS app/zip, артефакты. bundle.active=false; установщика Windows/Releases/полного JS в этом workflow нет. Нужны установщик Windows, подходящий unsigned macOS-пакет/архив, версионированные Releases, артефакты/логи, полный JS/Rust CI и корректные permissions. Проверять workflow runs, не только YAML. Чистые Windows/macOS без dev tools: установка/первый запуск, OAuth/deep-link установленного приложения, старый проект, понятные предупреждения. Dev-runner не заменяет чистую ОС.
 
+2026-11-14, агент (DeepSeek), база `41f4fab`: УСТАНОВЩИКИ СОБРАНЫ В CI — ПРОВЕРЕНО.
+- Пуш workflow разрешён после выдачи токену права Workflows; изменение запушено в `experiment/tauri-rust-finish`.
+- Прогон GitHub Actions `43611843767` («Кабинет на Tauri (сборка)», commit `41f4fab`): оба job — `Сборка (macos-15)` и `Сборка (windows-latest)` — completed success.
+- Артефакты: `kabinet-tauri-installer-windows-41f4fab` (NSIS `Кабинет (Tauri, тест)_0.38.0_x64-setup.exe`, 4 269 335 байт, архив 4 251 600), `kabinet-tauri-installer-macos-41f4fab` (dmg `Кабинет (Tauri, тест)_0.38.0_aarch64.dmg`, 6 355 169 байт, архив 6 310 434). Сырые бинарники и `Cargo.lock` также загружены.
+- Проверка неизменности `src-tauri/Cargo.lock` в workflow прошла; `cargo test --locked` ядра — success в обоих job.
+- Остаётся: Releases/теги (не делались), подпись Windows и нотаризация macOS (сейчас ad-hoc), чистая установка/первый запуск на Windows и macOS, Intel-сборка macOS (runner arm64), LANG_EN/PDF в установленном приложении вручную.
+
 2026-11-14, агент (DeepSeek), база `7000fc9`: УСТАНОВЩИКИ В CI (шаг 7 аудита / № 15). По решению автора установщики собираются только в GitHub Actions, локальная сборка не выполняется.
 - `experiments/tauri-app/src-tauri/tauri.conf.json`: `bundle.active` включён (`true`), `targets: "all"`, иконки png/ico/icns, macOS — ad-hoc подпись `signingIdentity: "-"` и минимум 10.15, Windows NSIS — `installMode: "currentUser"`.
 - Подготовлено изменение `.github/workflows/tauri-app.yml`: шаги `npx --yes @tauri-apps/cli@2 build --bundles nsis` (Windows) и `--bundles dmg` (macOS), проверка неизменности `src-tauri/Cargo.lock`, загрузка артефактов `bundle/nsis/*.exe` и `bundle/dmg/*.dmg`. Пуш ОТКЛОНЁН GitHub: у сохранённого токена нет права Workflows, поэтому в удалённой ветке этого изменения пока нет; патч передан автору.
@@ -634,3 +641,5 @@ tauri-app.yml уже делает Rust tests, exe и macOS app/zip, артефа
 2026-11-14: перенесён PDF-экспорт `9995155` (печать через браузер, `pdf` в форматах, язык из `LANG_EN`); cherry-pick без конфликтов, Rust 197, `npm test` 351/351, check 0, оболочка 0. Окно печати вручную не проверялось.
 
 2026-11-14: шаг 7 — `bundle.active=true` и параметры установщиков внесены; workflow-шаги NSIS/dmg подготовлены, но пуш отклонён из-за отсутствия права Workflows у токена. Локально не собирались по решению автора; после применения патча/выдачи права — прогон и запись результата.
+
+2026-11-14: установщики собраны в CI: run 43611843767 на `41f4fab` — macos-15 и windows-latest success; NSIS x64 setup 4.27 МБ, dmg aarch64 6.36 МБ, оба артефакта загружены. № 15 остаётся PARTIAL (Releases, подпись, чистая установка, Intel mac).
