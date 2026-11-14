@@ -240,6 +240,16 @@ impl<T: Remote> FolderSync<T> {
 
     fn read_local(&self, rel: &str) -> R<Vec<u8>> { fs::read(self.dir.join(rel)).map_err(|e| format!("{}: {}", rel, e)) }
 
+    /// Отличие отсутствия от ошибки чтения: `Ok(None)` — файла нет (NotFound), `Err` — ошибка доступа/ввода.
+    /// Ошибку нельзя превращать в «пустоту»: нечитаемая глава не должна выпадать из слияния или удаляться.
+    fn read_local_opt(&self, rel: &str) -> R<Option<Vec<u8>>> {
+        match fs::read(self.dir.join(rel)) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("{}: {}", rel, e)),
+        }
+    }
+
     /// Хэш локального файла на диске; None, если файла уже нет. Позволяет заметить сохранение,
     /// случившееся после walk_local, но до обработки файла в проходе.
     fn local_hash(&self, rel: &str) -> R<Option<String>> {
@@ -321,8 +331,17 @@ impl<T: Remote> FolderSync<T> {
                 if !id_re.is_match(id) || have.contains(id) { continue; }
                 let rel = format!("{}/{}.{}", folder, id, ext);
                 if list == "chapters" {
-                    let t = self.read_local(&rel).map(|b| text(&b)).unwrap_or_default();
-                    if t.trim().is_empty() { dropped.push(rel); continue; }
+                    // Пустота — только по успешно прочитанному файлу. Ошибку чтения нельзя принимать
+                    // за пустоту: иначе нечитаемая глава выпадет из слияния и её текст останется без ссылки.
+                    let empty = match self.read_local_opt(&rel) {
+                        Ok(Some(b)) => text(&b).trim().is_empty(),
+                        Ok(None) => false, // файла нет — отдельный безопасный случай, ссылку сохраняем
+                        Err(e) => return Err(format!(
+                            "Не удалось прочитать главу «{}» при слиянии структуры: {}. Слияние остановлено, чтобы не потерять текст.",
+                            rel, e
+                        )),
+                    };
+                    if empty { dropped.push(rel); continue; }
                 }
                 extra.push(e.clone());
                 added.push(rel);
@@ -339,7 +358,12 @@ impl<T: Remote> FolderSync<T> {
         let has_local_content = !added.is_empty() || !trash_extra.is_empty()
             || local_meta.get("words").is_some()
             || arr(&local_meta, "chapters").iter().any(|c| c.get("id").and_then(|x| x.as_str())
-                .map(|id| self.read_local(&format!("Главы/{}.md", id)).map(|b| !text(&b).trim().is_empty()).unwrap_or(false)).unwrap_or(false))
+                .map(|id| match self.read_local_opt(&format!("Главы/{}.md", id)) {
+                    Ok(Some(b)) => !text(&b).trim().is_empty(),
+                    Ok(None) => false,
+                    // Ошибка чтения: считаем, что содержимое может быть, и сохраняем копию project.json.
+                    Err(_) => true,
+                }).unwrap_or(false))
             || ["characters", "places", "items", "notes"].iter().any(|k| !arr(&local_meta, k).is_empty())
             || local_meta.get("name").and_then(|x| x.as_str()).map(|n| !n.is_empty() && n != "1" && n != "Проект" && Some(n) != remote_meta.get("name").and_then(|x| x.as_str())).unwrap_or(false);
         if meta_differs && has_local_content {
@@ -352,8 +376,22 @@ impl<T: Remote> FolderSync<T> {
         for rel in &dropped {
             // Глава была пустой при чтении, но за время прохода (сеть выше) в неё могли напечатать текст.
             let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-            let still_empty = self.read_local(rel).map(|b| text(&b).trim().is_empty()).unwrap_or(true);
-            if still_empty { let _ = fs::remove_file(self.dir.join(rel)); local.remove(rel); }
+            let still_empty = match self.read_local_opt(rel) {
+                Ok(Some(b)) => text(&b).trim().is_empty(),
+                Ok(None) => true, // файла уже нет: удалять нечего, это не ошибка данных
+                Err(e) => return Err(format!(
+                    "Не удалось прочитать главу «{}» перед удалением: {}. Удаление остановлено, чтобы не потерять текст.",
+                    rel, e
+                )),
+            };
+            if still_empty {
+                match fs::remove_file(self.dir.join(rel)) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(format!("Не удалось удалить пустую главу «{}»: {}. Удаление остановлено.", rel, e)),
+                }
+                local.remove(rel);
+            }
         }
         let out = if !added.is_empty() || !trash_extra.is_empty() { serde_json::to_string_pretty(&Value::Object(merged)).unwrap().into_bytes() } else { remote_raw };
         // Локальную мету могли сохранить за время прохода (сеть выше). Пишем результат, только если файл не менялся
@@ -1036,6 +1074,31 @@ mod tests {
         assert_eq!(r(&b, "Главы/aaaaaa.md"), "старый роман");
         assert!(!b.join("Главы/zzzzzz.md").exists());
         assert!(fs::read_dir(b.join("Конфликты")).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("было на этом устройстве")));
+    }
+
+    /// Ошибку чтения главы нельзя принимать за пустоту: иначе нечитаемая глава выпадет из слияния
+    /// и её текст останется без ссылки в проекте, а повторная проверка могла бы удалить файл.
+    /// Подмена файла каталогом даёт ошибку чтения, отличную от NotFound; это воспроизводимый
+    /// тест контракта, а не эквивалент всех ошибок доступа (см. карточку № 4 в ТЗ).
+    #[test]
+    fn unreadable_chapter_is_not_treated_as_empty_in_adopt() {
+        let s = FakeServer::new();
+        let a = tmpdir("adopt-read-err-a").join("p");
+        project(&a, &[("aaaaaa", "старый роман")]);
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("adopt-read-err-b").join("p");
+        project(&b, &[("yyyyyy", "мой черновик")]);
+        let file = b.join("Главы/yyyyyy.md");
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        let meta_before = r(&b, "project.json");
+
+        let mut sb = sync_of(&b, &s, "b");
+        let res = sb.sync();
+        assert!(res.is_err(), "слияние с нечитаемой главой должно остановиться, а не считать главу пустой");
+        assert!(file.is_dir(), "файл не удалён: на его месте по-прежнему каталог");
+        assert_eq!(r(&b, "project.json"), meta_before, "мета не должна потерять главу при ошибке чтения");
     }
 
     #[test]
