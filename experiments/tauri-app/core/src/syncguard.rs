@@ -174,8 +174,26 @@ pub fn guard_write_at(
     label: &str,
     now: chrono::DateTime<chrono::Local>,
 ) -> crate::store::R<Option<String>> {
-    let Some(k) = known_hash(file) else { return Ok(None) }; // файл в этом сеансе не читали: сравнивать не с чем
-    let Ok(bytes) = std::fs::read(file) else { return Ok(None) }; // файла нет (удалён на другом устройстве): просто запишем свой
+    guard_write_at_with_read(dir, file, new_text, label, now, |path| std::fs::read(path))
+}
+
+// Подмена только чтения позволяет воспроизвести PermissionDenied независимо от прав процесса.
+// В рабочем приложении guard_write_at всегда передаёт std::fs::read.
+fn guard_write_at_with_read(
+    dir: &Path,
+    file: &Path,
+    new_text: &str,
+    label: &str,
+    now: chrono::DateTime<chrono::Local>,
+    read: impl FnOnce(&Path) -> std::io::Result<Vec<u8>>,
+) -> crate::store::R<Option<String>> {
+    let bytes = match read(file) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("Не удалось прочитать файл «{}» перед сохранением: {}. Запись остановлена, чтобы не затереть исходное содержимое.", file.display(), e)),
+    };
+    // Даже без известного хэша ошибка чтения запрещает запись; читаемый непрочитанный файл сохраняет прежнее поведение.
+    let Some(k) = known_hash(file) else { return Ok(None) };
     // fs.readFileSync(file, 'utf8') в JS не падает на битых байтах, а заменяет их на U+FFFD: повторяем,
     // иначе испорченный файл молча перезаписался бы без копии в «Конфликты».
     let disk = String::from_utf8_lossy(&bytes).into_owned();
@@ -343,5 +361,65 @@ mod conflict_collision_tests {
         fs::write(p.0.join(CONFLICT_DIR), "not a directory").unwrap();
         assert!(guard_write_at(&p.0, &file, "mine", "Same title", at()).is_err());
         assert_eq!(fs::read_to_string(file).unwrap(), "foreign");
+    }
+
+    #[test]
+    fn read_errors_stop_guard_with_and_without_known_hash() {
+        use std::io::{Error, ErrorKind};
+        for kind in [ErrorKind::PermissionDenied, ErrorKind::Other] {
+            for tracked in [false, true] {
+                let p = Project::new();
+                let file = p.0.join("read-error.md");
+                fs::write(&file, "foreign bytes").unwrap();
+                if tracked { note_read(&file, "base"); }
+                let before_known = known_hash(&file);
+                let result = guard_write_at_with_read(&p.0, &file, "mine", "Read error", at(), |path| {
+                    assert_eq!(path, file.as_path());
+                    Err(Error::new(kind, "injected read failure"))
+                });
+                let error = result.expect_err("ошибка чтения не должна разрешать запись");
+                assert!(error.contains("injected read failure"));
+                assert!(error.contains(&file.display().to_string()));
+                assert_eq!(fs::read(&file).unwrap(), b"foreign bytes");
+                assert_eq!(known_hash(&file), before_known);
+                assert!(!p.0.join(CONFLICT_DIR).exists());
+            }
+        }
+    }
+
+    #[test]
+    fn actual_directory_read_error_is_not_missing_file() {
+        let p = Project::new();
+        let file = p.0.join("directory.md");
+        fs::create_dir(&file).unwrap();
+        note_read(&file, "base");
+        let read_error = fs::read(&file).expect_err("чтение каталога должно завершиться ошибкой");
+        assert_ne!(read_error.kind(), std::io::ErrorKind::NotFound);
+        assert!(guard_write_at(&p.0, &file, "mine", "Directory", at()).is_err());
+        assert!(file.is_dir());
+        assert!(!p.0.join(CONFLICT_DIR).exists());
+    }
+
+    #[test]
+    fn missing_file_still_allows_save_with_and_without_known_hash() {
+        let p = Project::new();
+        for tracked in [false, true] {
+            let file = p.0.join(if tracked { "tracked.md" } else { "untracked.md" });
+            if tracked { note_read(&file, "base"); }
+            assert!(guard_write_at(&p.0, &file, "mine", "Missing", at()).unwrap().is_none());
+            assert!(!file.exists());
+        }
+        assert!(!p.0.join(CONFLICT_DIR).exists());
+    }
+
+    #[test]
+    fn readable_untracked_file_keeps_previous_no_conflict_behavior() {
+        let p = Project::new();
+        let file = p.0.join("untracked.md");
+        fs::write(&file, "foreign bytes").unwrap();
+        assert!(known_hash(&file).is_none());
+        assert!(guard_write_at(&p.0, &file, "mine", "Unread", at()).unwrap().is_none());
+        assert_eq!(fs::read(&file).unwrap(), b"foreign bytes");
+        assert!(!p.0.join(CONFLICT_DIR).exists());
     }
 }
