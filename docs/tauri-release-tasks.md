@@ -167,6 +167,8 @@ list_files подавляет ошибки, signature пропускает чт�
 
 2026-11-14, агент (DeepSeek), база `e28bfa5`: команда `backup:restore` в оболочке — перед восстановлением останавливает обмен с облаком (`switch_sync(None)`), затем `restore_backup`, затем запускает обмен снова (`switch_sync(Some(dir))`), чтобы в облако не ушёл частично восстановленный проект. `restore_backup` выполняется в `spawn_blocking` (не блокирует асинхронный runtime). Добавлена `backup:list` (список копий). Мост: `backupList`, `restoreBackup(name)`. Проверка: `cargo check --locked` оболочки → exit 0; полный `cargo test` ядра → 157 passed; `node scripts/check.js` → exit 0. Остаётся UI восстановления в renderer (сейчас только `backupNow`) — статус PARTIAL.
 
+2026-11-14, агент (DeepSeek), база `d94c0f0`: добавлена интерактивная команда `backup:restoreInteractive` (нативный выбор папки копии через rfd, затем согласованное восстановление с остановкой/перезапуском обмена) и методы моста `restoreBackupInteractive`/`onRestoreBackup`. UI в renderer НЕ добавлен: renderer общий с Electron, его `api.*`-вызовы проверяются против Electron-preload и словаря i18n (`scripts/check.js`, `test/i18n.test.js`) — для меню восстановления нужна поддержка и в Electron, это отдельное решение. Проверки: `cargo check --locked` оболочки → exit 0, `node scripts/check.js` → exit 0, `npm test` → 350/350, ядро → 157/157. Статус PARTIAL.
+
 ### 9. Статистика
 
 read_days сводит ошибки к пустоте, set_day_words не защищает read–modify–write. Различать отсутствие/порчу/ошибку; оригинал не затирать, безопасно восстанавливать. Сериализовать всех писателей включая sync либо безопасно сливать. Сохранить правило дневного максимума. Тесты: отсутствие, корректный/битый JSON, ошибки чтения/записи, параллельные разные/одинаковые даты, sync.
@@ -287,3 +289,5 @@ tauri-app.yml уже делает Rust tests, exe и macOS app/zip, артефа
 2026-11-14: задача № 8 — PARTIAL (MVP) на базе `c66ff9a`: добавлен `restore_backup` — проверка копии, страховочная копия текущего состояния, запись файлов без удаления новых; регрессия + red/green, полный Rust 157/157. Атомарное переключение, координация с watcher/sync и UI не сделаны — статус PARTIAL, не PASS.
 
 2026-11-14: задача № 8 — PARTIAL (продолжение) на базе `e28bfa5`: команда `backup:restore` останавливает sync на время восстановления и запускает снова; добавлены `backup:list` и методы моста. UI восстановления в renderer ещё нет. Проверки: `cargo check --locked` оболочки → 0, ядро 157/157, `check.js` → 0.
+
+2026-11-14: задача № 8 — PARTIAL (продолжение) на базе `d94c0f0`: интерактивный `backup:restoreInteractive` (нативный выбор копии) + мост; UI меню отложен — общий renderer требует поддержки и в Electron, иначе падают `check.js`/i18n-тест. Оболочка 0, `check.js` 0, JS 350/350, ядро 157/157.

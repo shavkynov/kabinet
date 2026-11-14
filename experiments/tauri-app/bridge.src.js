@@ -112,6 +112,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     backupNow: () => call('backup:now'),
     backupList: () => call('backup:list'),
     restoreBackup: (name) => call('backup:restore', name),
+    restoreBackupInteractive: () => call('backup:restoreInteractive'),
     openBackupFolder: () => call('backup:openFolder'),
     appVersion: () => call('app:version'),
     setProjectGoal: (g) => call('project:setProjectGoal', g),
@@ -167,7 +168,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
     onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',
     onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onExport: 'ui:export',
-    onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onOpenBackups: 'ui:openBackups',
+    onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onRestoreBackup: 'ui:restoreBackup', onOpenBackups: 'ui:openBackups',
     onOpenSync: 'ui:openSync', onSyncNow: 'ui:syncNow', onToggleSound: 'ui:toggleSound', onToggleAmbient: 'ui:toggleAmbient',
   };
   for (const [name, event] of Object.entries(MENU)) window.kabinet[name] = subscribeVoid(event);
