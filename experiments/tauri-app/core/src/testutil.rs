@@ -20,6 +20,10 @@ pub struct Fs {
     pub page_limit: Option<usize>,
     /// На этом offset сервер отдаёт пустую страницу при непустом total — проверка отказа.
     pub empty_page_at: Option<usize>,
+    /// Удаление — асинхронная операция (202 + опрос статуса), как у Яндекса для непустых папок.
+    pub async_deletes: bool,
+    /// Отложенные операции удаления: id операции → путь, который будет удалён при успехе.
+    pub pending_ops: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Default)]
@@ -110,7 +114,16 @@ impl Http for FakeServer {
             ("cloud-api.yandex.net", "DELETE", "/v1/disk/resources") => {
                 f.log.push(format!("DELETE {}", path));
                 if f.fail_deletes { return r(500, vec![]); }
+                if !f.files.contains_key(&path) && !f.dirs.contains(&path) { return r(404, vec![]); }
+                if f.async_deletes {
+                    let op = format!("/v1/disk/operations/{}", f.pending_ops.len() + 1);
+                    f.pending_ops.insert(op.clone(), path.clone());
+                    return Ok(Resp { status: 202, body: serde_json::json!({ "href": format!("https://cloud-api.yandex.net{}", op) }).to_string().into_bytes(), location: None });
+                }
                 if f.files.remove(&path).is_some() { r(204, vec![]) } else { r(404, vec![]) }
+            }
+            ("cloud-api.yandex.net", "GET", p) if p.starts_with("/v1/disk/operations/") => {
+                if let Some(file) = f.pending_ops.remove(p) { f.files.remove(&file); js(serde_json::json!({ "status": "success" })) } else { r(404, vec![]) }
             }
             other => panic!("неожиданный запрос поддельному Диску: {:?}", other),
         }

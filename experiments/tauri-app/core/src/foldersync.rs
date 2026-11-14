@@ -1264,6 +1264,17 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Асинхронное удаление в облаке (202 + операция) подтверждается опросом статуса.
+    #[test]
+    fn async_cloud_delete_is_confirmed_by_operation() {
+        let s = FakeServer::new();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "текст".as_bytes());
+        let mut r = dav_on(&s, "/Кабинет/Роман");
+        s.0.lock().unwrap().async_deletes = true;
+        r.remove("Главы/aaaaaa.md").unwrap();
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none(), "удаление через асинхронную операцию подтверждено");
+    }
+
     /// Пустая промежуточная страница при непустом total — отказ, а не «файлов нет».
     #[test]
     fn empty_intermediate_page_is_rejected() {
