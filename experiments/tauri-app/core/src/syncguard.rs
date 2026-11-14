@@ -60,8 +60,23 @@ pub fn stamp_at(now: &chrono::DateTime<chrono::Local>) -> String {
     )
 }
 
+// Тестовая точка времени: под `cfg(test)` позволяет зафиксировать «текущую секунду» на потоке теста.
+// В обычной сборке её нет, поведение не меняется.
+#[cfg(test)]
+thread_local! {
+    static TEST_NOW: std::cell::Cell<Option<chrono::DateTime<chrono::Local>>> = std::cell::Cell::new(None);
+}
+#[cfg(test)]
+pub(crate) fn set_test_now(t: Option<chrono::DateTime<chrono::Local>>) { TEST_NOW.with(|c| c.set(t)); }
+
+pub(crate) fn now_local() -> chrono::DateTime<chrono::Local> {
+    #[cfg(test)]
+    if let Some(t) = TEST_NOW.with(|c| c.get()) { return t; }
+    chrono::Local::now()
+}
+
 pub fn stamp_now() -> String {
-    stamp_at(&chrono::Local::now())
+    stamp_at(&now_local())
 }
 
 /// Название главы или карточки для имени файла: без запретных знаков, не длиннее 60.
@@ -92,10 +107,10 @@ pub fn stem(rel: &str) -> String {
 // guard_write может вызываться под sync_save_lock: повторно его здесь не берём.
 static CONFLICT_COPY_LOCK: Mutex<()> = Mutex::new(());
 
-fn content_conflict_name(now: &chrono::DateTime<chrono::Local>, label: &str, ext: &str, bytes: &[u8]) -> String {
+fn content_conflict_name(now: &chrono::DateTime<chrono::Local>, label: &str, suffix: &str, ext: &str, bytes: &[u8]) -> String {
     let digest: String = sha2::Sha256::digest(bytes).iter().map(|b| format!("{:02x}", b)).collect();
     let head = format!("{} ", stamp_at(now));
-    let tail = format!(" (с другого устройства) {}{}", digest, ext);
+    let tail = format!(" ({}) {}{}", suffix, digest, ext);
     let mut title = String::new();
     for c in safe_name(label).chars() {
         if head.len() + title.len() + c.len_utf8() + tail.len() > 220 { break; }
@@ -106,18 +121,49 @@ fn content_conflict_name(now: &chrono::DateTime<chrono::Local>, label: &str, ext
 
 // None — файл отсутствует; Some(true) — та же версия; Some(false) — другая.
 // Ошибку чтения не принимаем за отсутствие копии.
-fn conflict_copy_state(path: &Path, text: &str) -> crate::store::R<Option<bool>> {
+fn conflict_copy_state(path: &Path, bytes: &[u8]) -> crate::store::R<Option<bool>> {
     match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes.as_slice() == text.as_bytes())),
+        Ok(saved) => Ok(Some(saved.as_slice() == bytes)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("Не удалось проверить существующую копию конфликта: {}", e)),
     }
 }
 
+/// Кандидаты имени конфликтной копии: обычное (время + название) и с SHA-256 содержимого.
+/// Второе нужно, если под обычным именем уже лежит ДРУГАЯ версия (одна секунда, одно название).
+pub(crate) fn conflict_names(now: &chrono::DateTime<chrono::Local>, label: &str, suffix: &str, ext: &str, bytes: &[u8]) -> Vec<String> {
+    vec![
+        format!("{} {} ({}){}", stamp_at(now), safe_name(label), suffix, ext),
+        content_conflict_name(now, label, suffix, ext, bytes),
+    ]
+}
+
+/// Сохраняет версию в «Конфликты» под первым подходящим именем из кандидатов и возвращает его.
+/// Та же версия под этим именем используется повторно, другую не затираем. Если подходящего имени нет,
+/// возвращаем ошибку: сохранение останавливается, чтобы не затереть чужую копию.
+/// Замок защищает только выбор и запись копии внутри процесса; сети под ним нет.
+pub(crate) fn save_conflict_copy(folder: &Path, names: &[String], bytes: &[u8]) -> crate::store::R<String> {
+    let _copy_guard = CONFLICT_COPY_LOCK.lock().map_err(|_| "Внутренний замок копий конфликтов недоступен.".to_string())?;
+    std::fs::create_dir_all(folder).map_err(|e| format!("Не удалось создать папку «{}»: {}", CONFLICT_DIR, e))?;
+    for name in names {
+        match conflict_copy_state(&folder.join(name), bytes)? {
+            Some(true) => return Ok(name.clone()),
+            Some(false) => continue,
+            None => {
+                // Чужую версию пишем атомарно: прерванная запись не должна оставить в «Конфликтах» обрывок.
+                crate::store::write_atomic_bytes(&folder.join(name), bytes)
+                    .map_err(|e| format!("Не удалось сохранить чужую версию в «{}»: {}", CONFLICT_DIR, e))?;
+                return Ok(name.clone());
+            }
+        }
+    }
+    Err("Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.".into())
+}
+
 /// Вызывать перед записью файла. Возвращает имя сохранённой чужой версии или None, если конфликта нет.
 /// label: название главы или карточки для имени файла. Порт guardWrite из JS.
 pub fn guard_write(dir: &Path, file: &Path, new_text: &str, label: &str) -> crate::store::R<Option<String>> {
-    guard_write_at(dir, file, new_text, label, chrono::Local::now())
+    guard_write_at(dir, file, new_text, label, now_local())
 }
 
 /// guardWrite с явным временем (в JS `now = new Date()`): нужно для воспроизводимых имён в тестах.
@@ -137,27 +183,9 @@ pub fn guard_write_at(
     if h == k || h == hash_text(new_text) {
         return Ok(None);
     }
-    let _copy_guard = CONFLICT_COPY_LOCK.lock().map_err(|_| "Внутренний замок копий конфликтов недоступен.".to_string())?;
-    let folder = dir.join(CONFLICT_DIR);
-    std::fs::create_dir_all(&folder).map_err(|e| format!("Не удалось создать папку «{}»: {}", CONFLICT_DIR, e))?;
     let ext = extname(&file.to_string_lossy());
-    let mut name = format!("{} {} (с другого устройства){}", stamp_at(&now), safe_name(label), ext);
-    match conflict_copy_state(&folder.join(&name), &disk)? {
-        Some(true) => return Ok(Some(name)),
-        Some(false) => {
-            name = content_conflict_name(&now, label, &ext, disk.as_bytes());
-            match conflict_copy_state(&folder.join(&name), &disk)? {
-                Some(true) => return Ok(Some(name)),
-                Some(false) => return Err("Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.".into()),
-                None => {}
-            }
-        }
-        None => {}
-    }
-    // Чужую версию пишем атомарно: прерванная запись не должна оставить в «Конфликтах» обрывок.
-    crate::store::write_atomic(&folder.join(&name), &disk)
-        .map_err(|e| format!("Не удалось сохранить чужую версию в «{}»: {}", CONFLICT_DIR, e))?;
-    Ok(Some(name))
+    let names = conflict_names(&now, label, "с другого устройства", &ext, disk.as_bytes());
+    Ok(Some(save_conflict_copy(&dir.join(CONFLICT_DIR), &names, disk.as_bytes())?))
 }
 
 #[cfg(test)]
@@ -302,7 +330,7 @@ mod conflict_collision_tests {
 
     #[test]
     fn hashed_name_keeps_extension_and_unicode_boundaries() {
-        let name = content_conflict_name(&at(), &"漢".repeat(60), ".json", b"foreign");
+        let name = content_conflict_name(&at(), &"漢".repeat(60), "с другого устройства", ".json", b"foreign");
         assert!(name.len() <= 220);
         assert!(name.ends_with(".json"));
         assert!(!name.contains('\u{fffd}'));

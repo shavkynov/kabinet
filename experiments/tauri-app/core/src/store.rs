@@ -427,16 +427,10 @@ pub fn save_meta(dir: &Path, meta: &Map<String, Value>) -> R<()> {
             Ok(bytes) => {
                 let current = String::from_utf8_lossy(&bytes).into_owned();
                 if crate::syncguard::hash_text(&current) != base {
-                    let folder = dir.join(crate::syncguard::CONFLICT_DIR);
-                    fs::create_dir_all(&folder)
-                        .map_err(|e| format!("Не удалось создать папку «{}»: {}", crate::syncguard::CONFLICT_DIR, e))?;
-                    let name = format!(
-                        "{} {} (с другого устройства){}",
-                        crate::syncguard::stamp_now(),
-                        crate::syncguard::safe_name(META),
-                        crate::syncguard::extname(META)
-                    );
-                    write_atomic(&folder.join(&name), &current)?;
+                    // Другая чужая версия под тем же именем (та же секунда) не затирается: берётся имя с SHA-256.
+                    let names = crate::syncguard::conflict_names(
+                        &crate::syncguard::now_local(), META, "с другого устройства", &crate::syncguard::extname(META), current.as_bytes());
+                    crate::syncguard::save_conflict_copy(&dir.join(crate::syncguard::CONFLICT_DIR), &names, current.as_bytes())?;
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // файла нет — просто запишем
@@ -1701,5 +1695,37 @@ mod meta_race_tests {
         assert_eq!(local2["chapters"][0]["title"], CLOUD_TITLE);
         assert_eq!(remote_meta(&sync.remote)["chapters"][0]["title"], CLOUD_TITLE);
         assert_eq!(remote_meta(&sync.remote)["chapters"][0]["goal"], json!(LOCAL_GOAL));
+    }
+}
+
+#[cfg(test)]
+mod meta_copy_collision_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn conflict_texts(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir.join(crate::syncguard::CONFLICT_DIR))
+            .map(|d| d.flatten().filter_map(|e| fs::read_to_string(e.path()).ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Две РАЗНЫЕ чужие версии project.json, вытесненные в одну секунду, обе должны остаться в «Конфликтах».
+    #[test]
+    fn two_foreign_metas_archived_in_one_second_are_both_kept() {
+        let dir = std::env::temp_dir().join(format!("kabinet-meta-copy-{}-{:x}", std::process::id(), rand::random::<u64>()));
+        create_project(&dir, "Copy", None).unwrap();
+        crate::syncguard::set_test_now(Some(chrono::Local.with_ymd_and_hms(2026, 11, 14, 12, 0, 0).single().unwrap()));
+        for word in ["foreign-one", "foreign-two"] {
+            let meta = load_meta(&dir).unwrap();
+            let mut foreign: Value = serde_json::from_slice(&fs::read(meta_path(&dir)).unwrap()).unwrap();
+            foreign["remoteOnly"] = json!(word);
+            fs::write(meta_path(&dir), serde_json::to_vec_pretty(&foreign).unwrap()).unwrap();
+            save_meta(&dir, &meta).unwrap();
+        }
+        let all = conflict_texts(&dir).join("\n");
+        crate::syncguard::set_test_now(None);
+        let _ = fs::remove_dir_all(&dir);
+        assert!(all.contains("foreign-one"), "первая чужая версия project.json затёрта второй копией с тем же именем");
+        assert!(all.contains("foreign-two"), "вторая чужая версия project.json потеряна");
     }
 }

@@ -3,7 +3,7 @@
 //! версии; при правках с обеих сторон чужая версия уходит в «Конфликты».
 use crate::remote::Remote;
 use crate::store::{write_atomic_bytes, R};
-use crate::syncguard::{extname, safe_name, stamp_now, stem, CONFLICT_DIR};
+use crate::syncguard::{conflict_names, extname, now_local, save_conflict_copy, stem, CONFLICT_DIR};
 use regex::Regex;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -220,9 +220,13 @@ impl<T: Remote> FolderSync<T> {
 
     /// Чужую (или вытесненную) версию кладём в «Конфликты» и у нас, и в папке.
     fn keep(&mut self, rel: &str, bytes: &[u8], label: &str, suffix: &str) -> R<String> {
-        let name = format!("{} {} ({}){}", stamp_now(), safe_name(label), suffix, extname(rel));
+        // Имя должно подойти и у нас, и в папке: другая версия под тем же именем (та же секунда) не затирается,
+        // тогда берётся имя с SHA-256. Проверка папки идёт без замка: сеть под замком не держим.
+        let candidates: Vec<String> = conflict_names(&now_local(), label, suffix, &extname(rel), bytes).into_iter()
+            .filter(|name| !matches!(self.remote.read(&format!("{}/{}", CONFLICT_DIR, name)), Ok(Some(b)) if b.as_slice() != bytes))
+            .collect();
+        let name = save_conflict_copy(&self.dir.join(CONFLICT_DIR), &candidates, bytes)?;
         let rel_conflict = format!("{}/{}", CONFLICT_DIR, name);
-        self.write_local(&rel_conflict, bytes)?;
         let pushed = self.remote.mkdir(CONFLICT_DIR).and_then(|_| self.remote.write(&rel_conflict, bytes));
         if pushed.is_ok() { self.state.insert(rel_conflict, hash_bytes(bytes)); }
         Ok(name)
@@ -514,9 +518,13 @@ impl<T: Remote> FolderSync<T> {
         let mut hidden = 0;
         for (rel, e) in &remote {
             if local.contains_key(rel) || rel.starts_with(&format!("{}/", CONFLICT_DIR)) { continue; }
-            let name = format!("{} {} (было в папке){}", stamp_now(), safe_name(&label_of(rel)), extname(rel));
+            let bytes = e.bytes.as_deref().unwrap_or(&[]);
+            // Другая версия под тем же именем (та же секунда) не затирается: берём имя с SHA-256, иначе останавливаемся.
+            let name = conflict_names(&now_local(), &label_of(rel), "было в папке", &extname(rel), bytes).into_iter()
+                .find(|n| !matches!(self.remote.read(&format!("{}/{}", CONFLICT_DIR, n)), Ok(Some(b)) if b.as_slice() != bytes))
+                .ok_or_else(|| "Копия в «Конфликты» уже существует и была изменена. Замена остановлена, чтобы не затереть её.".to_string())?;
             self.remote.mkdir(CONFLICT_DIR)?;
-            self.remote.write(&format!("{}/{}", CONFLICT_DIR, name), e.bytes.as_deref().unwrap_or(&[]))?;
+            self.remote.write(&format!("{}/{}", CONFLICT_DIR, name), bytes)?;
             self.remote.remove(rel)?;
             hidden += 1;
         }
@@ -620,6 +628,63 @@ mod tests {
         assert!(live.contains("название, сохранённое во время прохода") || in_conflicts,
             "конфликтная ветка sync затёрла project.json, сохранённый во время слияния слов");
         assert!(live.contains("бета"), "наше слово словаря должно остаться в живой мете");
+    }
+
+    fn fixed_second() { crate::syncguard::set_test_now(Some(chrono::TimeZone::with_ymd_and_hms(&chrono::Local, 2026, 11, 14, 12, 0, 0).single().unwrap())); }
+    fn local_conflicts(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir.join("Конфликты")).map(|d| d.flatten().filter_map(|e| fs::read_to_string(e.path()).ok()).collect()).unwrap_or_default()
+    }
+    fn remote_conflicts(s: &FakeServer) -> Vec<String> {
+        s.names().iter().filter(|n| n.contains("/Конфликты/")).filter_map(|n| s.get(n)).map(|b| String::from_utf8_lossy(&b).into_owned()).collect()
+    }
+
+    #[test]
+    fn keep_does_not_overwrite_another_version_kept_in_the_same_second() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.keep_foreign("Главы/aaaaaa.md", b"version one", "aaaaaa").unwrap();
+        sa.keep_foreign("Главы/aaaaaa.md", b"version two", "aaaaaa").unwrap();
+        let (local, remote) = (local_conflicts(&a), remote_conflicts(&s));
+        crate::syncguard::set_test_now(None);
+        assert!(local.contains(&"version one".to_string()), "локально первая версия затёрта: {local:?}");
+        assert!(local.contains(&"version two".to_string()), "локально вторая версия потеряна: {local:?}");
+        assert!(remote.contains(&"version one".to_string()), "в папке первая версия затёрта: {remote:?}");
+        assert!(remote.contains(&"version two".to_string()), "в папке вторая версия потеряна: {remote:?}");
+    }
+
+    #[test]
+    fn keep_same_version_twice_makes_one_copy() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        let first = sa.keep_foreign("Главы/aaaaaa.md", b"same", "aaaaaa").unwrap();
+        let second = sa.keep_foreign("Главы/aaaaaa.md", b"same", "aaaaaa").unwrap();
+        let (local, remote) = (local_conflicts(&a), remote_conflicts(&s));
+        crate::syncguard::set_test_now(None);
+        assert_eq!(first, second);
+        assert_eq!((local.len(), remote.len()), (1, 1));
+    }
+
+    #[test]
+    fn replace_all_does_not_overwrite_a_copy_hidden_in_the_same_second() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        s.put("Кабинет/Роман/Главы/zzzzzz.md", b"folder version one");
+        sa.replace_all().unwrap();
+        s.put("Кабинет/Роман/Главы/zzzzzz.md", b"folder version two");
+        sa.replace_all().unwrap();
+        let remote = remote_conflicts(&s);
+        crate::syncguard::set_test_now(None);
+        assert!(remote.contains(&"folder version one".to_string()), "«было в папке»: первая версия затёрта: {remote:?}");
+        assert!(remote.contains(&"folder version two".to_string()), "«было в папке»: вторая версия потеряна: {remote:?}");
     }
 
     #[test]
