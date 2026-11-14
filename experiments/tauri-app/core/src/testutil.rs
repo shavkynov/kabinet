@@ -1,5 +1,6 @@
-//! Поддельный WebDAV-сервер в памяти для тестов: PROPFIND/GET/PUT/DELETE/MKCOL.
-use crate::webdav::{Http, Req, Resp};
+//! Поддельный Яндекс Диск в памяти для тестов: тот же порядок обращений к API, что у настоящего
+//! (список, ссылки на загрузку и скачивание, переадресация скачивания, удаление). Тесты движка идут через настоящий YandexDisk.
+use crate::http::{Http, Req, Resp};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -16,8 +17,6 @@ pub struct Fs {
 
 #[derive(Clone, Default)]
 pub struct FakeServer(pub Arc<Mutex<Fs>>);
-
-fn esc(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;") }
 
 impl FakeServer {
     pub fn new() -> Self {
@@ -44,55 +43,73 @@ impl Http for FakeServer {
     fn request(&self, req: Req) -> Result<Resp, String> {
         let mut f = self.0.lock().unwrap();
         let u = url::Url::parse(&req.url).map_err(|e| e.to_string())?;
-        let path = percent_encoding::percent_decode_str(u.path()).decode_utf8_lossy().trim_end_matches('/').to_string();
-        f.log.push(format!("{} {}", req.method, path));
+        let q: BTreeMap<String, String> = u.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        // «disk:/Кабинет/Роман/a.md» → «/Кабинет/Роман/a.md»
+        let path = q.get("path").or_else(|| q.get("p")).map(|p| p.strip_prefix("disk:").unwrap_or(p).trim_end_matches('/').to_string()).unwrap_or_default();
         let r = |status: u16, body: Vec<u8>| Ok(Resp { status, body, location: None });
-        match req.method.as_str() {
-            "PROPFIND" => {
-                let known = path.is_empty() || f.dirs.contains(&path) || f.files.contains_key(&path);
-                if !known { return r(404, vec![]); }
-                let depth = req.headers.iter().find(|(k, _)| k == "Depth").map(|x| x.1.clone()).unwrap_or("1".into());
-                let mut xml = String::from("<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">");
-                let enc = |p: &str| p.split('/').map(|s| percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()).collect::<Vec<_>>().join("/");
-                xml.push_str(&format!("<d:response><d:href>{}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>", esc(&enc(&path))));
-                if depth != "0" {
+        let js = |v: serde_json::Value| Ok(Resp { status: 200, body: v.to_string().into_bytes(), location: None });
+        let enc = |p: &str| url::form_urlencoded::byte_serialize(p.as_bytes()).collect::<String>();
+        let iso = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|d| d.to_rfc3339()).unwrap_or_default();
+        match (u.host_str().unwrap_or(""), req.method.as_str(), u.path()) {
+            ("cloud-api.yandex.net", "GET", "/v1/disk/resources") => {
+                if path.is_empty() || f.dirs.contains(&path) {
+                    f.log.push(format!("LIST {}", path));
                     let prefix = format!("{}/", path);
-                    let mut seen = std::collections::BTreeSet::new();
-                    for d in &f.dirs { if d.starts_with(&prefix) && !d[prefix.len()..].contains('/') && seen.insert(d.clone()) {
-                        xml.push_str(&format!("<d:response><d:href>{}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>", esc(&enc(d))));
-                    } }
+                    let mut items = vec![];
+                    for d in &f.dirs { if let Some(n) = d.strip_prefix(&prefix) { if !n.contains('/') { items.push(serde_json::json!({ "name": n, "type": "dir" })); } } }
                     if !f.hide_all_files {
-                        for (p, (data, t)) in &f.files { if p.starts_with(&prefix) && !p[prefix.len()..].contains('/') {
-                            let secs = std::time::UNIX_EPOCH + std::time::Duration::from_millis(*t as u64);
-                            xml.push_str(&format!("<d:response><d:href>{}</d:href><d:propstat><d:prop><d:resourcetype/><d:getcontentlength>{}</d:getcontentlength><d:getlastmodified>{}</d:getlastmodified></d:prop></d:propstat></d:response>", esc(&enc(p)), data.len(), httpdate::fmt_http_date(secs)));
-                        } }
+                        for (p, (data, t)) in &f.files { if let Some(n) = p.strip_prefix(&prefix) { if !n.contains('/') {
+                            items.push(serde_json::json!({ "name": n, "type": "file", "size": data.len(), "modified": iso(*t) }));
+                        } } }
                     }
-                }
-                xml.push_str("</d:multistatus>");
-                r(207, xml.into_bytes())
+                    js(serde_json::json!({ "type": "dir", "_embedded": { "total": items.len(), "items": items } }))
+                } else if let Some((d, _)) = f.files.get(&path) {
+                    js(serde_json::json!({ "type": "file", "size": d.len(), "md5": format!("{:x}", md5::compute(d)) }))
+                } else { r(404, vec![]) }
             }
-            "GET" => {
-                if f.fail_gets { return r(500, vec![]); }
-                match f.files.get(&path) { Some((d, _)) => r(200, d.clone()), None => r(404, vec![]) }
-            }
-            "PUT" => {
+            ("cloud-api.yandex.net", "PUT", "/v1/disk/resources") => {
+                f.log.push(format!("MKDIR {}", path));
                 let parent = path.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
                 if !parent.is_empty() && !f.dirs.contains(&parent) { return r(409, vec![]); }
+                if f.dirs.insert(path) { r(201, vec![]) } else { r(409, vec![]) }
+            }
+            ("cloud-api.yandex.net", "GET", "/v1/disk/resources/upload") => {
+                let parent = path.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
+                if !parent.is_empty() && !f.dirs.contains(&parent) { return r(409, vec![]); }
+                js(serde_json::json!({ "href": format!("https://uploader.yandex.net/put?p={}", enc(&path)) }))
+            }
+            ("uploader.yandex.net", "PUT", _) => {
+                f.log.push(format!("PUT {}", path));
                 f.clock += 1000;
                 let t = f.clock;
                 f.files.insert(path, (req.body.unwrap_or_default(), t));
                 r(201, vec![])
             }
-            "DELETE" => { if f.files.remove(&path).is_some() { r(204, vec![]) } else { r(404, vec![]) } }
-            "MKCOL" => { if f.dirs.insert(path) { r(201, vec![]) } else { r(405, vec![]) } }
-            _ => r(405, vec![]),
+            ("cloud-api.yandex.net", "GET", "/v1/disk/resources/download") => {
+                if f.files.contains_key(&path) { js(serde_json::json!({ "href": format!("https://downloader.yandex.net/a?p={}", enc(&path)) })) } else { r(404, vec![]) }
+            }
+            ("downloader.yandex.net", "GET", _) => Ok(Resp { status: 302, body: vec![], location: Some(format!("https://cdn.yandex.net/b?p={}", enc(&path))) }),
+            ("cdn.yandex.net", "GET", _) => {
+                f.log.push(format!("GET {}", path));
+                if f.fail_gets { return r(500, vec![]); }
+                match f.files.get(&path) { Some((d, _)) => r(200, d.clone()), None => r(404, vec![]) }
+            }
+            ("cloud-api.yandex.net", "DELETE", "/v1/disk/resources") => {
+                f.log.push(format!("DELETE {}", path));
+                if f.files.remove(&path).is_some() { r(204, vec![]) } else { r(404, vec![]) }
+            }
+            other => panic!("неожиданный запрос поддельному Диску: {:?}", other),
         }
     }
 }
 
-/// Адаптер без WebDAV: прямой доступ к FakeServer как к Remote (для тестов движка).
-pub fn dav_on(server: &FakeServer, root: &str) -> crate::webdav::WebDav<FakeServer> {
-    crate::webdav::WebDav::new(server.clone(), "https://dav.example.com", "u", "p", root).unwrap()
+/// Данные входа Яндекса для тестов: логин с признаком OAuth и «пароль» — JSON с токеном, который не истекает.
+pub const OAUTH_USER: &str = "oauth-yandex:0123456789abcdef0123456789abcdef";
+pub fn oauth_pass() -> String { serde_json::json!({ "kind": "kabinet-yandex-oauth", "accessToken": "тест", "expiresAt": 4_102_444_800_000_i64 }).to_string() }
+
+/// Движок синхронизации поверх поддельного Диска.
+pub fn dav_on(server: &FakeServer, root: &str) -> crate::yandexdisk::YandexDisk<FakeServer> {
+    crate::yandexdisk::YandexDisk::new(server.clone(), &oauth_pass(), root).unwrap()
 }
 
 /// Пустая временная папка для теста.

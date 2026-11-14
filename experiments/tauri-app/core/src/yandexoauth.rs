@@ -2,7 +2,7 @@
 //! Приложение открывает страницу Яндекса, а ответ возвращается ссылкой kabinet://oauth/yandex?… (см. docs/oauth/yandex).
 //! Окну отдаётся только одноразовый «билет»: сам токен остаётся в ядре и попадает в защищённое хранилище.
 use crate::store::R;
-use crate::webdav::{Http, Req};
+use crate::http::{Http, Req};
 use crate::yandexdisk::PREFIX;
 use base64::Engine;
 use serde_json::{json, Value};
@@ -140,6 +140,14 @@ impl YandexAuth {
             "expiresAt": now_ms() + (expires_in * 1000.0) as i64, "tokenType": "bearer" }).to_string())
     }
 
+    /// Только для тестов: выдаёт билет на готовые данные входа, минуя браузер.
+    #[cfg(test)]
+    pub fn test_ticket(&self, user: &str, creds: &str) -> String {
+        let t = hex(&rand_bytes());
+        self.tickets.lock().unwrap().insert(t.clone(), Ticket { user: user.into(), creds: creds.into(), until: Instant::now() + TICKET_TTL });
+        t
+    }
+
     /// Обменивает билет из окна на данные входа (один раз).
     pub fn take_ticket(&self, ticket: &str, user: &str) -> R<String> {
         let t = self.tickets.lock().unwrap().remove(ticket);
@@ -150,7 +158,7 @@ impl YandexAuth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::webdav::Resp;
+    use crate::http::Resp;
 
     struct Token(u16, Value, Arc<Mutex<Vec<String>>>);
     impl Http for Token {

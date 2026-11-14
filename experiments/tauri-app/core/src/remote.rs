@@ -19,7 +19,7 @@ pub trait Remote: Send {
     fn mkdir(&mut self, rel: &str) -> R<()>;
 }
 
-/// Папка, которой можно подключиться и в которой можно создать корень: общее для WebDAV и Яндекс Диска.
+/// Папка, которой можно подключиться и в которой можно создать корень: сейчас её реализует только Яндекс Диск.
 pub trait Folder: Remote {
     fn check(&mut self) -> R<bool>;
     fn ensure_root(&mut self) -> R<()>;

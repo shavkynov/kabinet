@@ -1,10 +1,10 @@
-//! Проект на компьютере, связанный с сетевой папкой (WebDAV). Порт src/davlink.js.
+//! Проект на компьютере, связанный с папкой на Яндекс Диске. Порт src/davlink.js.
 //! Фоновый поток: полный проход раз в 30 с, выгрузка через 4 с после правки (наблюдение за папкой),
 //! замок «kabinet.lock» раз в минуту. Проходы идут строго по одному.
 use crate::foldersync::{is_syncable, FolderSync, SyncResult};
 use crate::store::{write_atomic, R};
 use crate::remote::Folder;
-use crate::webdav::{self, Http, WebDav};
+use crate::http::Http;
 use crate::yandexdisk::{self, is_oauth_user, YandexDisk};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -95,8 +95,8 @@ fn link_key(dir: &Path) -> String { dir.to_string_lossy().to_string() }
 
 fn dav_of(http: Box<dyn Http>, acc: &Acc, root: Option<&str>) -> R<Rm> {
     let root = root.unwrap_or(&acc.root);
-    if is_oauth_user(&acc.user) { return Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?)); }
-    Ok(Box::new(WebDav::new(http, &acc.url, &acc.user, &acc.pass, root)?))
+    if !is_oauth_user(&acc.user) { return Err("Вход по паролю больше не поддерживается. Подключите Яндекс Диск заново.".into()); }
+    Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?))
 }
 
 fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEvent) -> Option<SyncResult> {
@@ -298,14 +298,14 @@ impl DavLink {
 
     /// Вход на сервер: проверка логина и пароля.
     pub fn login(&self, url: &str, user: &str, pass: &str) -> R<Acc> {
-        let acc = Acc { url: if is_oauth_user(user) { url.to_string() } else { webdav::normalize_url(url)? }, user: user.to_string(), pass: pass.to_string(), root: String::new(), label: String::new() };
+        let acc = Acc { url: url.to_string(), user: user.to_string(), pass: pass.to_string(), root: String::new(), label: String::new() };
         dav_of((self.make_http)(), &acc, Some(""))?.check()?;
         Ok(acc)
     }
 
     pub fn browse(&self, acc: &Acc, at: &str) -> R<Vec<Value>> {
-        let v = if is_oauth_user(&acc.user) { yandexdisk::browse_folders((self.make_http)(), &acc.pass, at)? }
-            else { webdav::browse_folders((self.make_http)(), &acc.url, &acc.user, &acc.pass, at)? };
+        if !is_oauth_user(&acc.user) { return Err("Вход по паролю больше не поддерживается. Подключите Яндекс Диск заново.".into()); }
+        let v = yandexdisk::browse_folders((self.make_http)(), &acc.pass, at)?;
         Ok(v.into_iter().map(|(name, path)| json!({ "name": name, "path": path })).collect())
     }
 
@@ -387,7 +387,7 @@ mod tests {
         DavLink::new(data, Arc::new(PlainSecret), "Тест", Arc::new(move || Box::new(s.clone()) as Box<dyn Http>),
             Arc::new(move |e| events.lock().unwrap().push(format!("{:?}", e))))
     }
-    fn acc() -> Acc { Acc { url: "https://dav.example.com".into(), user: "u".into(), pass: "p".into(), root: "/Кабинет/Роман".into(), label: "Облако".into() } }
+    fn acc() -> Acc { Acc { url: "https://webdav.yandex.ru".into(), user: OAUTH_USER.into(), pass: oauth_pass(), root: "/Кабинет/Роман".into(), label: "Облако".into() } }
     fn project(dir: &Path) {
         std::fs::create_dir_all(dir.join("Главы")).unwrap();
         std::fs::write(dir.join("project.json"), r#"{"name":"Роман","chapters":[{"id":"aaaaaa","title":"1"}]}"#).unwrap();
@@ -418,7 +418,7 @@ mod tests {
         let v = d.attach(&dir, &acc(), "ask").unwrap();
         assert_eq!(v["exists"], json!(false));
         assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "текст".as_bytes());
-        assert_eq!(d.link_of(&dir).unwrap().user, "u");
+        assert_eq!(d.link_of(&dir).unwrap().user, OAUTH_USER);
         assert_eq!(d.status(Some(&dir))["linked"], json!(true));
         assert_eq!(d.logins().len(), 1);
         d.stop();
@@ -461,12 +461,14 @@ mod tests {
     }
 
     #[test]
-    fn bad_password_is_reported_without_linking() {
+    fn rejected_login_is_reported_without_linking() {
         struct Deny;
-        impl Http for Deny { fn request(&self, _: crate::webdav::Req) -> Result<crate::webdav::Resp, String> { Ok(crate::webdav::Resp { status: 401, body: vec![], location: None }) } }
+        impl Http for Deny { fn request(&self, _: crate::http::Req) -> Result<crate::http::Resp, String> { Ok(crate::http::Resp { status: 401, body: vec![], location: None }) } }
         let data = tmpdir("data");
         let d = DavLink::new(&data, Arc::new(PlainSecret), "Т", Arc::new(|| Box::new(Deny) as Box<dyn Http>), Arc::new(|_| {}));
-        assert!(d.login("https://x.ru", "u", "bad").unwrap_err().contains("логин"));
+        assert!(d.login("https://webdav.yandex.ru", OAUTH_USER, &oauth_pass()).unwrap_err().contains("Подключите"));
+        let old = Acc { user: "me@yandex.ru".into(), pass: "пароль".into(), ..acc() };
+        assert!(d.attach(&tmpdir("old"), &old, "ask").unwrap_err().contains("больше не поддерживается"));
         let dir = tmpdir("proj");
         project(&dir);
         assert!(d.attach(&dir, &acc(), "ask").is_err());
@@ -496,7 +498,7 @@ mod tests {
     fn sync_now_holds_config_during_error_callback() {
         struct Offline;
         impl Http for Offline {
-            fn request(&self, _: crate::webdav::Req) -> Result<crate::webdav::Resp, String> {
+            fn request(&self, _: crate::http::Req) -> Result<crate::http::Resp, String> {
                 Err("Сеть недоступна (тест)".into())
             }
         }

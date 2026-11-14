@@ -7,7 +7,7 @@ use kabinet_core::{backup, export, exporttarget, import, mentions, searchreplace
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
-use kabinet_core::webdav::{Http, Retrying, UreqHttp};
+use kabinet_core::http::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -544,7 +544,7 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             let dir = state.current.lock().ok().and_then(|g| g.clone());
             let mut text = String::new();
             if dir.is_some() { text.push_str("Сейчас проект лежит на этом компьютере. Чтобы он синхронизировался, выберите «Файл → Синхронизация…».\n\n"); }
-            text.push_str("Облако без установки программ: подключает Яндекс Диск, Mail.ru, Nextcloud и другие серверы WebDAV по логину и паролю приложения. Проект остаётся на этом компьютере, а его копия синхронизируется с облаком; на телефоне в Кабинете для Android подключается тот же сервер.\n\nПравки с обеих сторон сохраняются: если один и тот же текст изменили на двух устройствах, чужая версия сохраняется в папке «Конфликты».\n\nСовет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать.");
+            text.push_str("Облако без установки программ: подключает Яндекс Диск через вход в браузере (пароль вводится только на сайте Яндекса). Проект остаётся на этом компьютере, а его копия синхронизируется с облаком; на телефоне в Кабинете для Android подключается тот же Яндекс Диск.\n\nПравки с обеих сторон сохраняются: если один и тот же текст изменили на двух устройствах, чужая версия сохраняется в папке «Конфликты».\n\nСовет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать.");
             let buttons = if dir.is_some() { rfd::MessageButtons::OkCancelCustom("OK".into(), "Открыть папку «Конфликты»".into()) } else { rfd::MessageButtons::Ok };
             let res = rfd::AsyncMessageDialog::new().set_title("Синхронизация").set_description(text).set_buttons(buttons).show().await;
             if let (Some(dir), rfd::MessageDialogResult::Custom(c)) = (dir, res) {

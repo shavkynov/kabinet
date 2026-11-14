@@ -3,7 +3,7 @@
 //! Позиции считаются в единицах UTF-16, как в JavaScript и в ответе сервера.
 use crate::dict;
 use crate::store::{self, write_atomic, R};
-use crate::webdav::{Http, Req};
+use crate::http::{Http, Req};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -311,7 +311,7 @@ impl CheckApi {
 mod tests {
     use super::*;
     use crate::testutil::tmpdir;
-    use crate::webdav::Resp;
+    use crate::http::Resp;
     use std::sync::atomic::AtomicUsize;
 
     #[test]

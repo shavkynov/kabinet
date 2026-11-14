@@ -2,13 +2,21 @@
 //! Пароль окну не отдаётся: после входа остаётся только номер сеанса.
 use crate::davlink::{Acc, DavLink};
 use crate::store::{safe_folder_name, R};
-use crate::webdav::{Http, UreqHttp, PRESETS};
+use crate::http::{Http, UreqHttp};
 use crate::yandexdisk::is_oauth_user;
 use crate::yandexoauth::YandexAuth;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+/// Подключаемые сервисы. Остался один: Яндекс Диск. Адрес — только метка: по ней интерфейс отбирает сохранённые входы Яндекса,
+/// обращений по этому адресу программа не делает (работа идёт через API Яндекс Диска).
+pub struct Preset { pub id: &'static str, pub name: &'static str, pub url: &'static str, pub hint: &'static str }
+
+pub const PRESETS: &[Preset] = &[
+    Preset { id: "yandex", name: "Яндекс Диск", url: "https://webdav.yandex.ru", hint: "Вход откроется в вашем браузере. Пароль вводится только на сайте Яндекса." },
+];
 
 pub struct DavApi {
     pub link: DavLink,
@@ -42,7 +50,8 @@ impl DavApi {
         let need = || cur.ok_or_else(|| "Проект не открыт.".to_string());
         match op {
             "presets" => Ok(Self::presets()),
-            "saved" => Ok(Value::Array(self.link.logins().iter().enumerate().map(|(i, l)| json!({
+            // Старые входы по паролю (WebDAV) не показываем: подключиться ими уже нельзя.
+            "saved" => Ok(Value::Array(self.link.logins().iter().enumerate().filter(|(_, l)| is_oauth_user(l["user"].as_str().unwrap_or(""))).map(|(i, l)| json!({
                 "index": i, "label": l["label"], "user": l["user"], "url": l["url"] })).collect())),
             "useSaved" => {
                 let logins = self.link.logins();
@@ -54,13 +63,15 @@ impl DavApi {
             "login" => {
                 let form = a.first().cloned().unwrap_or(Value::Null);
                 let id = form["preset"].as_str().unwrap_or("");
-                let preset = PRESETS.iter().find(|p| p.id == id).unwrap_or(&PRESETS[PRESETS.len() - 1]);
-                let url = if preset.url.is_empty() { form["url"].as_str().unwrap_or("") } else { preset.url };
+                let preset = PRESETS.iter().find(|p| p.id == id).ok_or("Этот сервис пока не поддерживается.")?;
+                let url = preset.url;
                 let (user, pass) = (form["user"].as_str().unwrap_or(""), form["pass"].as_str().unwrap_or(""));
                 if user.is_empty() || pass.is_empty() { return Err("Введите логин и пароль.".into()); }
                 // Вход через браузер: вместо пароля — одноразовый билет, настоящие данные берём из ядра.
                 let creds;
-                let pass = if is_oauth_user(user) { creds = self.yandex.take_ticket(pass, user)?; creds.as_str() } else { pass };
+                if !is_oauth_user(user) { return Err("Вход по паролю больше не поддерживается. Подключите Яндекс Диск через браузер.".into()); }
+                creds = self.yandex.take_ticket(pass, user)?;
+                let pass = creds.as_str();
                 let acc = self.link.login(url, user, pass)?;
                 Ok(json!({ "session": self.new_session(acc, preset.name), "label": preset.name }))
             }
@@ -108,7 +119,7 @@ mod tests {
     use super::*;
     use crate::davlink::PlainSecret;
     use crate::testutil::*;
-    use crate::webdav::Http;
+    use crate::http::Http;
     use std::sync::Arc;
 
     fn api(s: &FakeServer, data: &Path) -> DavApi {
@@ -121,8 +132,11 @@ mod tests {
         let s = FakeServer::new();
         s.put("Кабинет/старый/project.json", b"{}");
         let a = api(&s, &tmpdir("data"));
-        assert!(a.call("login", &[json!({ "preset": "other", "url": "https://dav.example.com", "user": "", "pass": "" })], None).is_err());
-        let r = a.call("login", &[json!({ "preset": "other", "url": "https://dav.example.com", "user": "u", "pass": "p" })], None).unwrap();
+        assert!(a.call("login", &[json!({ "preset": "yandex", "user": "", "pass": "" })], None).is_err());
+        assert!(a.call("login", &[json!({ "preset": "other", "user": OAUTH_USER, "pass": "x" })], None).unwrap_err().contains("не поддерживается"));
+        assert!(a.call("login", &[json!({ "preset": "yandex", "user": "me@yandex.ru", "pass": "пароль" })], None).unwrap_err().contains("больше не поддерживается"));
+        let ticket = a.yandex.test_ticket(OAUTH_USER, &oauth_pass());
+        let r = a.call("login", &[json!({ "preset": "yandex", "user": OAUTH_USER, "pass": ticket })], None).unwrap();
         let id = r["session"].as_str().unwrap().to_string();
         assert!(r.get("pass").is_none());
         let b = a.call("browse", &[json!(id), json!("/")], None).unwrap();
@@ -158,7 +172,8 @@ mod tests {
     fn open_target_avoids_existing_names() {
         let s = FakeServer::new();
         let a = api(&s, &tmpdir("data"));
-        let r = a.call("login", &[json!({ "preset": "other", "url": "https://dav.example.com", "user": "u", "pass": "p" })], None).unwrap();
+        let ticket = a.yandex.test_ticket(OAUTH_USER, &oauth_pass());
+        let r = a.call("login", &[json!({ "preset": "yandex", "user": OAUTH_USER, "pass": ticket })], None).unwrap();
         let id = r["session"].as_str().unwrap();
         let parent = tmpdir("parent");
         std::fs::create_dir_all(parent.join("Роман")).unwrap();

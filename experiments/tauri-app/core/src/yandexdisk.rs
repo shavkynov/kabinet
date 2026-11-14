@@ -2,7 +2,7 @@
 //! Данные входа лежат в «пароле» как JSON { kind: "kabinet-yandex-oauth", accessToken, expiresAt, … }.
 use crate::remote::{Folder, Item, Remote};
 use crate::store::R;
-use crate::webdav::{Http, Req, Resp};
+use crate::http::{Http, Req, Resp};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -145,7 +145,8 @@ impl<H: Http> YandexDisk<H> {
             for it in items {
                 let name = it["name"].as_str().unwrap_or("");
                 let ty = it["type"].as_str().unwrap_or("");
-                if name.is_empty() || name.contains('/') || parts(name)?.len() != 1 || !(ty == "dir" || ty == "file") { return Err(plain("Некорректный элемент папки Яндекса.")); }
+                // Необычные имена (\\ : * ? и т.п.) здесь не отвергаем: их отсеивает синхронизация (is_syncable), и один странный файл не остановит обмен.
+                if name.is_empty() || name.contains('/') || name.contains('\0') || !(ty == "dir" || ty == "file") { return Err(plain("Некорректный элемент папки Яндекса.")); }
                 let mtime = it["modified"].as_str().and_then(|m| chrono::DateTime::parse_from_rfc3339(m).ok()).map(|d| d.timestamp_millis()).unwrap_or(0);
                 out.push(Item { name: name.into(), dir: ty == "dir", size: it["size"].as_i64().unwrap_or(0), mtime });
             }

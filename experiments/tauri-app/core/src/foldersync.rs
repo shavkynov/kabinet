@@ -646,7 +646,7 @@ mod tests {
         w(dir, "project.json", &serde_json::to_string_pretty(&json!({"name":"Роман","chapters":list})).unwrap());
         for (id, t) in ch { w(dir, &format!("Главы/{}.md", id), t); }
     }
-    fn sync_of(dir: &Path, s: &FakeServer, st: &str) -> FolderSync<crate::webdav::WebDav<FakeServer>> {
+    fn sync_of(dir: &Path, s: &FakeServer, st: &str) -> FolderSync<crate::yandexdisk::YandexDisk<FakeServer>> {
         FolderSync::new(dir, dav_on(s, "/Кабинет/Роман"), Some(dir.parent().unwrap().join(format!("{}.state", st))))
     }
 

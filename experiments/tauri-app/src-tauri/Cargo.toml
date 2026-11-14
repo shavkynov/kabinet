@@ -16,7 +16,7 @@ url = "2"
 tauri-plugin-deep-link = "2"
 kabinet-core = { path = "../core" }
 
-# Пароли WebDAV хранятся в защищённом хранилище системы: Credential Manager (Windows), Связка ключей (macOS).
+# Данные входа в Яндекс хранятся в защищённом хранилище системы: Credential Manager (Windows), Связка ключей (macOS).
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
 

@@ -1,15 +1,6 @@
-use kabinet_core::{store, webdav};
+use kabinet_core::store;
 use serde_json::json;
 use std::fs;
-
-#[test]
-fn to_base64_matches_standard_vectors() {
-    assert_eq!(webdav::to_base64(b""), "");
-    assert_eq!(webdav::to_base64(b"abc"), "YWJj");
-    assert_eq!(webdav::to_base64(b"ab"), "YWI=");
-    assert_eq!(webdav::to_base64(b"a"), "YQ==");
-    assert_eq!(webdav::to_base64(&[0xfb, 0xff]), "+/8=");
-}
 
 #[test]
 fn read_image_encodes_with_standard_base64() {
