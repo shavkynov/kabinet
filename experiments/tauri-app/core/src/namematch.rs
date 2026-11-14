@@ -38,8 +38,9 @@ pub fn alternation(keys: &[String]) -> String {
     trie_regex(&root)
 }
 
-/// Регулярка «слово целиком, без учёта регистра» для набора имён в нижнем регистре; None, если имён нет.
-pub fn name_regex(keys: &[String]) -> Option<fancy_regex::Regex> {
+/// Регулярка «без учёта регистра» для набора имён в нижнем регистре; None, если имён нет.
+/// Границы слова проверяются отдельно через `is_word_boundary` без lookaround, чтобы работал быстрый DFA-движок `regex`.
+pub fn name_regex(keys: &[String]) -> Option<regex::Regex> {
     let mut list: Vec<String> = keys.to_vec();
     list.sort();
     list.dedup();
@@ -47,8 +48,15 @@ pub fn name_regex(keys: &[String]) -> Option<fancy_regex::Regex> {
         return None;
     }
     let alt = alternation(&list);
-    let pattern = format!(r"(?i)(?<![\p{{L}}\p{{N}}])(?:{alt})(?![\p{{L}}\p{{N}}])");
-    fancy_regex::Regex::new(&pattern).ok()
+    let pattern = format!(r"(?i)(?:{alt})");
+    regex::Regex::new(&pattern).ok()
+}
+
+/// Проверка, что совпадение `[start..end]` ограничено не-буквенно-цифровыми символами (аналог `(?<![\p{L}\p{N}])` и `(?![\p{L}\p{N}])`).
+pub fn is_word_boundary(text: &str, start: usize, end: usize) -> bool {
+    let prev_ok = text[..start].chars().next_back().map_or(true, |c| !c.is_alphanumeric());
+    let next_ok = text[end..].chars().next().map_or(true, |c| !c.is_alphanumeric());
+    prev_ok && next_ok
 }
 
 /// Признак «слово начинается с большой буквы».
@@ -60,11 +68,10 @@ pub fn is_capital(s: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn all(re: &fancy_regex::Regex, text: &str) -> Vec<String> {
+    fn all(re: &regex::Regex, text: &str) -> Vec<String> {
         re.find_iter(text)
-            .filter_map(|m| m.ok())
+            .filter(|m| !m.as_str().is_empty() && is_word_boundary(text, m.start(), m.end()))
             .map(|m| m.as_str().to_string())
-            .filter(|s| !s.is_empty())
             .collect()
     }
 
@@ -92,8 +99,8 @@ mod tests {
         let fast = name_regex(&words).unwrap();
         let mut sorted = words.clone();
         sorted.sort_by(|a, b| b.chars().count().cmp(&a.chars().count()));
-        let slow_pat = format!(r"(?i)(?<![\p{{L}}\p{{N}}])(?:{})(?![\p{{L}}\p{{N}}])", sorted.join("|"));
-        let slow = fancy_regex::Regex::new(&slow_pat).unwrap();
+        let slow_pat = format!(r"(?i)(?:{})", sorted.join("|"));
+        let slow = regex::Regex::new(&slow_pat).unwrap();
         let text: String = (0..2000).map(|i| if i % 7 == 0 { format!("имя{}ой", radix(i % 120)) } else { "слово".to_string() }).collect::<Vec<_>>().join(" ");
         assert_eq!(all(&fast, &text), all(&slow, &text));
         assert!(alternation(&["ab".into(), "a".into()]).contains('?'), "префикс-слово сохраняется как необязательное продолжение");
