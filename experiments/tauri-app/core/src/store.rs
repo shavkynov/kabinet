@@ -276,7 +276,9 @@ pub fn write_atomic_bytes(file: &Path, data: &[u8]) -> R<()> {
         let mut last = Ok(());
         for attempt in 0..6 {
             match fs::rename(&tmp, file) {
-                Ok(()) => return Ok(()),
+                // Новая запись переживёт аварийное выключение: синхронизируем каталог (best-effort,
+                // ошибка не отменяет уже записанные данные).
+                Ok(()) => { let _ = sync_parent_dir(file); return Ok(()); }
                 Err(e) => { last = Err(e); std::thread::sleep(std::time::Duration::from_millis(40 * (attempt + 1))); }
             }
         }
@@ -291,6 +293,26 @@ pub fn write_atomic_bytes(file: &Path, data: &[u8]) -> R<()> {
 }
 
 fn meta_path(dir: &Path) -> PathBuf { dir.join(META) }
+
+/// Синхронизация каталога после rename, чтобы новая запись пережила аварийное выключение.
+/// Best-effort: где файловая система не поддерживает — ошибку не возвращаем, данные уже записаны.
+#[cfg(unix)]
+fn sync_parent_dir(file: &Path) -> std::io::Result<()> {
+    match file.parent() { Some(parent) => std::fs::File::open(parent)?.sync_all(), None => Ok(()) }
+}
+
+/// На Windows каталог открывают с FILE_FLAG_BACKUP_SEMANTICS (0x02000000) и вызывают FlushFileBuffers.
+/// Поддержка зависит от версии Windows/ФС: ошибку намеренно не возвращаем (best-effort).
+#[cfg(windows)]
+fn sync_parent_dir(file: &Path) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let Some(parent) = file.parent() else { return Ok(()) };
+    let f = std::fs::OpenOptions::new().read(true).custom_flags(0x0200_0000).open(parent)?;
+    f.sync_all()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn sync_parent_dir(_file: &Path) -> std::io::Result<()> { Ok(()) }
 
 fn chapter_file(dir: &Path, id: &str) -> R<PathBuf> {
     if !valid_id(id) { return Err("Неверный идентификатор главы.".into()); }
