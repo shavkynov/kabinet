@@ -1309,7 +1309,7 @@ mod tests {
         assert!(ids.contains(&"aaaaaa"));
     }
 
-    /// Ошибка удаления пустой главы в adopt доходит до вызывающего кода; файл остаётся.
+    /// Ошибка удаления пустой главы в adopt доходит до вызывающего кода; файл и мета не публикуются.
     #[cfg(windows)]
     #[test]
     fn adopt_reports_failure_to_remove_empty_chapter() {
@@ -1323,11 +1323,52 @@ mod tests {
         project(&b, &[("zzzzzz", "")]); // пустая глава, которой нет в облаке → adopt её удалит
         let file = b.join("Главы/zzzzzz.md");
         // Читать файл можно, удалить — нельзя: воспроизводимый отказ удаления без chmod.
-        let _lock = fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
+        let lock = fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
         let mut sb = sync_of(&b, &s, "b");
-        let res = sb.sync();
-        assert!(res.is_err(), "ошибка удаления пустой главы должна дойти до вызывающего: {:?}", res.as_ref().map(|r| r.pulled.clone()));
+        let err = match sb.sync() {
+            Err(e) => e,
+            Ok(r) => panic!("ожидалась ошибка удаления, получено Ok: {:?}", r.pulled),
+        };
+        assert!(err.contains("Не удалось удалить пустую главу"), "ошибка именно от удаления в adopt, а не раньше: {}", err);
         assert!(file.exists(), "файл пустой главы остался на месте");
+        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
+        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["zzzzzz"], "после отказа мета сохраняет свою главу и не публикует новую структуру: {ids:?}");
+
+        // После снятия блокировки повтор тем же объектом должен завершиться штатно.
+        drop(lock);
+        sb.sync().expect("повтор после снятия блокировки должен завершиться штатно");
+        assert!(!file.exists(), "пустая глава удалена при повторе");
+        assert!(b.join("Главы/aaaaaa.md").exists(), "облачная глава скачана при повторе");
+        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
+        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["aaaaaa"], "облачная структура присутствует в локальной мете: {ids:?}");
+    }
+
+    /// Ветка `Err(_) => true` в `has_local_content`: нечитаемая глава уже есть в облаке (слияние её не читает),
+    /// мета отличается нейтральным полем — без защиты локальная копия project.json не сохранилась бы.
+    #[test]
+    fn has_local_content_keeps_project_copy_when_chapter_read_fails() {
+        let s = FakeServer::new();
+        let a = tmpdir("hlc-a").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("hlc-b").join("p");
+        project(&b, &[("aaaaaa", "текст")]);
+        let mut meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
+        meta["neutralMarker"] = json!(1); // мета отличается, но это поле не входит в has_local_content
+        w(&b, "project.json", &serde_json::to_string_pretty(&meta).unwrap());
+        let file = b.join("Главы/aaaaaa.md");
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap(); // ошибка чтения возникает именно внутри has_local_content
+
+        let mut sb = sync_of(&b, &s, "b");
+        let _ = sb.sync(); // дальнейшие шаги могут упереться в каталог на месте файла — это не предмет теста
+        let conflicts: Vec<String> = fs::read_dir(b.join("Конфликты"))
+            .map(|d| d.flatten().filter_map(|e| fs::read_to_string(e.path()).ok()).collect()).unwrap_or_default();
+        assert!(conflicts.iter().any(|t| t.contains("neutralMarker")),
+            "ошибка чтения в has_local_content должна сохранить локальную копию project.json: {:?}", conflicts);
     }
 
     /// stats.json синхронизируется как обычный файл: статистика с другого устройства не теряется.
