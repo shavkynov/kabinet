@@ -21,16 +21,27 @@ const safeName = (s) => String(s || '').replace(/[\\/:*?"<>|\n\r\t]/g, '-').repl
 
 // Полный SHA-256 содержимого различает версии даже при одинаковых времени и названии.
 // Ограничиваем байты имени с запасом под временный суффикс writeFileAtomic.
-function conflictName(label, ext, data, now = new Date()) {
+function conflictName(label, ext, data, now = new Date(), suffix = 'с другого устройства') {
   const digest = crypto.createHash('sha256').update(data).digest('hex');
   const head = `${stamp(now)} `;
-  const tail = ` (с другого устройства) ${digest}${ext}`;
+  const tail = ` (${suffix}) ${digest}${ext}`;
   let title = '';
   for (const char of safeName(label)) {
     if (Buffer.byteLength(head + title + char + tail, 'utf8') > 220) break;
     title += char;
   }
   return head + title + tail;
+}
+
+/**
+ * Кандидаты имени конфликтной копии: обычное (время + название) и с SHA-256 содержимого.
+ * Второе нужно, если под обычным именем уже лежит другая версия (та же секунда, то же название).
+ */
+function conflictNames(label, suffix, ext, data, now = new Date()) {
+  return [
+    `${stamp(now)} ${safeName(label)} (${suffix})${ext}`,
+    conflictName(label, ext, data, now, suffix),
+  ];
 }
 
 /**
@@ -82,4 +93,4 @@ function assertNotPlaceholder(file) {
   }
 }
 
-module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName, conflictName };
+module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName, conflictName, conflictNames };

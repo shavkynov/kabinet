@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { writeFileAtomic } = require('./fsutil');
-const { CONFLICT_DIR, stamp, safeName } = require('./syncguard');
+const { CONFLICT_DIR, conflictNames } = require('./syncguard');
 const dictLib = require('./dict');
 
 // Что переносим в папку и обратно. «Копии» (резервные) и временные файлы не нужны:
@@ -181,9 +181,32 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     try { return hashBytes(readLocal(rel)); } catch { return undefined; }
   };
 
+  /**
+   * Имя копии в «Конфликты», которое не затрёт другую версию: обычное, а если оно занято другим содержимым —
+   * с SHA-256. Та же версия под этим именем переиспользуется. withLocal: проверять и локальную папку.
+   * Ошибка чтения папки имя не блокирует: запись в неё всё равно не удастся и будет обработана вызывающим.
+   */
+  async function freeConflictName(rel, label, suffix, bytes, withLocal) {
+    const want = Buffer.from(bytes);
+    for (const name of conflictNames(label, suffix, path.extname(rel), want, now())) {
+      const relConflict = `${CONFLICT_DIR}/${name}`;
+      let busy = false;
+      if (withLocal) {
+        try { busy = !fs.readFileSync(path.join(dir, relConflict)).equals(want); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+      }
+      if (!busy) {
+        let there = null;
+        try { there = await adapter.read(relConflict); } catch { /* папка недоступна */ }
+        if (there && !Buffer.from(there).equals(want)) busy = true;
+      }
+      if (!busy) return name;
+    }
+    throw new Error('Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.');
+  }
+
   /** Чужую версию наружу не выбрасываем: складываем её в «Конфликты» и локально, и в папке. */
   async function keepForeign(rel, bytes, label) {
-    const name = `${stamp(now())} ${safeName(label)} (с другого устройства)${path.extname(rel)}`;
+    const name = await freeConflictName(rel, label, 'с другого устройства', bytes, true);
     const relConflict = `${CONFLICT_DIR}/${name}`;
     const target = path.join(dir, relConflict);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -208,7 +231,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
 
   /** Сохраняем вытесненную локальную структуру в «Конфликты» и в папке, как и любую чужую версию. */
   async function keepLocalCopy(rel, bytes, label) {
-    const name = `${stamp(now())} ${safeName(label)} (было на этом устройстве)${path.extname(rel)}`;
+    const name = await freeConflictName(rel, label, 'было на этом устройстве', bytes, true);
     const relConflict = `${CONFLICT_DIR}/${name}`;
     const target = path.join(dir, relConflict);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -463,10 +486,11 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     let hidden = 0;
     for (const rel of remote.keys()) {
       if (local.has(rel) || rel.startsWith(`${CONFLICT_DIR}/`)) continue;
-      const name = `${stamp(now())} ${safeName(labelOf(rel))} (было в папке)${path.extname(rel)}`;
+      const bytes = remote.get(rel).bytes;
+      const name = await freeConflictName(rel, labelOf(rel), 'было в папке', bytes, false);
       const relConflict = `${CONFLICT_DIR}/${name}`;
       await adapter.mkdir(CONFLICT_DIR);
-      await adapter.write(relConflict, remote.get(rel).bytes);
+      await adapter.write(relConflict, bytes);
       await adapter.remove(rel);
       hidden += 1;
     }
