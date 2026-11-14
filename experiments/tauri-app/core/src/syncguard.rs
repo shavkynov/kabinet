@@ -88,6 +88,32 @@ pub fn stem(rel: &str) -> String {
     base[..base.len() - ext.len()].to_string()
 }
 
+// Этот замок защищает только выбор и запись конфликтной копии внутри процесса.
+// guard_write может вызываться под sync_save_lock: повторно его здесь не берём.
+static CONFLICT_COPY_LOCK: Mutex<()> = Mutex::new(());
+
+fn content_conflict_name(now: &chrono::DateTime<chrono::Local>, label: &str, ext: &str, bytes: &[u8]) -> String {
+    let digest: String = sha2::Sha256::digest(bytes).iter().map(|b| format!("{:02x}", b)).collect();
+    let head = format!("{} ", stamp_at(now));
+    let tail = format!(" (с другого устройства) {}{}", digest, ext);
+    let mut title = String::new();
+    for c in safe_name(label).chars() {
+        if head.len() + title.len() + c.len_utf8() + tail.len() > 220 { break; }
+        title.push(c);
+    }
+    format!("{}{}{}", head, title, tail)
+}
+
+// None — файл отсутствует; Some(true) — та же версия; Some(false) — другая.
+// Ошибку чтения не принимаем за отсутствие копии.
+fn conflict_copy_state(path: &Path, text: &str) -> crate::store::R<Option<bool>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes.as_slice() == text.as_bytes())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Не удалось проверить существующую копию конфликта: {}", e)),
+    }
+}
+
 /// Вызывать перед записью файла. Возвращает имя сохранённой чужой версии или None, если конфликта нет.
 /// label: название главы или карточки для имени файла. Порт guardWrite из JS.
 pub fn guard_write(dir: &Path, file: &Path, new_text: &str, label: &str) -> crate::store::R<Option<String>> {
@@ -111,9 +137,23 @@ pub fn guard_write_at(
     if h == k || h == hash_text(new_text) {
         return Ok(None);
     }
+    let _copy_guard = CONFLICT_COPY_LOCK.lock().map_err(|_| "Внутренний замок копий конфликтов недоступен.".to_string())?;
     let folder = dir.join(CONFLICT_DIR);
     std::fs::create_dir_all(&folder).map_err(|e| format!("Не удалось создать папку «{}»: {}", CONFLICT_DIR, e))?;
-    let name = format!("{} {} (с другого устройства){}", stamp_at(&now), safe_name(label), extname(&file.to_string_lossy()));
+    let ext = extname(&file.to_string_lossy());
+    let mut name = format!("{} {} (с другого устройства){}", stamp_at(&now), safe_name(label), ext);
+    match conflict_copy_state(&folder.join(&name), &disk)? {
+        Some(true) => return Ok(Some(name)),
+        Some(false) => {
+            name = content_conflict_name(&now, label, &ext, disk.as_bytes());
+            match conflict_copy_state(&folder.join(&name), &disk)? {
+                Some(true) => return Ok(Some(name)),
+                Some(false) => return Err("Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.".into()),
+                None => {}
+            }
+        }
+        None => {}
+    }
     // Чужую версию пишем атомарно: прерванная запись не должна оставить в «Конфликтах» обрывок.
     crate::store::write_atomic(&folder.join(&name), &disk)
         .map_err(|e| format!("Не удалось сохранить чужую версию в «{}»: {}", CONFLICT_DIR, e))?;
@@ -151,5 +191,129 @@ mod tests {
         assert_eq!(hash_text("abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
         assert_eq!(hash_text(""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert_eq!(hash_text("Привет"), "2805ae8e7e12f182135f92fb90843bb1080d3be8"); // сверено с node crypto.createHash('sha1')
+    }
+}
+
+
+#[cfg(test)]
+mod conflict_collision_tests {
+    use super::*;
+    use chrono::{Local, TimeZone};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Barrier};
+
+    struct Project(PathBuf);
+    impl Project {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("kabinet-copy-collision-{}-{:016x}", std::process::id(), rand::random::<u64>()));
+            fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+        fn file(&self, name: &str, text: &str) -> PathBuf {
+            let file = self.0.join(name);
+            note_read(&file, "base");
+            fs::write(&file, text).unwrap();
+            file
+        }
+        fn save(&self, file: &Path) -> String {
+            guard_write_at(&self.0, file, "mine", "Same title", at()).unwrap().unwrap()
+        }
+        fn path(&self, name: &str) -> PathBuf { self.0.join(CONFLICT_DIR).join(name) }
+        fn saved(&self, name: &str) -> String { fs::read_to_string(self.path(name)).unwrap() }
+    }
+    impl Drop for Project { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+    fn at() -> chrono::DateTime<Local> { Local.with_ymd_and_hms(2026, 11, 14, 12, 0, 0).single().unwrap() }
+
+    #[test]
+    fn same_second_keeps_both_foreign_versions() {
+        let p = Project::new();
+        let file = p.file("aaaaaa.md", "foreign one");
+        let first = p.save(&file);
+        assert_eq!(first, "2026-11-14 12-00-00 Same title (с другого устройства).md");
+        fs::write(&file, "foreign two").unwrap();
+        let second = p.save(&file);
+        assert_ne!(first, second);
+        assert_eq!(p.saved(&first), "foreign one");
+        assert_eq!(p.saved(&second), "foreign two");
+        assert_eq!(fs::read_to_string(file).unwrap(), "foreign two");
+    }
+
+    #[test]
+    fn same_title_keeps_both_documents() {
+        let p = Project::new();
+        let one = p.file("aaaaaa.md", "first document");
+        let two = p.file("bbbbbb.md", "second document");
+        let first = p.save(&one);
+        let second = p.save(&two);
+        assert_ne!(first, second);
+        assert_eq!(p.saved(&first), "first document");
+        assert_eq!(p.saved(&second), "second document");
+    }
+
+    #[test]
+    fn identical_copy_is_reused_without_rewriting() {
+        let p = Project::new();
+        let file = p.file("aaaaaa.md", "foreign");
+        let first = p.save(&file);
+        let stamp = fs::metadata(p.path(&first)).unwrap().modified().unwrap();
+        let second = p.save(&file);
+        assert_eq!(first, second);
+        assert_eq!(fs::metadata(p.path(&first)).unwrap().modified().unwrap(), stamp);
+        assert_eq!(fs::read_dir(p.0.join(CONFLICT_DIR)).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn edited_hashed_copy_stops_preservation_instead_of_overwriting() {
+        let p = Project::new();
+        let file = p.file("aaaaaa.md", "foreign one");
+        let first = p.save(&file);
+        fs::write(&file, "foreign two").unwrap();
+        let second = p.save(&file);
+        fs::write(p.path(&second), "manually edited copy").unwrap();
+        assert!(guard_write_at(&p.0, &file, "mine", "Same title", at()).is_err());
+        assert_eq!(p.saved(&first), "foreign one");
+        assert_eq!(p.saved(&second), "manually edited copy");
+        assert_eq!(fs::read_to_string(file).unwrap(), "foreign two");
+    }
+
+    #[test]
+    fn parallel_calls_keep_every_version() {
+        let p = Project::new();
+        let gate = Arc::new(Barrier::new(8));
+        let mut workers = Vec::new();
+        for i in 0..8 {
+            let text = format!("foreign version {}", i);
+            let file = p.file(&format!("doc{}.md", i), &text);
+            let root = p.0.clone();
+            let gate = gate.clone();
+            workers.push(std::thread::spawn(move || {
+                gate.wait();
+                let name = guard_write_at(&root, &file, "mine", "Same title", at()).unwrap().unwrap();
+                (name, text)
+            }));
+        }
+        let copies: Vec<_> = workers.into_iter().map(|t| t.join().unwrap()).collect();
+        let names: std::collections::HashSet<_> = copies.iter().map(|(n, _)| n).collect();
+        assert_eq!(names.len(), 8);
+        for (name, text) in &copies { assert_eq!(&p.saved(name), text); }
+        assert_eq!(fs::read_dir(p.0.join(CONFLICT_DIR)).unwrap().count(), 8);
+    }
+
+    #[test]
+    fn hashed_name_keeps_extension_and_unicode_boundaries() {
+        let name = content_conflict_name(&at(), &"漢".repeat(60), ".json", b"foreign");
+        assert!(name.len() <= 220);
+        assert!(name.ends_with(".json"));
+        assert!(!name.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn copy_directory_error_does_not_modify_the_source() {
+        let p = Project::new();
+        let file = p.file("aaaaaa.md", "foreign");
+        fs::write(p.0.join(CONFLICT_DIR), "not a directory").unwrap();
+        assert!(guard_write_at(&p.0, &file, "mine", "Same title", at()).is_err());
+        assert_eq!(fs::read_to_string(file).unwrap(), "foreign");
     }
 }
