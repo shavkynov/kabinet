@@ -20,8 +20,8 @@ pub fn read_days(dir: &Path) -> Map<String, Value> {
     read_days_strict(dir).unwrap_or_default()
 }
 
-/// Строгое чтение перед записью: отсутствие файла → пустая статистика; ошибка чтения или порча JSON → Err.
-/// Запись после Err запрещена, чтобы не затереть исходные дни пустым файлом.
+/// Строгое чтение перед записью: отсутствие файла → пустая статистика; ошибка чтения, порча JSON или
+/// неподдерживаемая структура → Err. Запись после Err запрещена, чтобы не затереть исходные дни пустым файлом.
 fn read_days_strict(dir: &Path) -> R<Map<String, Value>> {
     let text = match std::fs::read_to_string(dir.join(FILE)) {
         Ok(t) => t,
@@ -30,12 +30,22 @@ fn read_days_strict(dir: &Path) -> R<Map<String, Value>> {
     };
     let raw: Value = serde_json::from_str(&text)
         .map_err(|e| format!("Файл статистики повреждён: {}. Запись остановлена, чтобы не затереть данные.", e))?;
+    // Формат stats.json: объект { "days": { "YYYY-MM-DD": число } } — так пишут все писатели
+    // (Rust, общий JS, синхронизация). Отсутствие `days` или null — пустая статистика (совместимость).
+    // Массив/скаляр вместо `days` или не-объект верхнего уровня — неподдерживаемая структура:
+    // писать поверх нельзя, иначе непрочитанные данные будут потеряны.
+    let Some(obj) = raw.as_object() else {
+        return Err("Файл статистики имеет неподдерживаемую структуру: ожидается объект «days». Запись остановлена, чтобы не затереть данные.".into());
+    };
+    let days = match obj.get("days") {
+        None | Some(Value::Null) => return Ok(Map::new()),
+        Some(Value::Object(m)) => m,
+        Some(_) => return Err("Файл статистики имеет неподдерживаемую структуру: поле «days» должно быть объектом. Запись остановлена, чтобы не затереть данные.".into()),
+    };
     let mut out = Map::new();
-    if let Some(days) = raw["days"].as_object() {
-        for (k, v) in days {
-            let n = v.as_f64().map(|x| x.floor()).unwrap_or(0.0);
-            if valid_date(k) && n.is_finite() && n > 0.0 { out.insert(k.clone(), json!(n.min(1_000_000.0) as i64)); }
-        }
+    for (k, v) in days {
+        let n = v.as_f64().map(|x| x.floor()).unwrap_or(0.0);
+        if valid_date(k) && n.is_finite() && n > 0.0 { out.insert(k.clone(), json!(n.min(1_000_000.0) as i64)); }
     }
     Ok(out)
 }
@@ -136,6 +146,27 @@ mod tests {
         fs::create_dir(e.join("stats.json")).unwrap();
         assert!(set_day_words(&e, "2026-11-10", &json!(5)).is_err());
         assert!(e.join("stats.json").is_dir());
+    }
+
+    #[test]
+    fn set_day_words_rejects_unsupported_structure_without_overwriting() {
+        // JSON разбирается, но структура не поддерживается писателями (все пишут {"days":{...}}):
+        // запись должна остановиться, исходные байты — не меняться.
+        for raw in [r#"{"days":[]}"#, r#"{"days":5}"#, r#"{"days":"x"}"#, r#"{"days":true}"#, "[]", r#""x""#, "5"] {
+            let d = tmpdir("stats-structure");
+            fs::write(d.join("stats.json"), raw).unwrap();
+            let res = set_day_words(&d, "2026-11-10", &json!(5));
+            let err = res.expect_err(&format!("неподдерживаемая структура должна останавливать запись: {raw}"));
+            assert!(err.contains("Запись остановлена"), "понятная ошибка приложения: {err}");
+            assert_eq!(fs::read_to_string(d.join("stats.json")).unwrap(), raw, "исходные байты не изменились: {raw}");
+        }
+        // Отсутствующее поле days или null — пустая статистика (совместимость: так же читает JS-версия).
+        for raw in ["{}", r#"{"days":null}"#, r#"{"days":{}}"#] {
+            let d = tmpdir("stats-empty-structure");
+            fs::write(d.join("stats.json"), raw).unwrap();
+            set_day_words(&d, "2026-11-10", &json!(7)).unwrap();
+            assert_eq!(read_days(&d)["2026-11-10"], 7, "пустая структура принимается: {raw}");
+        }
     }
 
     #[test]
