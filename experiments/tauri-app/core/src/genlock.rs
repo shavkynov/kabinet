@@ -105,10 +105,8 @@ pub fn release(remote: &mut impl Remote, token: &str) -> R<()> {
 mod tests {
     use super::*;
     use crate::remote::Folder;
-    use crate::testutil::{dav_on, FakeServer};
+    use crate::testutil::{dav_on, FakeServer, Gate};
     use serde_json::Value;
-    use std::sync::{Arc, Condvar, Mutex};
-    use std::time::Duration;
 
     fn remote(s: &FakeServer) -> crate::yandexdisk::YandexDisk<FakeServer> {
         let mut r = dav_on(s, "/Кабинет/Роман");
@@ -279,35 +277,7 @@ mod tests {
     // второй участник действует в промежутке, затем первая операция продолжается. Ожидания ограничены
     // по времени (5 с). Производственная логика не меняется; тесты закрепляют ТЕКУЩЕЕ поведение.
 
-    struct Gate { reached: Arc<(Mutex<bool>, Condvar)>, released: Arc<(Mutex<bool>, Condvar)> }
-    impl Clone for Gate {
-        fn clone(&self) -> Self { Gate { reached: self.reached.clone(), released: self.released.clone() } }
-    }
-    impl Gate {
-        fn new() -> Self {
-            Gate { reached: Arc::new((Mutex::new(false), Condvar::new())), released: Arc::new((Mutex::new(false), Condvar::new())) }
-        }
-        /// Из приостанавливаемой операции: отметить достижение точки и ждать разрешения.
-        fn hold(&self) {
-            let (m, c) = &*self.reached;
-            *m.lock().unwrap() = true;
-            c.notify_all();
-            let (m, c) = &*self.released;
-            let mut g = m.lock().unwrap();
-            while !*g { g = c.wait_timeout(g, Duration::from_secs(5)).unwrap().0; }
-        }
-        /// Из главного потока: дождаться достижения точки (не дольше 5 с).
-        fn wait_reached(&self) {
-            let (m, c) = &*self.reached;
-            let mut g = m.lock().unwrap();
-            while !*g { g = c.wait_timeout(g, Duration::from_secs(5)).unwrap().0; }
-        }
-        fn allow(&self) {
-            let (m, c) = &*self.released;
-            *m.lock().unwrap() = true;
-            c.notify_all();
-        }
-    }
+    // Управляемая остановка (Gate) — в общей тестовой инфраструктуре `testutil`.
 
     /// Тестовая обёртка Remote: пауза после чтения LOCK_FILE и/или замена замка в этот момент.
     struct Wedge<T> { inner: T, gate: Option<Gate>, replace: Option<(String, String)> }

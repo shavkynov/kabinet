@@ -2,7 +2,8 @@
 //! (список, ссылки на загрузку и скачивание, переадресация скачивания, удаление). Тесты движка идут через настоящий YandexDisk.
 use crate::http::{Http, Req, Resp};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct Fs {
@@ -191,4 +192,100 @@ pub fn tmpdir(tag: &str) -> std::path::PathBuf {
     let p = std::env::temp_dir().join(format!("kabinet-test-{}-{:x}", tag, n));
     std::fs::create_dir_all(&p).unwrap();
     p
+}
+
+/// Управляемая точка остановки для детерминированных конкурентных тестов.
+///
+/// Ожидание ограничено ОДНИМ абсолютным deadline: при исчерпании — явный диагностический отказ,
+/// а не повторные 5-секундные ожидания. `allow_on_drop` гарантирует освобождение приостановленного
+/// участника при ошибке/панике управляющего сценария, чтобы cleanup/join не завис.
+#[derive(Clone)]
+pub(crate) struct Gate {
+    reached: Arc<(Mutex<bool>, Condvar)>,
+    released: Arc<(Mutex<bool>, Condvar)>,
+    timeout: Duration,
+}
+
+impl Gate {
+    pub(crate) fn new() -> Self { Self::with_timeout(Duration::from_secs(5)) }
+    pub(crate) fn with_timeout(timeout: Duration) -> Self {
+        Gate {
+            reached: Arc::new((Mutex::new(false), Condvar::new())),
+            released: Arc::new((Mutex::new(false), Condvar::new())),
+            timeout,
+        }
+    }
+
+    /// Проверка предиката после каждого пробуждения; по единому deadline — явный отказ.
+    fn wait_flag(flag: &(Mutex<bool>, Condvar), timeout: Duration, what: &str) {
+        let deadline = Instant::now() + timeout;
+        let (m, c) = flag;
+        let mut g = m.lock().unwrap_or_else(|e| e.into_inner());
+        while !*g {
+            let now = Instant::now();
+            if now >= deadline {
+                panic!("Gate: {} не дождались за {:?} — ожидание ограничено deadline", what, timeout);
+            }
+            let (next, _) = c.wait_timeout(g, deadline - now).unwrap_or_else(|e| e.into_inner());
+            g = next;
+        }
+    }
+
+    /// Из приостанавливаемой операции: сообщить о достижении точки и ждать разрешения.
+    pub(crate) fn hold(&self) {
+        let (m, c) = &*self.reached;
+        *m.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        c.notify_all();
+        Self::wait_flag(&self.released, self.timeout, "разрешения продолжить");
+    }
+
+    /// Из управляющего потока: дождаться достижения точки остановки.
+    pub(crate) fn wait_reached(&self) {
+        Self::wait_flag(&self.reached, self.timeout, "точки остановки");
+    }
+
+    /// Разрешить приостановленному участнику продолжить (идемпотентно).
+    pub(crate) fn allow(&self) {
+        let (m, c) = &*self.released;
+        *m.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        c.notify_all();
+    }
+
+    /// Освобождение приостановленного участника при выходе из области — в том числе по панике.
+    pub(crate) fn allow_on_drop(&self) -> AllowOnDrop { AllowOnDrop(self.clone()) }
+}
+
+pub(crate) struct AllowOnDrop(Gate);
+impl Drop for AllowOnDrop {
+    fn drop(&mut self) { self.0.allow(); }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::Gate;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn gate_has_a_single_deadline_and_reports_timeout() {
+        let gate = Gate::with_timeout(Duration::from_millis(50));
+        let g = gate.clone();
+        let started = Instant::now();
+        let res = std::thread::spawn(move || g.wait_reached()).join();
+        assert!(res.is_err(), "исчерпание времени — явный диагностический отказ");
+        assert!(started.elapsed() < Duration::from_secs(2), "ожидание ограничено deadline, а не повторяется");
+    }
+
+    #[test]
+    fn gate_allow_on_drop_releases_paused_participant_when_scenario_panics() {
+        let gate = Gate::with_timeout(Duration::from_secs(2));
+        let g = gate.clone();
+        let paused = std::thread::spawn(move || g.hold());
+        gate.wait_reached();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = gate.allow_on_drop();
+            panic!("ошибка управляющего сценария");
+        }));
+        assert!(res.is_err(), "сценарий действительно упал");
+        assert!(paused.join().is_ok(), "приостановленный участник освобождён, а не завис");
+    }
 }
