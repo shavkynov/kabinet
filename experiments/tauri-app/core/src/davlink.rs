@@ -1,6 +1,8 @@
 //! Проект на компьютере, связанный с папкой на Яндекс Диске. Порт src/davlink.js.
-//! Фоновый поток: полный проход раз в 30 с, выгрузка через 4 с после правки (наблюдение за папкой),
-//! замок «kabinet.lock» раз в минуту. Проходы идут строго по одному.
+//! Фоновый поток: полный проход раз в 30 с, выгрузка через 4 с после правки (наблюдение за папкой).
+//! Служебного замка в облаке Rust-версия не пишет: `kabinet.lock` — отметка Electron/Android
+//! «проект открыт на этом устройстве», она только читается человеком и не блокирует обмен.
+//! Проходы одного устройства идут строго по одному.
 use crate::foldersync::{is_syncable, FolderSync};
 use crate::store::{write_atomic, R};
 use crate::remote::Folder;
@@ -16,11 +18,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub const LOCK_FILE: &str = "kabinet.lock";
 const PASS: Duration = Duration::from_secs(30);
 const PUSH_DELAY: Duration = Duration::from_secs(4);
-/// Время жизни замка синхронизации: заведомо больше разумного прохода.
-const LOCK_TTL_MS: i64 = 10 * 60 * 1000;
 /// Граница ожидания потока при остановке: закрытие окна не должно висеть на join без границы.
 const STOP_BOUND: Duration = Duration::from_secs(5);
 
@@ -80,8 +79,7 @@ struct Shared {
     /// Сколько РЕАЛЬНЫХ проходов этой сессии сейчас выполняется (фоновый и/или ручной).
     passes: AtomicUsize,
     /// Все сессии DavLink: новый проход того же проекта не начинается, пока прежний активен.
-    /// Слабые ссылки — реестр не продлевает жизнь сессиям; блокировка пересечения — локальная,
-    /// облачный genlock для этой гарантии не используется.
+    /// Слабые ссылки — реестр не продлевает жизнь сессиям; блокировка пересечения — локальная.
     peers: Arc<Mutex<Vec<Weak<Shared>>>>,
     dirty_at: Mutex<Option<Instant>>,
     quiet_until: Mutex<Instant>,
@@ -155,14 +153,14 @@ fn dav_of(http: Box<dyn Http>, acc: &Acc, root: Option<&str>) -> R<Rm> {
     Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?))
 }
 
-fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, device: &str, on_event: &OnEvent) -> PassOutcome {
+fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEvent) -> PassOutcome {
     // Остановка сессии запрещает НОВЫЕ проходы. Уже идущий проход доигрывает текущий запрос,
     // но новых записей не делает (cancel-флаг в FolderSync).
     if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
     if shared.busy.swap(true, Ordering::SeqCst) { return PassOutcome::Skipped; }
     // Учёт РЕАЛЬНОГО прохода, а не только фонового потока: новый проход того же проекта не начинается,
     // пока прежний проход (фоновый или ручной) ещё выполняется. Проверка и счётчик — под одним локальным
-    // замком, чтобы два прохода не проскочили её одновременно. Облачный genlock для этого не используется.
+    // замком, чтобы два прохода не проскочили её одновременно.
     {
         let mut peers = shared.peers.lock().unwrap();
         peers.retain(|w| w.upgrade().map(|s| !s.stop.load(Ordering::SeqCst) || s.passes.load(Ordering::SeqCst) > 0).unwrap_or(false));
@@ -175,32 +173,12 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, device: &str, on
         shared.passes.fetch_add(1, Ordering::SeqCst);
     }
     let _pass = PassGuard(shared.clone());
-    // Замок общего доступа: проходы с других устройств не должны пересекаться. Не взяли замок —
-    // пропускаем проход (повторим позже), чтобы не воевать за одни и те же файлы.
-    let token = format!("{}-{:x}", device, rand::random::<u64>());
-    let locked = match sync.lock() {
-        Ok(mut s) => crate::genlock::try_acquire(&mut s.remote, device, &token, LOCK_TTL_MS),
+    // Облачного замка нет: свежая отметка `kabinet.lock` от Electron/Android не блокирует проход
+    // и не перезаписывается. Чужие правки защищает write_checked (перечитывание перед записью).
+    let result = match sync.lock() {
+        Ok(mut s) => s.sync(),
         Err(_) => Err("Внутренний замок синхронизации недоступен.".to_string()),
     };
-    match locked {
-        Ok(true) => {}
-        Ok(false) => { // обмен уже идёт на другом устройстве — пропускаем проход, повторим позже
-            shared.busy.store(false, Ordering::SeqCst);
-            return PassOutcome::Skipped;
-        }
-        Err(e) => {
-            shared.busy.store(false, Ordering::SeqCst);
-            if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
-            shared.st.lock().unwrap().last_error = e.clone();
-            on_event(&shared.dir, Event::Error(e));
-            return PassOutcome::Error;
-        }
-    }
-    let result = {
-        let mut s = sync.lock().unwrap();
-        s.sync()
-    };
-    if let Ok(mut s) = sync.lock() { let _ = crate::genlock::release(&mut s.remote, &token); }
     *shared.quiet_until.lock().unwrap() = Instant::now() + Duration::from_secs(3);
     shared.busy.store(false, Ordering::SeqCst);
     // Уже отправленный запрос не отзываем задним числом: результат пришёл в контексте ИСХОДНОЙ сессии.
@@ -332,7 +310,7 @@ impl DavLink {
         };
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let thread = {
-            let (sh, sy, ev, device) = (shared.clone(), sync.clone(), self.on_event.clone(), self.device.clone());
+            let (sh, sy, ev) = (shared.clone(), sync.clone(), self.on_event.clone());
             std::thread::spawn(move || {
                 let mut last_pass = Instant::now().checked_sub(PASS - Duration::from_millis(1500)).unwrap_or_else(Instant::now);
                 while !sh.stop.load(Ordering::SeqCst) {
@@ -341,7 +319,7 @@ impl DavLink {
                     let dirty = sh.dirty_at.lock().unwrap().map(|t| t.elapsed() >= PUSH_DELAY).unwrap_or(false);
                     if dirty || last_pass.elapsed() >= PASS {
                         *sh.dirty_at.lock().unwrap() = None;
-                        run_pass(&sh, &sy, &device, &ev);
+                        run_pass(&sh, &sy, &ev);
                         last_pass = Instant::now();
                     }
                 }
@@ -387,7 +365,7 @@ impl DavLink {
         shared.st.lock().unwrap().conflict = false;
         // если фоновый проход уже идёт, подождать его конца и запустить свой
         for _ in 0..600 { if !shared.busy.load(Ordering::SeqCst) { break; } std::thread::sleep(Duration::from_millis(100)); }
-        let outcome = run_pass(&shared, &sync, &self.device, &self.on_event);
+        let outcome = run_pass(&shared, &sync, &self.on_event);
         let mut v = self.status(Some(&dir));
         // Фактический исход, а не «успешное» состояние: пропуск/остановка видны в UI.
         v["status"] = json!(match outcome {
@@ -590,7 +568,7 @@ mod tests {
         set_test_stop_bound(None);
         assert!(d.start(&dir), "новый работник того же проекта запущен");
         // Прежний проход этой сессии ещё выполняется — новый проход того же проекта откладывается
-        // локальным реестром проходов (не genlock-ом) и не пересекается с ним.
+        // локальным реестром проходов и не пересекается с ним.
         assert_eq!(d.sync_now().unwrap()["status"], json!("skipped"), "второй проход отложен до завершения старого");
         assert!(!pulled(&dir), "пересечения записей нет");
         gate.allow();
@@ -659,7 +637,7 @@ mod tests {
         assert_eq!(d.status(Some(&dir))["linked"], json!(true));
         assert_eq!(d.logins().len(), 1);
         d.stop();
-        // замок снят
+        // служебного замка в облаке нет: Rust его не пишет и не трогает
         assert!(s.get("Кабинет/Роман/kabinet.lock").is_none());
         d.detach(&dir).unwrap();
         assert_eq!(d.status(Some(&dir))["linked"], json!(false));
@@ -704,19 +682,23 @@ mod tests {
     }
 
     #[test]
-    fn sync_now_does_not_sync_when_another_device_holds_the_lock() {
+    fn phone_lock_does_not_block_pass_and_is_not_touched() {
         let s = FakeServer::new();
         let d = link(&tmpdir("data"), &s, Default::default());
         let dir = tmpdir("proj");
         project(&dir);
         d.attach(&dir, &acc(), "ask").unwrap();
         d.stop();
-        // другое устройство держит замок синхронизации
-        s.put("Кабинет/Роман/kabinet.lock", br#"{"device":"Other","token":"x"}"#);
+        // Свежая отметка «проект открыт на телефоне» в формате Electron/Android:
+        // это не замок прохода, а информационная отметка, и Rust не должен её блокироваться/затирать.
+        let stamp = format!("{{\"device\":\"Телефон\",\"time\":{}}}", now_ms());
+        s.put("Кабинет/Роман/kabinet.lock", stamp.as_bytes());
         std::fs::write(dir.join("Главы/aaaaaa.md"), "наша правка").unwrap();
         assert!(d.start(&dir));
-        d.sync_now().unwrap();
-        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "текст".as_bytes(), "чужой замок не даёт синхронизировать");
+        let st = d.sync_now().unwrap();
+        assert_eq!(st["error"], json!(""));
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "наша правка".as_bytes(), "чужая отметка телефона не блокирует обмен");
+        assert_eq!(s.get("Кабинет/Роман/kabinet.lock").unwrap(), stamp.as_bytes(), "Rust не перезаписывает отметку телефона");
         d.stop();
     }
 

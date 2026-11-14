@@ -23,7 +23,7 @@
 | Ссылки/junction не обходятся | — | `walk_local` (№ 6) | `walk_local_does_not_enter_linked_folder` | тест |
 | Гонка создания нового файла | — | `write_checked` create-only (№ 1) | `push_new_file_does_not_overwrite_concurrent_creation` | тест |
 | Create-only примитив | — | `Remote::create` (`overwrite=false`) | `create_only_does_not_overwrite_existing` | тест |
-| Замок синхронизации (серверное время) | нет | `genlock` + `run_pass` (№ 1) | `lock_is_exclusive_*`, `expired_lock_is_taken_over`, `sync_now_does_not_sync_when_another_device_holds_the_lock` | тест |
+| Отметка «проект открыт на другом устройстве» | `cloud.js` (`kabinet.lock`, `{device,time}`) | Rust не пишет и не блокирует её; проход не зависит от чужой отметки | `phone_lock_does_not_block_pass_and_is_not_touched` | тест |
 | Остановка обмена без сетевого прохода | — | `davlink::stop` (№ 13) | `stop_does_not_force_network_pass_*` | тест |
 | Связь проекта (attach/pull/push) | — | `DavLink` | `attach_*`, `sync_now_pulls_*` | тест |
 | Корзина (восстановление карточки) | — | `store::restore_trash` | тест `store` | тест |
