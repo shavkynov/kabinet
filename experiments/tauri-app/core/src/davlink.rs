@@ -257,13 +257,14 @@ impl DavLink {
         true
     }
 
-    /// Дописать всё в сетевую папку и снять замок (закрытие проекта, выход).
+    /// Остановить обмен и снять замок (закрытие проекта, выход). Обязательный сетевой проход
+    /// на выходе не делаем: незавершённое сохранено локально и уйдёт при следующем запуске,
+    /// а блокирующий проход мешает закрытию окна при медленной/недоступной сети.
     pub fn stop(&self) {
         let work = self.cur.lock().unwrap().take();
         let Some(mut w) = work else { return };
         w.shared.stop.store(true, Ordering::SeqCst);
         if let Some(t) = w.thread.take() { let _ = t.join(); }
-        run_pass(&w.shared, &w.sync, &self.on_event);
         release_lock(&w.sync, &self.device);
     }
 
@@ -442,6 +443,27 @@ mod tests {
         assert_eq!(st["error"], json!(""));
         assert_eq!(std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).unwrap(), "правка с телефона");
         assert!(events.lock().unwrap().iter().any(|e| e.contains("Changed")));
+        d.stop();
+    }
+
+    #[test]
+    fn stop_does_not_force_network_pass_and_keeps_change_for_resume() {
+        let s = FakeServer::new();
+        let data = tmpdir("data");
+        let d = link(&data, &s, Default::default());
+        let dir = tmpdir("proj");
+        project(&dir);
+        d.attach(&dir, &acc(), "ask").unwrap();
+        // правка сразу после подключения, до фонового прохода
+        std::fs::write(dir.join("Главы/aaaaaa.md"), "новая правка").unwrap();
+        d.stop();
+        // stop не делает обязательного сетевого прохода: в облаке ещё старый текст, правка не потеряна
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "текст".as_bytes(), "stop сам не выгружает правку");
+        assert_eq!(std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).unwrap(), "новая правка");
+        // повторный запуск догоняет
+        assert!(d.start(&dir));
+        d.sync_now().unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "новая правка".as_bytes());
         d.stop();
     }
 
