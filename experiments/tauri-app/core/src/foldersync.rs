@@ -621,11 +621,13 @@ impl<T: Remote> FolderSync<T> {
     }
 
     fn after_local_delete(&mut self, rel: &str, res: &mut SyncResult) -> R<()> {
-        let bytes = self.remote.read(rel).ok().flatten();
+        // Ошибку чтения нельзя принять за «чужой версии нет»: иначе чужой текст удалится без копии.
+        let bytes = self.remote.read(rel)?;
         if let Some(b) = bytes {
             if Some(&hash_bytes(&b)) != self.state.get(rel) { self.keep_foreign(rel, &b, &label_of(rel))?; res.conflicts.push(rel.to_string()); }
         }
-        let _ = self.remote.remove(rel);
+        // Ошибку удаления не выдаём за успешно выполненное удаление: состояние не меняем, повторим при следующем проходе.
+        self.remote.remove(rel)?;
         self.state.remove(rel);
         res.removed.push(rel.to_string());
         Ok(())
@@ -1160,6 +1162,36 @@ mod tests {
         let res = sa.sync();
         assert!(res.is_err(), "ошибка записи состояния не должна выдаваться за успех");
         assert!(s.get("Кабинет/Роман/project.json").is_some(), "работа до сохранения состояния выполнена");
+    }
+
+    /// Ошибка чтения облачной копии не должна приводить к её удалению без сохранения чужой версии.
+    #[test]
+    fn delete_keeps_cloud_file_when_cloud_read_fails() {
+        let s = FakeServer::new();
+        let a = tmpdir("del-readerr").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap(); // автор удалил главу локально
+        s.0.lock().unwrap().fail_gets = true; // облако не отдаёт файл: ошибка, а не 404
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
+        assert!(res.is_err(), "ошибка чтения облака должна остановить удаление");
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "облачный файл сохранён");
+    }
+
+    /// Ошибка удаления в облаке не должна выдаваться за успешно выполненное удаление.
+    #[test]
+    fn delete_reports_cloud_remove_error() {
+        let s = FakeServer::new();
+        let a = tmpdir("del-remerr").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap();
+        s.0.lock().unwrap().fail_deletes = true;
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
+        assert!(res.is_err(), "ошибка удаления в облаке должна возвращаться");
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "файл в облаке ещё не удалён");
     }
 
     #[test]

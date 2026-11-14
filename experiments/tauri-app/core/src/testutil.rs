@@ -13,6 +13,7 @@ pub struct Fs {
     /// Если задано, список файлов скрывается (неполный ответ облака).
     pub hide_all_files: bool,
     pub fail_gets: bool,
+    pub fail_deletes: bool,
 }
 
 #[derive(Clone, Default)]
@@ -96,6 +97,7 @@ impl Http for FakeServer {
             }
             ("cloud-api.yandex.net", "DELETE", "/v1/disk/resources") => {
                 f.log.push(format!("DELETE {}", path));
+                if f.fail_deletes { return r(500, vec![]); }
                 if f.files.remove(&path).is_some() { r(204, vec![]) } else { r(404, vec![]) }
             }
             other => panic!("неожиданный запрос поддельному Диску: {:?}", other),
