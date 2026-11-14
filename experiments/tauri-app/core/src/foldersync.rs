@@ -1264,6 +1264,24 @@ mod tests {
         assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
     }
 
+    /// Сбой прохода не портит состояние: повтор после устранения сбоя проходит.
+    #[test]
+    fn failed_pass_is_retried_and_succeeds() {
+        let s = FakeServer::new();
+        let a = tmpdir("retry").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap(); // автор удалил главу локально
+        s.0.lock().unwrap().fail_gets = true;               // первый проход: ошибка чтения облака
+        assert!(sa.push(&["Главы/aaaaaa.md".to_string()]).is_err(), "первый проход падает");
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "облако не тронуто после сбоя");
+        s.0.lock().unwrap().fail_gets = false;              // сбой устранён — повтор
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert!(res.removed.contains(&"Главы/aaaaaa.md".to_string()), "повтор удаляет облачную копию: {:?}", res.removed);
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none(), "повтор прошёл");
+    }
+
     /// Недоступное облако останавливает синхронизацию; локальные файлы не трогаются.
     #[test]
     fn unavailable_cloud_stops_sync_without_local_changes() {
