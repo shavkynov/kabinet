@@ -11,6 +11,7 @@ pub mod export;
 pub mod exporttarget;
 pub mod foldersync;
 pub mod genlock;
+pub mod genstore;
 pub mod import;
 pub mod media;
 pub mod mentions;
