@@ -1233,6 +1233,23 @@ mod tests {
         assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "файл в облаке ещё не удалён");
     }
 
+    /// Чужая правка перед локальным удалением сохраняется в «Конфликты», а не теряется.
+    #[test]
+    fn local_delete_preserves_changed_cloud_version_before_removing() {
+        let s = FakeServer::new();
+        let a = tmpdir("del-foreign").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        // локально удалили, а в облаке — другая версия (правка с другого устройства)
+        fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "правка с телефона".as_bytes());
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()), "чужая правка должна попасть в конфликты");
+        assert!(s.names().iter().any(|n| n.contains("Конфликты") && s.get(n).as_deref() == Some("правка с телефона".as_bytes())), "чужая версия сохранена: {:?}", s.names());
+        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none(), "облачный файл удалён после сохранения копии");
+    }
+
     /// Неполный список облака (файл пропал из списка, но не удалён) не должен удалять локальную главу.
     #[test]
     fn incomplete_listing_does_not_delete_local_chapter() {
