@@ -1443,6 +1443,22 @@ mod tests {
     }
 
     /// Папка-ссылка (junction) не должна обходиться: иначе в синхронизацию попадут файлы вне проекта.
+    /// Обычная структура проекта обходится по папкам; вложенная подпапка не синхронизируется.
+    #[test]
+    fn normal_structure_is_walked_by_folders() {
+        let dir = tmpdir("structure").join("p");
+        project(&dir, &[("aaaaaa", "текст")]);
+        fs::create_dir_all(dir.join("Персонажи")).unwrap();
+        fs::write(dir.join("Персонажи/p1.json"), "{}").unwrap();
+        fs::create_dir_all(dir.join("Главы/подпапка")).unwrap();
+        fs::write(dir.join("Главы/подпапка/x.md"), "x").unwrap();
+        let local = walk_local(&dir).unwrap();
+        assert!(local.contains_key("project.json"));
+        assert!(local.contains_key("Главы/aaaaaa.md"));
+        assert!(local.contains_key("Персонажи/p1.json"));
+        assert!(!local.keys().any(|k| k.contains("подпапка")), "вложенная подпапка не синхронизируется");
+    }
+
     #[cfg(windows)]
     #[test]
     fn walk_local_does_not_enter_linked_folder() {
