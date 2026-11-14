@@ -118,6 +118,22 @@ pub fn merge_meta_words(local: &[u8], remote: &[u8]) -> Option<Vec<u8>> {
 
 // ---------- движок ----------
 
+/// Тестовая точка конфликтной ветки sync: после чтения локального project.json, до записи результата слияния.
+/// Живёт только в unit-тестах (`cfg(test)`): в обычной сборке и в интеграционных тестах её нет.
+#[cfg(test)]
+pub(crate) mod sync_hook {
+    use std::cell::RefCell;
+    type Hook = Box<dyn FnOnce()>;
+    thread_local! {
+        static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+    }
+    pub fn set<F: FnOnce() + 'static>(f: F) { HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
+    pub fn fire() {
+        let hook = HOOK.with(|h| h.borrow_mut().take());
+        if let Some(hook) = hook { hook(); }
+    }
+}
+
 pub struct FolderSync<T: Remote> {
     pub dir: PathBuf,
     pub remote: T,
@@ -265,9 +281,33 @@ impl<T: Remote> FolderSync<T> {
                 self.keep("stats.json", &raw, "stats", "было на этом устройстве")?;
             }
         }
-        for rel in &dropped { let _ = fs::remove_file(self.dir.join(rel)); local.remove(rel); }
+        for rel in &dropped {
+            // Глава была пустой при чтении, но за время прохода (сеть выше) в неё могли напечатать текст.
+            let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+            let still_empty = self.read_local(rel).map(|b| text(&b).trim().is_empty()).unwrap_or(true);
+            if still_empty { let _ = fs::remove_file(self.dir.join(rel)); local.remove(rel); }
+        }
         let out = if !added.is_empty() || !trash_extra.is_empty() { serde_json::to_string_pretty(&Value::Object(merged)).unwrap().into_bytes() } else { remote_raw };
-        self.write_local("project.json", &out)?;
+        // Локальную мету могли сохранить за время прохода (сеть выше). Пишем результат, только если файл не менялся
+        // с момента чтения; иначе эту версию тоже кладём в «Конфликты» (сеть — вне замка) и проверяем снова.
+        let mut seen = local_raw.clone();
+        let mut attempts = 0;
+        loop {
+            {
+                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                let fresh = self.read_local("project.json")?;
+                if fresh == seen {
+                    self.write_local("project.json", &out)?;
+                    break;
+                }
+                seen = fresh;
+            }
+            attempts += 1;
+            if attempts >= 3 {
+                return Err("Проект менялся во время первой синхронизации. Ничего не удалено, повторим при следующем проходе.".into());
+            }
+            self.keep("project.json", &seen, "project", "было на этом устройстве")?;
+        }
         local.insert("project.json".into(), hash_bytes(&out));
         self.state.insert("project.json".into(), entry_hash);
 
@@ -353,9 +393,17 @@ impl<T: Remote> FolderSync<T> {
                     remote.insert(rel.clone(), e);
                     let foreign = foreign?;
                     self.keep_foreign(rel, &foreign, &label_of(rel))?;
-                    let mine = self.read_local(rel)?;
-                    let with_words = if rel == "project.json" { merge_meta_words(&mine, &foreign) } else { None };
-                    if let Some(w) = &with_words { self.write_local(rel, w)?; }
+                    // Чтение, слияние и запись под общим замком: сохранение не вклинится между чтением и записью
+                    // и не будет затёрто результатом, посчитанным по старой версии. Сети под замком нет.
+                    let with_words = {
+                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                        let mine = self.read_local(rel)?;
+                        #[cfg(test)]
+                        if rel == "project.json" { sync_hook::fire(); } // ТЕСТОВАЯ ТОЧКА: после чтения, до записи результата
+                        let merged = if rel == "project.json" { merge_meta_words(&mine, &foreign) } else { None };
+                        if let Some(w) = &merged { self.write_local(rel, w)?; }
+                        merged
+                    };
                     let now_local = self.read_local(rel)?;
                     self.remote.write(rel, &now_local)?;
                     self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
@@ -528,6 +576,50 @@ mod tests {
     }
     fn sync_of(dir: &Path, s: &FakeServer, st: &str) -> FolderSync<crate::webdav::WebDav<FakeServer>> {
         FolderSync::new(dir, dav_on(s, "/Кабинет/Роман"), Some(dir.parent().unwrap().join(format!("{}.state", st))))
+    }
+
+    /// Слияние слов словаря в конфликтной ветке: сохранение меты между чтением и записью не должно теряться.
+    /// Сохранение идёт из ДРУГОГО потока, как настоящая команда: после исправления она ждёт замок, а не вклинивается.
+    #[test]
+    fn meta_saved_during_word_merge_is_not_lost() {
+        use std::sync::{Arc, Mutex, mpsc};
+        use std::time::Duration;
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        w(&a, "project.json", &serde_json::to_string_pretty(&json!({"name":"Роман","chapters":[{"id":"aaaaaa","title":"aaaaaa"}],"words":["альфа"]})).unwrap());
+        w(&a, "Главы/aaaaaa.md", "текст");
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        let b = tmpdir("b").join("p");
+        let mut sb = sync_of(&b, &s, "b");
+        sb.import_all().unwrap();
+
+        // Оба устройства меняют мету: у A появилось слово «гамма», у B — «бета».
+        let meta = |words: &[&str]| serde_json::to_string_pretty(&json!({"name":"Роман","chapters":[{"id":"aaaaaa","title":"aaaaaa"}],"words":words})).unwrap();
+        w(&a, "project.json", &meta(&["альфа", "гамма"]));
+        sa.sync().unwrap();
+        w(&b, "project.json", &meta(&["альфа", "бета"]));
+
+        let handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
+        let (h2, b2) = (handle.clone(), b.clone());
+        sync_hook::set(move || {
+            let (tx, rx) = mpsc::channel();
+            let t = std::thread::spawn(move || {
+                crate::store::rename_chapter(&b2, "aaaaaa", "название, сохранённое во время прохода").unwrap();
+                let _ = tx.send(());
+            });
+            *h2.lock().unwrap() = Some(t);
+            // До исправления сохранение успевает завершиться здесь; после — ждёт замок, а таймаут лишь страховка.
+            let _ = rx.recv_timeout(Duration::from_millis(600));
+        });
+        sb.sync().unwrap();
+        if let Some(t) = handle.lock().unwrap().take() { t.join().unwrap(); }
+
+        let live = r(&b, "project.json");
+        let in_conflicts = fs::read_dir(b.join("Конфликты")).map(|d| d.flatten().any(|e| fs::read_to_string(e.path()).map(|t| t.contains("название, сохранённое")).unwrap_or(false))).unwrap_or(false);
+        assert!(live.contains("название, сохранённое во время прохода") || in_conflicts,
+            "конфликтная ветка sync затёрла project.json, сохранённый во время слияния слов");
+        assert!(live.contains("бета"), "наше слово словаря должно остаться в живой мете");
     }
 
     #[test]
