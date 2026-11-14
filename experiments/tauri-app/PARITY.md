@@ -13,13 +13,16 @@
 | Пустота глав при переносе структуры | — | `foldersync::read_local_opt` (№ 4) | `unreadable_chapter_is_not_treated_as_empty_in_adopt` | тест |
 | Статистика без затирания оригинала | — | `stats::read_days_strict` + `sync_save_lock` (№ 9) | `set_day_words_*` (3 теста) | тест |
 | Резервные копии | `backup.js` | `backup::make_backup` (№ 7) | `backup_detects_binary_change_*`, `backup_does_not_follow_directory_junctions` | тест |
-| Восстановление из резервной копии | нет | нет | — | **нет** |
+| Проверка целостности копии | нет | `backup::verify_backup` (№ 7) | `backup_verification_detects_corruption_and_missing_signature` | тест |
+| Восстановление из копии (файлы) | нет | `backup::restore_backup` (№ 8, MVP) | `restore_verified_backup_keeps_newer_files` | тест |
+| Восстановление: координация с sync и меню | нет | `backup:restore`, `restore_interactive` (№ 8) | оболочка собирается (`cargo check --locked`); GUI не запускался | код |
 | Синхронизация с общей папкой | `folder.js` | `foldersync::FolderSync` | `foldersync`-тесты (34) | тест |
 | Удаление: ошибки чтения/удаления не глушатся | — | `after_local_delete`, `remove_local` (№ 2) | `delete_keeps_cloud_file_*`, `delete_reports_cloud_remove_error`, `local_delete_failure_is_reported_not_hidden` | тест |
 | Неполный список облака не удаляет локальное | — | прямое чтение перед удалением (№ 5) | `incomplete_listing_does_not_delete_local_chapter` | тест |
 | Ссылки/junction не обходятся | — | `walk_local` (№ 6) | `walk_local_does_not_enter_linked_folder` | тест |
 | Гонка создания нового файла | — | `write_checked` create-only (№ 1) | `push_new_file_does_not_overwrite_concurrent_creation` | тест |
 | Create-only примитив | — | `Remote::create` (`overwrite=false`) | `create_only_does_not_overwrite_existing` | тест |
+| Замок синхронизации (серверное время) | нет | `genlock` (№ 1, примитив) | `lock_is_exclusive_*`, `expired_lock_is_taken_over` | тест (в движок не подключён) |
 | Остановка обмена без сетевого прохода | — | `davlink::stop` (№ 13) | `stop_does_not_force_network_pass_*` | тест |
 | Связь проекта (attach/pull/push) | — | `DavLink` | `attach_*`, `sync_now_pulls_*` | тест |
 | Корзина (восстановление карточки) | — | `store::restore_trash` | тест `store` | тест |
