@@ -36,6 +36,10 @@ pub struct Fs {
     pub fail_put_prefixes: std::collections::BTreeSet<String>,
     /// Отказ СОЗДАНИЯ ПАПКИ для точных путей — точечный сбой одной операции.
     pub fail_mkdir_paths: std::collections::BTreeSet<String>,
+    /// Скрыть из списка файлы с этими префиксами (неполный список проб).
+    pub hide_prefixes: std::collections::BTreeSet<String>,
+    /// Отказ УДАЛЕНИЯ для путей с этими префиксами — точечный сбой одной операции.
+    pub fail_delete_prefixes: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Default)]
@@ -56,6 +60,14 @@ impl FakeServer {
         for d in &parts[..parts.len() - 1] { p = format!("{}/{}", p, d); f.dirs.insert(p.clone()); }
         f.files.insert(format!("/{}", path.trim_matches('/')), (data.to_vec(), t));
     }
+    /// Положить файл с заданным временем изменения (без изменения «часов» сервера).
+    pub fn put_at(&self, path: &str, data: &[u8], mtime: i64) {
+        let mut f = self.0.lock().unwrap();
+        let mut p = String::new();
+        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+        for d in &parts[..parts.len() - 1] { p = format!("{}/{}", p, d); f.dirs.insert(p.clone()); }
+        f.files.insert(format!("/{}", path.trim_matches('/')), (data.to_vec(), mtime));
+    }
     pub fn get(&self, path: &str) -> Option<Vec<u8>> {
         self.0.lock().unwrap().files.get(&format!("/{}", path.trim_matches('/'))).map(|x| x.0.clone())
     }
@@ -75,14 +87,15 @@ impl Http for FakeServer {
         let iso = |ms: i64| chrono::DateTime::from_timestamp_millis(ms).map(|d| d.to_rfc3339()).unwrap_or_default();
         match (u.host_str().unwrap_or(""), req.method.as_str(), u.path()) {
             ("cloud-api.yandex.net", "GET", "/v1/disk/resources") => {
-                if f.fail_list { return r(500, vec![]); }
                 if path.is_empty() || f.dirs.contains(&path) {
+                    // сбой именно СПИСКА папки (не метаданных файла — иначе сломается подтверждение create)
+                    if f.fail_list { return r(500, vec![]); }
                     f.log.push(format!("LIST {}", path));
                     let prefix = format!("{}/", path);
                     let mut items = vec![];
                     for d in &f.dirs { if let Some(n) = d.strip_prefix(&prefix) { if !n.contains('/') { items.push(serde_json::json!({ "name": n, "type": "dir" })); } } }
                     if !f.hide_all_files {
-                        for (p, (data, t)) in &f.files { if f.hide.contains(p) { continue; } if let Some(n) = p.strip_prefix(&prefix) { if !n.contains('/') {
+                        for (p, (data, t)) in &f.files { if f.hide.contains(p) || f.hide_prefixes.iter().any(|x| p.starts_with(x)) { continue; } if let Some(n) = p.strip_prefix(&prefix) { if !n.contains('/') {
                             items.push(serde_json::json!({ "name": n, "type": "file", "size": data.len(), "modified": iso(*t) }));
                         } } }
                     }
@@ -133,6 +146,7 @@ impl Http for FakeServer {
             ("cloud-api.yandex.net", "DELETE", "/v1/disk/resources") => {
                 f.log.push(format!("DELETE {}", path));
                 if f.fail_deletes { return r(500, vec![]); }
+                if f.fail_delete_prefixes.iter().any(|x| path.starts_with(x)) { return r(500, vec![]); }
                 if !f.files.contains_key(&path) && !f.dirs.contains(&path) { return r(404, vec![]); }
                 if f.async_deletes {
                     let op = format!("/v1/disk/operations/{}", f.pending_ops.len() + 1);
