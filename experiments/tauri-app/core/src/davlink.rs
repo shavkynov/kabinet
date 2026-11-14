@@ -19,7 +19,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const LOCK_FILE: &str = "kabinet.lock";
 const PASS: Duration = Duration::from_secs(30);
 const PUSH_DELAY: Duration = Duration::from_secs(4);
-const LOCK_EVERY: Duration = Duration::from_secs(60);
+/// Время жизни замка синхронизации: заведомо больше разумного прохода.
+const LOCK_TTL_MS: i64 = 10 * 60 * 1000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct Acc {
@@ -99,12 +100,33 @@ fn dav_of(http: Box<dyn Http>, acc: &Acc, root: Option<&str>) -> R<Rm> {
     Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?))
 }
 
-fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEvent) -> Option<SyncResult> {
+fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, device: &str, on_event: &OnEvent) -> Option<SyncResult> {
     if shared.busy.swap(true, Ordering::SeqCst) { return None; }
+    // Замок общего доступа: проходы с других устройств не должны пересекаться. Не взяли замок —
+    // пропускаем проход (повторим позже), чтобы не воевать за одни и те же файлы.
+    let token = format!("{}-{:x}", device, rand::random::<u64>());
+    let locked = match sync.lock() {
+        Ok(mut s) => crate::genlock::try_acquire(&mut s.remote, device, &token, LOCK_TTL_MS),
+        Err(_) => Err("Внутренний замок синхронизации недоступен.".to_string()),
+    };
+    match locked {
+        Ok(true) => {}
+        Ok(false) => { // обмен уже идёт на другом устройстве — пропускаем проход, повторим позже
+            shared.busy.store(false, Ordering::SeqCst);
+            return None;
+        }
+        Err(e) => {
+            shared.st.lock().unwrap().last_error = e.clone();
+            on_event(Event::Error(e));
+            shared.busy.store(false, Ordering::SeqCst);
+            return None;
+        }
+    }
     let result = {
         let mut s = sync.lock().unwrap();
         s.sync()
     };
+    if let Ok(mut s) = sync.lock() { let _ = crate::genlock::release(&mut s.remote, &token); }
     let out = match result {
         Ok(res) => {
             {
@@ -128,21 +150,6 @@ fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEvent) -
     *shared.quiet_until.lock().unwrap() = Instant::now() + Duration::from_secs(3);
     shared.busy.store(false, Ordering::SeqCst);
     out
-}
-
-fn write_lock(sync: &Mutex<FolderSync<Rm>>, device: &str) {
-    use crate::remote::Remote;
-    let body = json!({ "device": device, "time": now_ms() }).to_string();
-    if let Ok(mut s) = sync.lock() { let _ = s.remote.write(LOCK_FILE, body.as_bytes()); }
-}
-
-fn release_lock(sync: &Mutex<FolderSync<Rm>>, device: &str) {
-    use crate::remote::Remote;
-    let Ok(mut s) = sync.lock() else { return };
-    let Ok(Some(bytes)) = s.remote.read(LOCK_FILE) else { return };
-    if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-        if v.get("device").and_then(|x| x.as_str()) == Some(device) { let _ = s.remote.remove(LOCK_FILE); }
-    }
 }
 
 impl DavLink {
@@ -237,19 +244,16 @@ impl DavLink {
         let thread = {
             let (sh, sy, ev, device) = (shared.clone(), sync.clone(), self.on_event.clone(), self.device.clone());
             std::thread::spawn(move || {
-                write_lock(&sy, &device);
                 let mut last_pass = Instant::now().checked_sub(PASS - Duration::from_millis(1500)).unwrap_or_else(Instant::now);
-                let mut last_lock = Instant::now();
                 while !sh.stop.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(250));
                     if sh.stop.load(Ordering::SeqCst) { break; }
                     let dirty = sh.dirty_at.lock().unwrap().map(|t| t.elapsed() >= PUSH_DELAY).unwrap_or(false);
                     if dirty || last_pass.elapsed() >= PASS {
                         *sh.dirty_at.lock().unwrap() = None;
-                        run_pass(&sh, &sy, &ev);
+                        run_pass(&sh, &sy, &device, &ev);
                         last_pass = Instant::now();
                     }
-                    if last_lock.elapsed() >= LOCK_EVERY { write_lock(&sy, &device); last_lock = Instant::now(); }
                 }
             })
         };
@@ -265,7 +269,6 @@ impl DavLink {
         let Some(mut w) = work else { return };
         w.shared.stop.store(true, Ordering::SeqCst);
         if let Some(t) = w.thread.take() { let _ = t.join(); }
-        release_lock(&w.sync, &self.device);
     }
 
     pub fn status(&self, dir: Option<&Path>) -> Value {
@@ -291,7 +294,7 @@ impl DavLink {
         shared.st.lock().unwrap().conflict = false;
         // если фоновый проход уже идёт, подождать его конца и запустить свой
         for _ in 0..600 { if !shared.busy.load(Ordering::SeqCst) { break; } std::thread::sleep(Duration::from_millis(100)); }
-        run_pass(&shared, &sync, &self.on_event);
+        run_pass(&shared, &sync, &self.device, &self.on_event);
         Ok(self.status(Some(&dir)))
     }
 
@@ -464,6 +467,23 @@ mod tests {
         assert!(d.start(&dir));
         d.sync_now().unwrap();
         assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "новая правка".as_bytes());
+        d.stop();
+    }
+
+    #[test]
+    fn sync_now_does_not_sync_when_another_device_holds_the_lock() {
+        let s = FakeServer::new();
+        let d = link(&tmpdir("data"), &s, Default::default());
+        let dir = tmpdir("proj");
+        project(&dir);
+        d.attach(&dir, &acc(), "ask").unwrap();
+        d.stop();
+        // другое устройство держит замок синхронизации
+        s.put("Кабинет/Роман/kabinet.lock", br#"{"device":"Other","token":"x"}"#);
+        std::fs::write(dir.join("Главы/aaaaaa.md"), "наша правка").unwrap();
+        assert!(d.start(&dir));
+        d.sync_now().unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "текст".as_bytes(), "чужой замок не даёт синхронизировать");
         d.stop();
     }
 
