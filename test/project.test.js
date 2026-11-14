@@ -522,13 +522,13 @@ test('резервные копии: только при изменениях, �
   assert.ok(backup.makeBackup(dir, { now: t(1) }));
   assert.equal(backup.makeBackup(dir, { now: t(2) }), null);
   project.writeChapter(dir, id, 'вторая версия');
-  assert.ok(backup.makeBackup(dir, { now: t(3), keep: 2 }));
+  assert.ok(backup.makeBackup(dir, { now: t(3) }));
   project.writeChapter(dir, id, 'третья версия');
-  assert.ok(backup.makeBackup(dir, { now: t(4), keep: 2 }));
+  assert.ok(backup.makeBackup(dir, { now: t(4) }));
   const list = backup.listBackups(dir);
-  assert.equal(list.length, 2);
-  assert.equal(fs.readFileSync(path.join(dir, backup.BACKUP_DIR, list[1], 'Главы', `${id}.md`), 'utf8'), 'третья версия');
-  assert.ok(!fs.existsSync(path.join(dir, backup.BACKUP_DIR, list[1], backup.BACKUP_DIR)));
+  assert.equal(list.length, 3, 'копий меньше 30 — все сохранены');
+  assert.equal(fs.readFileSync(path.join(dir, backup.BACKUP_DIR, list[list.length - 1], 'Главы', `${id}.md`), 'utf8'), 'третья версия');
+  assert.ok(!fs.existsSync(path.join(dir, backup.BACKUP_DIR, list[list.length - 1], backup.BACKUP_DIR)));
 });
 
 test('поиск по проекту: главы, карточки, заметки', () => {

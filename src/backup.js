@@ -67,30 +67,35 @@ function listBackups(dir, root = defaultRoot(dir)) {
   }
 }
 
+/** Предел автоматических резервных копий на проект — суммарно (не «30 последних плюс дневные»). */
+const MAX_BACKUPS = 30;
+/** Сколько последних копий выбирается сразу. */
+const RECENT_BACKUPS = 10;
+
 /**
- * Какие копии оставить: последние keep штук и самая поздняя копия каждого из keepDays последних дней,
- * в которые копии делались. Так недавняя история подробная, а старая остаётся по одной копии в день.
+ * Какие копии оставить (не более MAX_BACKUPS суммарно):
+ * 1) 10 последних; 2) самая поздняя копия каждого дня, начиная с новых дней, пока набор не достигнет предела;
+ * 3) оставшиеся места — самые новые ещё не выбранные копии; 4) если копий меньше предела — все.
  * all: имена копий по возрастанию.
  */
-function copiesToKeep(all, keep, keepDays) {
-  const set = new Set(all.slice(Math.max(0, all.length - Math.max(0, keep))));
+function copiesToKeep(all) {
+  const set = new Set(all.slice(Math.max(0, all.length - RECENT_BACKUPS)));
   const days = new Set();
-  for (let i = all.length - 1; i >= 0 && keepDays > 0; i -= 1) {
+  for (let i = all.length - 1; i >= 0 && set.size < MAX_BACKUPS; i -= 1) {
     const day = all[i].slice(0, 10);
     if (days.has(day)) continue;
-    if (days.size >= keepDays) break;
     days.add(day);
     set.add(all[i]);
   }
+  for (let i = all.length - 1; i >= 0 && set.size < MAX_BACKUPS; i -= 1) set.add(all[i]);
   return set;
 }
 
 /**
  * Делает копию проекта. Возвращает имя папки копии или null, если менять было нечего.
- * keep: сколько последних копий хранить; keepDays: за сколько последних дней хранить по копии на день;
  * root: папка для копий (по умолчанию «Резервные копии» внутри проекта).
  */
-function makeBackup(dir, { keep = 60, keepDays = 30, now = new Date(), root = defaultRoot(dir) } = {}) {
+function makeBackup(dir, { now = new Date(), root = defaultRoot(dir) } = {}) {
   const files = listFiles(dir);
   if (files.length === 0) return null;
   const sig = signature(dir, files);
@@ -116,7 +121,7 @@ function makeBackup(dir, { keep = 60, keepDays = 30, now = new Date(), root = de
   fs.renameSync(tmp, target);
 
   const all = listBackups(dir, root);
-  const keepSet = copiesToKeep(all, keep, keepDays);
+  const keepSet = copiesToKeep(all);
   keepSet.add(name); // только что сделанную копию не удаляем никогда
   for (const old of all) {
     if (!keepSet.has(old)) fs.rmSync(path.join(root, old), { recursive: true, force: true });
@@ -124,4 +129,4 @@ function makeBackup(dir, { keep = 60, keepDays = 30, now = new Date(), root = de
   return name;
 }
 
-module.exports = { BACKUP_DIR, makeBackup, listBackups, copiesToKeep };
+module.exports = { BACKUP_DIR, MAX_BACKUPS, makeBackup, listBackups, copiesToKeep };

@@ -10,26 +10,20 @@ const project = require('../src/project');
 const backup = require('../src/backup');
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'kabinet-bk-'));
-const names = (list) => list.map((n) => n.slice(0, 16));
 
-test('copiesToKeep: последние keep штук и последняя копия каждого из keepDays последних дней', () => {
-  const all = [
-    '2026-01-01 09-00-00', '2026-01-01 18-00-00',
-    '2026-01-02 09-00-00', '2026-01-02 18-00-00',
-    '2026-01-03 09-00-00', '2026-01-03 18-00-00',
-    '2026-01-04 09-00-00', '2026-01-04 18-00-00',
-  ];
-  const k = backup.copiesToKeep(all, 2, 2);
-  // последние две: 04 09, 04 18; по дню: 04 18, 03 18
-  assert.deepEqual([...k].sort(), ['2026-01-03 18-00-00', '2026-01-04 09-00-00', '2026-01-04 18-00-00']);
-  const k2 = backup.copiesToKeep(all, 3, 3);
-  // последние три: 03 18, 04 09, 04 18; по дню: 04 18, 03 18, 02 18
-  assert.deepEqual([...k2].sort(), ['2026-01-02 18-00-00', '2026-01-03 18-00-00', '2026-01-04 09-00-00', '2026-01-04 18-00-00']);
-  assert.equal(backup.copiesToKeep(all, 1, 0).size, 1, 'без дневных копий работает как раньше');
-  assert.equal(backup.copiesToKeep([], 5, 5).size, 0);
+test('copiesToKeep: не более 30 суммарно — 10 последних, по одной за день, затем самые новые', () => {
+  const all = [];
+  for (let d = 1; d <= 20; d += 1) for (const h of [10, 11]) all.push(`2026-01-${String(d).padStart(2, '0')} ${h}-00-00`);
+  const k = backup.copiesToKeep(all);
+  assert.equal(k.size, backup.MAX_BACKUPS, 'суммарно не более 30');
+  for (const name of all.slice(-10)) assert.ok(k.has(name), `последняя копия не сохранена: ${name}`);
+  for (let d = 1; d <= 20; d += 1) assert.ok(k.has(`2026-01-${String(d).padStart(2, '0')} 11-00-00`), `нет самой поздней копии дня ${d}`);
+  assert.ok(!k.has('2026-01-01 10-00-00'), 'старая копия сверх предела удаляется');
+  assert.equal(backup.copiesToKeep([]).size, 0);
+  assert.equal(backup.copiesToKeep(all.slice(0, 8)).size, 8, 'копий меньше предела — сохраняются все');
 });
 
-test('резервные копии: старые дни остаются по одной копии, свежая никогда не удаляется', () => {
+test('резервные копии: копий меньше 30 — сохраняются все, свежая содержит последнюю версию', () => {
   const dir = path.join(tmp(), 'P');
   const p = project.createProject(dir, 'P');
   const id = p.chapters[0].id;
@@ -39,16 +33,26 @@ test('резервные копии: старые дни остаются по �
   for (const [d, h] of [[1, 9], [1, 12], [1, 18], [2, 9], [2, 18], [3, 9], [3, 18]]) {
     n += 1;
     project.writeChapter(dir, id, `версия ${n}`);
-    assert.ok(backup.makeBackup(dir, { now: at(d, h), keep: 2, keepDays: 3, root }));
+    assert.ok(backup.makeBackup(dir, { now: at(d, h), root }));
   }
   const left = backup.listBackups(dir, root);
-  assert.deepEqual(names(left), ['2026-01-01 18-00', '2026-01-02 18-00', '2026-01-03 09-00', '2026-01-03 18-00']);
+  assert.equal(left.length, 7, 'копий меньше 30 — все сохранены');
   // самая свежая копия содержит последнюю версию
   assert.equal(fs.readFileSync(path.join(root, left[left.length - 1], 'Главы', `${id}.md`), 'utf8'), 'версия 7');
-  // даже при keep: 0 только что сделанная копия остаётся
-  project.writeChapter(dir, id, 'версия 8');
-  const made = backup.makeBackup(dir, { now: at(4, 9), keep: 0, keepDays: 0, root });
-  assert.deepEqual(backup.listBackups(dir, root), [made]);
+});
+
+test('резервные копии: не более 30 на проект, только что сделанная копия не удаляется', () => {
+  const dir = path.join(tmp(), 'P');
+  const p = project.createProject(dir, 'P');
+  const id = p.chapters[0].id;
+  const root = path.join(tmp(), 'копии');
+  for (let i = 0; i < 33; i += 1) {
+    project.writeChapter(dir, id, `версия ${i}`);
+    assert.ok(backup.makeBackup(dir, { now: new Date(2026, 0, 1 + Math.floor(i / 3), 10, 0, i % 60), root }));
+  }
+  const left = backup.listBackups(dir, root);
+  assert.equal(left.length, backup.MAX_BACKUPS, 'суммарно не более 30');
+  assert.equal(fs.readFileSync(path.join(root, left[left.length - 1], 'Главы', `${id}.md`), 'utf8'), 'версия 32', 'самая новая копия не удалена');
 });
 
 test('подпись копии: текст сверяется по содержимому, картинки по размеру и времени', () => {

@@ -72,16 +72,25 @@ pub fn list_backups(root: &Path) -> Vec<String> {
     v
 }
 
-/// Какие копии оставить: последние `keep` и самая поздняя копия каждого из `keep_days` последних дней, когда копии делались.
-pub fn copies_to_keep(all: &[String], keep: usize, keep_days: usize) -> BTreeSet<String> {
-    let mut set: BTreeSet<String> = all[all.len().saturating_sub(keep)..].iter().cloned().collect();
+/// Предел автоматических резервных копий на проект — суммарно (не «30 последних плюс дневные»).
+pub const MAX_BACKUPS: usize = 30;
+/// Сколько последних копий выбирается сразу.
+const RECENT_BACKUPS: usize = 10;
+
+/// Какие копии оставить (не более `MAX_BACKUPS` суммарно):
+/// 1) 10 последних; 2) самая поздняя копия каждого дня, начиная с новых дней, пока набор не достигнет предела;
+/// 3) оставшиеся места — самые новые ещё не выбранные копии; 4) если копий меньше предела — все.
+pub fn copies_to_keep(all: &[String]) -> BTreeSet<String> {
+    let mut set: BTreeSet<String> = all.iter().rev().take(RECENT_BACKUPS).cloned().collect();
     let mut days: BTreeSet<String> = BTreeSet::new();
     for name in all.iter().rev() {
-        if keep_days == 0 { break; }
+        if set.len() >= MAX_BACKUPS { break; }
         let day: String = name.chars().take(10).collect();
-        if days.contains(&day) { continue; }
-        if days.len() >= keep_days { break; }
-        days.insert(day);
+        if !days.insert(day) { continue; }
+        set.insert(name.clone());
+    }
+    for name in all.iter().rev() {
+        if set.len() >= MAX_BACKUPS { break; }
         set.insert(name.clone());
     }
     set
@@ -89,7 +98,6 @@ pub fn copies_to_keep(all: &[String], keep: usize, keep_days: usize) -> BTreeSet
 
 /// Делает копию. Возвращает имя папки копии или None, если менять было нечего.
 pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Option<String>> {
-    let (keep, keep_days) = (60, 30);
     let mut files = Vec::new();
     list_files(dir, Path::new(""), &mut files)?;
     files.sort();
@@ -119,7 +127,7 @@ pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Op
     }
     fs::rename(&tmp, &target).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
     let all = list_backups(root);
-    let mut keep_set = copies_to_keep(&all, keep, keep_days);
+    let mut keep_set = copies_to_keep(&all);
     keep_set.insert(name.clone()); // только что сделанную копию не удаляем никогда
     for old in all { if !keep_set.contains(&old) { let _ = fs::remove_dir_all(root.join(old)); } }
     Ok(Some(name))
@@ -337,12 +345,22 @@ mod tests {
     }
 
     #[test]
-    fn retention_keeps_recent_and_one_per_day() {
-        let all: Vec<String> = (0..5).flat_map(|d| (0..4).map(move |h| format!("2026-01-0{} 1{}-00-00", d + 1, h))).collect();
-        let keep = copies_to_keep(&all, 3, 2);
-        assert!(keep.contains("2026-01-05 13-00-00") && keep.contains("2026-01-05 12-00-00") && keep.contains("2026-01-05 11-00-00"));
-        assert!(keep.contains("2026-01-04 13-00-00")); // последняя копия предыдущего дня
-        assert!(!keep.contains("2026-01-03 13-00-00"));
+    fn retention_keeps_at_most_30_with_recent_and_daily() {
+        // 20 дней по 2 копии = 40 копий → остаётся ровно 30 суммарно
+        let all: Vec<String> = (1..=20).flat_map(|d| (0..2).map(move |h| format!("2026-01-{:02} 1{}-00-00", d, h))).collect();
+        let keep = copies_to_keep(&all);
+        assert_eq!(keep.len(), MAX_BACKUPS, "суммарно не более 30");
+        for name in &all[all.len() - RECENT_BACKUPS..] {
+            assert!(keep.contains(name), "последняя копия не сохранена: {}", name);
+        }
+        for d in 1..=20 {
+            let last = format!("2026-01-{:02} 11-00-00", d);
+            assert!(keep.contains(&last), "нет самой поздней копии дня: {}", last);
+        }
+        assert!(!keep.contains("2026-01-01 10-00-00"), "старая копия сверх предела должна быть удалена");
+        // копий меньше предела — сохраняются все
+        let few: Vec<String> = (1..=8).map(|d| format!("2026-01-{:02} 10-00-00", d)).collect();
+        assert_eq!(copies_to_keep(&few).len(), 8);
         assert!(is_backup_name("2026-01-01 10-00-00") && !is_backup_name("x"));
     }
 
