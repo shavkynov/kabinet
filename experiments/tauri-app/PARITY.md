@@ -31,7 +31,8 @@
 | Карточки (персонажи, места, предметы, заметки) | `store` (items) | `store::add_item/read_item/…` | unit-тесты модуля `store` | тест |
 | Поиск и замена | `searchreplace` | `searchreplace::replace_project` | unit-тесты модуля | тест |
 | Импорт глав (docx/rtf/md/txt) | `import` | `import` | unit-тесты модуля | тест |
-| Экспорт (docx/pdf/…, цели сохранения) | `export` | `export`/`exporttarget` | unit-тесты модулей | тест |
+| Экспорт (docx/rtf/md/txt/html, цели сохранения) | `export` | `export`/`exporttarget` | unit-тесты модулей | тест |
+| Экспорт PDF (печать в браузере) | `export` (Electron печатает окно) | `export::print_page` + `src-tauri` временная страница (`9995155`) | unit-тест `print_page`; GUI/окно печати не проверялись | код |
 | Вложения/изображения | — | `media` | unit-тесты модуля | тест |
 | Упоминания и ссылки | — | `mentions` | unit-тесты модуля | тест |
 | Анализ текста (проверка) | — | `check` | unit-тесты модуля | тест |
