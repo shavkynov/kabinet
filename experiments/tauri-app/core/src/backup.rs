@@ -38,7 +38,7 @@ fn list_files(root: &Path, rel: &Path, out: &mut Vec<String>) -> R<()> {
         let name = e.file_name().to_string_lossy().to_string();
         let r = if rel.as_os_str().is_empty() { PathBuf::from(&name) } else { rel.join(&name) };
         if rel.as_os_str().is_empty() && SKIP.contains(&name.as_str()) { continue; }
-        if name.ends_with(".tmp") || name == ".DS_Store" { continue; }
+        if name.ends_with(".tmp") || name == ".DS_Store" || name == ".sig" { continue; }
         let ft = e.file_type().map_err(|e| format!("Не удалось определить тип «{}»: {}. Копия не создана.", r.display(), e))?;
         if ft.is_dir() { list_files(root, &r, out)?; } else if ft.is_file() { out.push(r.to_string_lossy().to_string()); }
     }
@@ -118,6 +118,19 @@ pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Op
     Ok(Some(name))
 }
 
+/// Проверить целостность ранее сделанной копии: пересчитать подпись по содержимому и сравнить с `.sig`.
+/// Отсутствие/ошибка чтения подписи или файлов — `Err`, чтобы это не приняли за «целую» копию.
+pub fn verify_backup(root: &Path, name: &str) -> R<bool> {
+    let dir = root.join(name);
+    let stored = fs::read_to_string(dir.join(".sig"))
+        .map_err(|e| format!("Не удалось прочитать подпись копии «{}»: {}. Проверить целостность нельзя.", name, e))?;
+    let mut files = Vec::new();
+    list_files(&dir, Path::new(""), &mut files)?;
+    files.sort();
+    let computed = signature(&dir, &files)?;
+    Ok(computed == stored.trim())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +191,25 @@ mod tests {
         let second = make_backup(&dir, &root, Some("2026-01-01 10-00-01")).unwrap();
         assert!(second.is_some(), "изменение бинарного файла при том же размере и времени не должно пропускаться");
         assert_eq!(fs::read(root.join(second.unwrap()).join("data.bin")).unwrap(), b"BBBB");
+    }
+
+    #[test]
+    fn backup_verification_detects_corruption_and_missing_signature() {
+        let dir = tmpdir("verify").join("p");
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("Главы/a.md"), "один").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        let name = make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        assert!(verify_backup(&root, &name).unwrap(), "целая копия должна подтверждаться");
+        // порча файла в копии обнаруживается
+        fs::write(root.join(&name).join("Главы/a.md"), "два").unwrap();
+        assert!(!verify_backup(&root, &name).unwrap(), "порча копии должна обнаруживаться");
+        // вторая копия после изменения проекта, затем лишаем её подписи
+        fs::write(dir.join("Главы/b.md"), "три").unwrap();
+        let name2 = make_backup(&dir, &root, Some("2026-01-01 10-00-01")).unwrap().unwrap();
+        fs::remove_file(root.join(&name2).join(".sig")).unwrap();
+        assert!(verify_backup(&root, &name2).is_err(), "без .sig целостность нельзя подтвердить");
     }
 
     #[cfg(windows)]
