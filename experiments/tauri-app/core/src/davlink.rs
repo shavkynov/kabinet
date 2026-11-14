@@ -11,10 +11,10 @@ use crate::yandexdisk::{self, is_oauth_user, YandexDisk};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -76,19 +76,27 @@ struct Shared {
     /// Один флаг для фонового и ручного прохода: копия передаётся в FolderSync как cancel.
     stop: Arc<AtomicBool>,
     busy: AtomicBool,
-    /// Сколько РЕАЛЬНЫХ проходов этой сессии сейчас выполняется (фоновый и/или ручной).
-    passes: AtomicUsize,
-    /// Все сессии DavLink: новый проход того же проекта не начинается, пока прежний активен.
-    /// Слабые ссылки — реестр не продлевает жизнь сессиям; блокировка пересечения — локальная.
-    peers: Arc<Mutex<Vec<Weak<Shared>>>>,
+    /// Один признак «проход идёт» на проект: пока слот занят, второй проход того же проекта
+    /// откладывается. Слот освобождается при любом выходе из прохода, включая ошибку и отмену.
+    pass_slots: PassSlots,
     dirty_at: Mutex<Option<Instant>>,
     quiet_until: Mutex<Instant>,
     st: Mutex<St>,
 }
 
-/// Учитывает реальный проход сессии: счётчик уменьшается на любом выходе, включая ошибку и отмену.
-struct PassGuard(Arc<Shared>);
-impl Drop for PassGuard { fn drop(&mut self) { self.0.passes.fetch_sub(1, Ordering::SeqCst); } }
+type PassSlots = Arc<Mutex<HashSet<String>>>;
+
+/// Владение слотом прохода: освобождает проект при выходе из `run_pass` (в т.ч. по панике).
+struct PassSlot { slots: PassSlots, key: String }
+impl Drop for PassSlot { fn drop(&mut self) { self.slots.lock().unwrap().remove(&self.key); } }
+
+/// Занять слот проекта. `None` — проход этого проекта уже идёт (он откладывается).
+fn begin_pass(slots: &PassSlots, dir: &Path) -> Option<PassSlot> {
+    let key = link_key(dir);
+    let mut set = slots.lock().unwrap();
+    if !set.insert(key.clone()) { return None; }
+    Some(PassSlot { slots: slots.clone(), key })
+}
 
 struct Work {
     dir: PathBuf,
@@ -131,15 +139,11 @@ pub(crate) fn set_test_stop_bound(bound: Option<Duration>) {
 pub struct DavLink {
     data_dir: PathBuf,
     secret: Arc<dyn Secret>,
-    device: String,
     make_http: HttpFactory,
     on_event: OnEvent,
     cur: Mutex<Option<Work>>,
-    /// Отцепленные проходы: их поток уже вне `Work`, но работа ещё не завершена. Держим, чтобы
-    /// «остановка» не означала «забыли о старом работнике»; записи им запрещены stop-флагом.
-    orphans: Mutex<Vec<Arc<Shared>>>,
-    /// Реестр всех сессий (слабые ссылки) — общий для фонового и ручного прохода.
-    peers: Arc<Mutex<Vec<Weak<Shared>>>>,
+    /// Признак «проход идёт» по проекту — общий для фонового и ручного прохода.
+    pass_slots: PassSlots,
     config: Mutex<()>,
 }
 
@@ -158,21 +162,12 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
     // но новых записей не делает (cancel-флаг в FolderSync).
     if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
     if shared.busy.swap(true, Ordering::SeqCst) { return PassOutcome::Skipped; }
-    // Учёт РЕАЛЬНОГО прохода, а не только фонового потока: новый проход того же проекта не начинается,
-    // пока прежний проход (фоновый или ручной) ещё выполняется. Проверка и счётчик — под одним локальным
-    // замком, чтобы два прохода не проскочили её одновременно.
-    {
-        let mut peers = shared.peers.lock().unwrap();
-        peers.retain(|w| w.upgrade().map(|s| !s.stop.load(Ordering::SeqCst) || s.passes.load(Ordering::SeqCst) > 0).unwrap_or(false));
-        let blocked = peers.iter().filter_map(|w| w.upgrade())
-            .any(|s| !Arc::ptr_eq(&s, shared) && s.dir == shared.dir && s.passes.load(Ordering::SeqCst) > 0);
-        if blocked {
-            shared.busy.store(false, Ordering::SeqCst);
-            return PassOutcome::Skipped;
-        }
-        shared.passes.fetch_add(1, Ordering::SeqCst);
-    }
-    let _pass = PassGuard(shared.clone());
+    // Один признак «проход идёт» на проект: пока слот занят прежним проходом (в т.ч. отцепленным
+    // после stop), второй проход того же проекта откладывается. Слот снимается на любом выходе.
+    let Some(_slot) = begin_pass(&shared.pass_slots, &shared.dir) else {
+        shared.busy.store(false, Ordering::SeqCst);
+        return PassOutcome::Skipped;
+    };
     // Облачного замка нет: свежая отметка `kabinet.lock` от Electron/Android не блокирует проход
     // и не перезаписывается. Чужие правки защищает write_checked (перечитывание перед записью).
     let result = match sync.lock() {
@@ -208,8 +203,10 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
 }
 
 impl DavLink {
-    pub fn new(data_dir: &Path, secret: Arc<dyn Secret>, device: &str, make_http: HttpFactory, on_event: OnEvent) -> Self {
-        DavLink { data_dir: data_dir.to_path_buf(), secret, device: device.to_string(), make_http, on_event, cur: Mutex::new(None), orphans: Mutex::new(Vec::new()), peers: Arc::new(Mutex::new(Vec::new())), config: Mutex::new(()) }
+    /// `device` сохранён в сигнатуре для совместимости: Rust не пишет отметку `kabinet.lock`
+    /// (это делает Electron/Android), поэтому имя устройства пока не хранится.
+    pub fn new(data_dir: &Path, secret: Arc<dyn Secret>, _device: &str, make_http: HttpFactory, on_event: OnEvent) -> Self {
+        DavLink { data_dir: data_dir.to_path_buf(), secret, make_http, on_event, cur: Mutex::new(None), pass_slots: Arc::new(Mutex::new(HashSet::new())), config: Mutex::new(()) }
     }
 
     fn links_file(&self) -> PathBuf { self.data_dir.join("dav-links.json") }
@@ -263,15 +260,13 @@ impl DavLink {
     // ---------- работа открытого проекта ----------
 
     /// Остановить работника открытого проекта. Возвращает true, если поток завершился в границе.
-    /// Если нет — работник не забыт: он учитывается в `orphans`, а его записи уже запрещены stop-флагом.
+    /// Если нет — поток доиграет текущий запрос и выйдет сам: записи ему запрещены stop-флагом,
+    /// а слот прохода освободится по завершении.
     fn stop_work(&self) -> bool {
         let work = self.cur.lock().unwrap().take();
         let Some(mut w) = work else { return true };
         w.shared.stop.store(true, Ordering::SeqCst);
-        let finished = join_bounded(&mut w);
-        if !finished { self.orphans.lock().unwrap().push(w.shared.clone()); }
-        self.orphans.lock().unwrap().retain(|s| s.busy.load(Ordering::SeqCst) || !s.stop.load(Ordering::SeqCst));
-        finished
+        join_bounded(&mut w)
     }
 
     pub fn start(&self, dir: &Path) -> bool {
@@ -283,11 +278,10 @@ impl DavLink {
         let Ok(mut fs_) = self.folder_sync(dir, &acc) else { return false };
         let shared = Arc::new(Shared {
             dir: dir.to_path_buf(),
-            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), passes: AtomicUsize::new(0),
-            peers: self.peers.clone(),
+            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
+            pass_slots: self.pass_slots.clone(),
             dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
         });
-        self.peers.lock().unwrap().push(Arc::downgrade(&shared));
         // Один флаг для фонового и ручного прохода: после stop проход не делает новых записей.
         fs_.set_cancel(Some(shared.stop.clone()));
         let sync = Arc::new(Mutex::new(fs_));
@@ -541,7 +535,7 @@ mod tests {
         assert!(!pulled(&dir), "до освобождения проход ещё не завершён");
         gate.allow();
         // Отцепленный проход доигрывает запрос, но новых записей и событий от него быть не должно.
-        let ended = wait_until(Duration::from_secs(5), || d.orphans.lock().unwrap().iter().all(|s| !s.busy.load(Ordering::SeqCst)));
+        let ended = wait_until(Duration::from_secs(5), || d.pass_slots.lock().unwrap().is_empty());
         assert!(ended, "отцепленный проход завершился");
         assert!(!pulled(&dir), "остановленный проход не делает локальных записей");
         assert!(events.lock().unwrap().is_empty(), "остановленный проход не эмитит события: {:?}", events.lock().unwrap());
@@ -568,11 +562,11 @@ mod tests {
         set_test_stop_bound(None);
         assert!(d.start(&dir), "новый работник того же проекта запущен");
         // Прежний проход этой сессии ещё выполняется — новый проход того же проекта откладывается
-        // локальным реестром проходов и не пересекается с ним.
+        // слотом прохода и не пересекается с ним.
         assert_eq!(d.sync_now().unwrap()["status"], json!("skipped"), "второй проход отложен до завершения старого");
         assert!(!pulled(&dir), "пересечения записей нет");
         gate.allow();
-        let freed = wait_until(Duration::from_secs(10), || d.orphans.lock().unwrap().iter().all(|s| !s.busy.load(Ordering::SeqCst)));
+        let freed = wait_until(Duration::from_secs(10), || d.pass_slots.lock().unwrap().is_empty());
         assert!(freed, "отцепленный проход #1 завершился");
         // Отменённый старый проход не сделал записей и не эмитил событий (писать ему запрещено).
         assert!(events.lock().unwrap().is_empty(), "старый отменённый проход не эмитит события: {:?}", events.lock().unwrap());
@@ -715,7 +709,7 @@ mod tests {
             shared: Arc::new(Shared {
                 dir: dir.clone(),
                 stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
-                passes: AtomicUsize::new(0), peers: Arc::new(Mutex::new(Vec::new())),
+                pass_slots: d.pass_slots.clone(),
                 dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
             }),
             sync: Arc::new(Mutex::new(sync)),
@@ -807,8 +801,7 @@ mod tests {
                 dir: dir.clone(),
                 stop: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
-                passes: AtomicUsize::new(0),
-                peers: Arc::new(Mutex::new(Vec::new())),
+                pass_slots: d.pass_slots.clone(),
                 dirty_at: Mutex::new(None),
                 quiet_until: Mutex::new(Instant::now()),
                 st: Mutex::new(St::default()),
