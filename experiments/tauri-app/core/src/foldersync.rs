@@ -1414,6 +1414,61 @@ mod tests {
         assert!(s.get("Кабинет/Роман/project.json").is_some(), "работа до сохранения состояния выполнена");
     }
 
+    /// Прерывание МЕЖДУ публикацией state и обновлением cache: state новый, cache старый.
+    /// Новый экземпляр должен восстановиться; локальный текст и чужая версия не теряются,
+    /// устаревший/отсутствующий необязательный кэш не «подтверждает» удаление или перезапись.
+    #[test]
+    fn restart_after_state_saved_but_stale_cache_keeps_both_versions() {
+        let s = FakeServer::new();
+        let a = tmpdir("stale-cache").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        let state_file = a.parent().unwrap().join("a.state");
+        let cache_file = PathBuf::from(format!("{}.cache", state_file.display()));
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        let state_before = fs::read(&state_file).unwrap();
+        let cache_before = fs::read(&cache_file).unwrap();
+        assert!(state_before.len() > 2 && cache_before.len() > 2, "исходные state и cache записаны");
+
+        // Обе стороны изменились: проход обновит state и cache, чужая версия уйдёт в «Конфликты».
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "чужая правка".as_bytes());
+        w(&a, "Главы/aaaaaa.md", "моя правка");
+        let res = sa.sync().unwrap();
+        assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()), "конфликт зафиксирован: {:?}", res.conflicts);
+        let state_after_first = fs::read(&state_file).unwrap();
+        assert_ne!(state_before, state_after_first, "state обновился после прохода");
+
+        // Моделируем прерывание: `save` публикует state ПЕРВЫМ и атомарно, затем пишет cache (ошибка кэша
+        // не отменяет проход). Сбой/ошибка между ними оставляет новый state и старый cache — этот снимок
+        // достижим в рабочем порядке записи.
+        fs::write(&cache_file, &cache_before).unwrap();
+
+        // НОВЫЙ экземпляр с теми же сохранёнными данными — не повтор тем же объектом.
+        let state_json: Value = serde_json::from_slice(&state_after_first).unwrap();
+        let mut sb = sync_of(&a, &s, "a");
+        let loaded = sb.state();
+        assert_eq!(loaded.get("Главы/aaaaaa.md").map(|s| s.as_str()), state_json["Главы/aaaaaa.md"].as_str(),
+            "новый экземпляр загрузил state без потерь: {:?}", loaded);
+        let res2 = sb.sync().unwrap();
+        assert!(res2.pulled.is_empty() && res2.pushed.is_empty() && res2.removed.is_empty(),
+            "устаревший кэш не должен вызывать решений: pulled={:?} pushed={:?} removed={:?}", res2.pulled, res2.pushed, res2.removed);
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "моя правка", "локальный текст сохранён");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "моя правка".as_bytes(), "согласованная облачная версия сохранена");
+        let conflicts: Vec<String> = fs::read_dir(a.join("Конфликты"))
+            .map(|d| d.flatten().filter_map(|e| fs::read_to_string(e.path()).ok()).collect()).unwrap_or_default();
+        assert!(conflicts.iter().any(|t| t.contains("чужая правка")), "чужая версия сохранена в «Конфликтах»: {:?}", conflicts);
+        assert_eq!(fs::read(&state_file).unwrap(), state_after_first, "повтор не переписал state");
+
+        // Отсутствующий необязательный кэш: новый экземпляр и проход тоже безопасны.
+        fs::remove_file(&cache_file).unwrap();
+        let mut sc = sync_of(&a, &s, "a");
+        let res3 = sc.sync().unwrap();
+        assert!(res3.pulled.is_empty() && res3.pushed.is_empty() && res3.removed.is_empty(),
+            "без кэша решений быть не должно: pulled={:?} pushed={:?} removed={:?}", res3.pulled, res3.pushed, res3.removed);
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "моя правка", "локальный текст сохранён без кэша");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "моя правка".as_bytes(), "облачная версия не тронута без кэша");
+    }
+
     /// Ошибка чтения облачной копии не должна приводить к её удалению без сохранения чужой версии.
     #[test]
     fn delete_keeps_cloud_file_when_cloud_read_fails() {
