@@ -150,7 +150,10 @@ async function deleteDoc(kind, id) {
   try {
     const idx = indexIn(kind, id);
     const removedTitle = (itemsOf(kind).find((c) => c.id === id) || {}).title || '';
-    await flush();
+    if (!(await flush())) {
+      setStatus('error', 'Не удалось сохранить изменения. Удаление отменено, текст остался на экране');
+      return;
+    }
     const updated = kind === 'chapter' ? await api.deleteChapter(id) : await api.deleteItem(kind, id);
     if (!updated) return; // отмена
     setStatus('ok', t('«{0}» перемещено в Корзину', removedTitle));
