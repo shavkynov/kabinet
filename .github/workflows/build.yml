@@ -17,14 +17,64 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm run check
+      - name: Зависимости
+        id: dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          npm ci 2>&1 | tee "$RUNNER_TEMP/kabinet-dependencies.log"
+      - name: Общая проверка
+        id: validation
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee "$RUNNER_TEMP/kabinet-validation.log"
+      - name: Краткая причина ошибки для аудита
+        if: ${{ failure() && (steps.dependencies.outcome == 'failure' || steps.validation.outcome == 'failure') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAGNOSTIC_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FAILED_STEP: ${{ steps.dependencies.outcome == 'failure' && 'dependencies' || 'validation' }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          (async () => {
+            const env = process.env;
+            const repo = env.GITHUB_REPOSITORY;
+            const sha = env.DIAGNOSTIC_SHA;
+            if (!/^[\w.-]+\/[\w.-]+$/.test(repo || '') || !/^[a-f0-9]{40}$/.test(sha || '')) throw new Error('Недопустимая цель диагностики.');
+            const step = env.FAILED_STEP === 'dependencies' ? 'dependencies' : 'validation';
+            const task = step === 'dependencies' ? 'npm ci' : 'npm run check';
+            let log = '';
+            try { log = fs.readFileSync(path.join(env.RUNNER_TEMP, `kabinet-${step}.log`), 'utf8'); } catch {}
+            const lines = log.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/).map((s) => s.trim());
+            const reason = lines.find((s) => /^not ok\b/.test(s))
+              || lines.find((s) => /^npm (?:ERR!|error) code [A-Z0-9_]+$/.test(s))
+              || lines.find((s) => /^✗ /.test(s))
+              || 'Ошибка; подробности в журнале job';
+            const description = Array.from(`${task}: ${reason}`.replace(/[\x00-\x1f\x7f]/g, ' ')).slice(0, 140).join('');
+            const response = await fetch(`https://api.github.com/repos/${repo}/statuses/${sha}`, {
+              method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+              headers: { Authorization: `Bearer ${env.GH_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+              body: JSON.stringify({ state: 'failure', context: 'audit/check-failure', description,
+                target_url: `https://github.com/${repo}/actions/runs/${env.GITHUB_RUN_ID}` }),
+            });
+            if (!response.ok) throw new Error(`Не удалось записать диагностический статус: HTTP ${response.status}`);
+            console.log(description);
+          })().catch((error) => { console.error(error.message); process.exitCode = 1; });
+          NODE
 
   build:
     # установщики собираются только при выпуске версии (метка v0.0.0) или вручную
