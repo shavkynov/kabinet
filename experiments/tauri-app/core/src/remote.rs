@@ -15,6 +15,11 @@ pub trait Remote: Send {
     /// None: файла нет.
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>>;
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()>;
+    /// Создать файл, только если его ещё нет (create-only, без перезаписи). Если хранилище этого
+    /// не поддерживает — ошибка, а не молчаливая перезапись (примитив для протокола версий).
+    fn create(&mut self, _rel: &str, _bytes: &[u8]) -> R<()> {
+        Err("Создание без перезаписи не поддерживается этим хранилищем.".into())
+    }
     fn remove(&mut self, rel: &str) -> R<()>;
     fn mkdir(&mut self, rel: &str) -> R<()>;
 }
@@ -29,6 +34,7 @@ impl Remote for Box<dyn Folder> {
     fn list(&mut self, rel: &str) -> R<Vec<Item>> { (**self).list(rel) }
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { (**self).read(rel) }
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { (**self).write(rel, bytes) }
+    fn create(&mut self, rel: &str, bytes: &[u8]) -> R<()> { (**self).create(rel, bytes) }
     fn remove(&mut self, rel: &str) -> R<()> { (**self).remove(rel) }
     fn mkdir(&mut self, rel: &str) -> R<()> { (**self).mkdir(rel) }
 }

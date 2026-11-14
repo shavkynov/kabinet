@@ -77,6 +77,7 @@ impl Http for FakeServer {
             ("cloud-api.yandex.net", "GET", "/v1/disk/resources/upload") => {
                 let parent = path.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
                 if !parent.is_empty() && !f.dirs.contains(&parent) { return r(409, vec![]); }
+                if f.files.contains_key(&path) && q.get("overwrite").map(|v| v == "false").unwrap_or(false) { return r(409, vec![]); }
                 js(serde_json::json!({ "href": format!("https://uploader.yandex.net/put?p={}", enc(&path)) }))
             }
             ("uploader.yandex.net", "PUT", _) => {

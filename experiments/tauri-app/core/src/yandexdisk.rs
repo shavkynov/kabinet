@@ -179,6 +179,26 @@ impl<H: Http> YandexDisk<H> {
         Err(plain("Яндекс ещё не подтвердил сохранение файла. Синхронизация будет повторена."))
     }
 
+    /// Создать файл, только если его ещё нет. Использует документированный `overwrite=false`
+    /// (create-only): Яндекс отменяет загрузку, если такой файл уже есть.
+    fn do_create(&mut self, rel: &str, bytes: &[u8]) -> Result<(), YErr> {
+        let p = parts(rel)?;
+        if p.is_empty() { return Err(plain("Не указан файл.")); }
+        self.ensure(&p[..p.len() - 1].join("/"))?;
+        let path = self.disk_path(rel)?;
+        let res = self.send("GET", "/resources/upload", &[("path", &path), ("overwrite", "false")], false)?.ok_or_else(|| plain("Яндекс не выдал ссылку для загрузки."))?;
+        let href = res.data["href"].as_str().ok_or_else(|| plain("Яндекс не выдал ссылку для загрузки."))?.to_string();
+        self.transfer("PUT", &href, Some(bytes))?;
+        let want = format!("{:x}", md5::compute(bytes));
+        for _ in 0..20 {
+            if let Some(c) = self.meta(&path, true)? {
+                if c.data["type"] == "file" && c.data["md5"] == want.as_str() { return Ok(()); }
+            }
+            std::thread::sleep(self.pause);
+        }
+        Err(plain("Яндекс ещё не подтвердил сохранение файла. Синхронизация будет повторена."))
+    }
+
     fn do_remove(&mut self, rel: &str) -> Result<(), YErr> {
         if parts(rel)?.is_empty() { return Err(plain("Удаление корня запрещено.")); }
         let Some(res) = self.send("DELETE", "/resources", &[("path", &self.disk_path(rel)?)], true)? else { return Ok(()) };
@@ -205,6 +225,7 @@ impl<H: Http> Remote for YandexDisk<H> {
     fn list(&mut self, rel: &str) -> R<Vec<Item>> { Ok(self.do_list(rel)?) }
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { Ok(self.do_read(rel)?) }
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { Ok(self.do_write(rel, bytes)?) }
+    fn create(&mut self, rel: &str, bytes: &[u8]) -> R<()> { Ok(self.do_create(rel, bytes)?) }
     fn remove(&mut self, rel: &str) -> R<()> { Ok(self.do_remove(rel)?) }
     fn mkdir(&mut self, rel: &str) -> R<()> { Ok(self.ensure(rel)?) }
 }
@@ -260,7 +281,10 @@ mod tests {
                         json(serde_json::json!({ "type": "file", "size": b.len(), "md5": format!("{:x}", md5::compute(b)) }))
                     } else { code(404) }
                 }
-                ("cloud-api.yandex.net", "GET", "/v1/disk/resources/upload") => json(serde_json::json!({ "href": format!("https://uploader.yandex.net/put?p={}", url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()) })),
+                ("cloud-api.yandex.net", "GET", "/v1/disk/resources/upload") => {
+                    if q.get("overwrite").map(|v| v == "false").unwrap_or(false) && files.contains_key(&path) { return code(409); }
+                    json(serde_json::json!({ "href": format!("https://uploader.yandex.net/put?p={}", url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()) }))
+                }
                 ("uploader.yandex.net", "PUT", _) => { files.insert(q["p"].clone(), r.body.unwrap()); code(201) }
                 ("cloud-api.yandex.net", "GET", "/v1/disk/resources/download") => {
                     if files.contains_key(&path) { json(serde_json::json!({ "href": format!("https://downloader.yandex.net/a?p={}", url::form_urlencoded::byte_serialize(path.as_bytes()).collect::<String>()) })) } else { code(404) }
@@ -295,6 +319,20 @@ mod tests {
         assert!(fake.log.lock().unwrap().iter().any(|l| l == "GET cdn.yandex.net/b"));
         let b = browse_folders(fake.clone(), &creds(now_ms() + 100_000), "/Кабинет").unwrap();
         assert_eq!(b, vec![("Роман".to_string(), "/Кабинет/Роман".to_string())]);
+    }
+
+    #[test]
+    fn create_only_does_not_overwrite_existing() {
+        let fake = Fake::default();
+        let mut d = YandexDisk::new(fake.clone(), &creds(now_ms() + 100_000), "/Кабинет/Роман").unwrap().no_pause();
+        d.ensure_root().unwrap();
+        d.create("Главы/б.md", "первый".as_bytes()).unwrap();
+        assert_eq!(d.read("Главы/б.md").unwrap().unwrap(), "первый".as_bytes());
+        assert!(d.create("Главы/б.md", "второй".as_bytes()).is_err(), "create не должен перезаписывать существующий файл");
+        assert_eq!(d.read("Главы/б.md").unwrap().unwrap(), "первый".as_bytes(), "содержимое не изменилось");
+        // обычная запись перезаписывает
+        d.write("Главы/б.md", "третий".as_bytes()).unwrap();
+        assert_eq!(d.read("Главы/б.md").unwrap().unwrap(), "третий".as_bytes());
     }
 
     #[test]
