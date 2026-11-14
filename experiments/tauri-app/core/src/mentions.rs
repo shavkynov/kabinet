@@ -72,16 +72,15 @@ fn generated_of(title: &str, card: &Value, explicit: &[String], kind: &str) -> (
     (keys, cap_keys)
 }
 
-/// Число вхождений набора имён в текст. Пустые совпадения и формы, которые должны быть с большой буквы,
+/// Число вхождений набора имён в текст. Пустые совпадения, не-слова и формы, которые должны быть с большой буквы,
 /// но встретились со строчной, не считаются.
-pub fn count_in(text: &str, re: &Option<fancy_regex::Regex>, cap_keys: &BTreeSet<String>) -> usize {
+pub fn count_in(text: &str, re: &Option<regex::Regex>, cap_keys: &BTreeSet<String>) -> usize {
     let Some(re) = re else { return 0 };
     let flat = text.replace('\u{a0}', " ");
     let mut n = 0;
     for m in re.find_iter(&flat) {
-        let Ok(m) = m else { continue };
         let s = m.as_str();
-        if s.is_empty() {
+        if s.is_empty() || !namematch::is_word_boundary(&flat, m.start(), m.end()) {
             continue;
         }
         if cap_keys.contains(&s.to_lowercase()) && !namematch::is_capital(s) {
@@ -94,10 +93,6 @@ pub fn count_in(text: &str, re: &Option<fancy_regex::Regex>, cap_keys: &BTreeSet
 
 /// { protagonist, chapters: [{ id, title, n (номер главы), count }] }. У протагониста список не считаем.
 pub fn card_mentions(dir: &Path, kind: &str, id: &str) -> R<Value> {
-    // Читаем проект и одну карточку, формы считаем только для неё: card_index здесь не нужен.
-    // По замерам автора (release, 301 карточка, 60 глав) значимого ускорения это не дало:
-    // около 120–140 мс и до, и после правки. Весь card_index (формы всех карточек) занимает 8–15 мс;
-    // основное время уходит на подсчёт регуляркой. JS на том же проекте считает за ~25 мс.
     let meta = store::load_meta(dir)?;
     let list = list_of(kind).ok_or_else(|| "Карточка не найдена.".to_string())?;
     let title = meta[list]
