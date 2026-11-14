@@ -25,11 +25,26 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": "all",
     "icon": [
       "../../../build/icon.png",
-      "../../../build/icon.ico"
-    ]
+      "../../../build/icon.ico",
+      "../../../build/icon.icns"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Редактор Кабинет",
+    "longDescription": "Кабинет — редактор для писателей: рукопись, карточки, проверка текста, резервные копии и Яндекс Диск.",
+    "copyright": "© Александр Шавкунов",
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   },
   "plugins": {
     "deep-link": {
