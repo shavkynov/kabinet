@@ -22,7 +22,7 @@ S — локальная правка; M — несколько функций/�
 
 | № | Работа | Сложность | Приоритет | Зависимости | Статус |
 |---|---|---|---|---|---|
-| 3 | Строгое чтение syncguard | S | P1 | нет | UNVERIFIED — правка подготовлена, тесты не запускались |
+| 3 | Строгое чтение syncguard | S | P1 | нет | PASS — проверено на `5dd4a3d` (Rust 138, JS 557, red/green, вызывающий путь) |
 | 4 | Пустота глав | S–M | P1 | контракт чтения 3 | FAIL |
 | 9 | Статистика | M | P1 | контракт чтения, согласовать 11 | FAIL |
 | 10 | State/cache | M–L | P1 | согласовать 11/13 | FAIL |
@@ -69,6 +69,15 @@ NotFound отдельно; PermissionDenied и другие ошибки ост�
 2026-11-14, Perplexity, база `a353b1a352d0267550d8e0a67977393f7ff2fd5f`: подготовлено изменение syncguard.rs/guard_write_at с приватным guard_write_at_with_read. Только NotFound даёт Ok(None); ошибки возвращаются с путём и причиной. Чтение проверяется и без known_hash; читаемый непрочитанный файл сохраняет прежнее поведение. Новые unit-тесты: read_errors_stop_guard_with_and_without_known_hash (PermissionDenied/Other), actual_directory_read_error_is_not_missing_file, missing_file_still_allows_save_with_and_without_known_hash, readable_untracked_file_keeps_previous_no_conflict_behavior. Прежние тесты, включая collision и core/tests/syncguard_guard.rs, сохранены.
 
 Фактически выполнена только проверка наличия среды через Python shutil.which: cargo=None, rustc=None. Компиляция и Rust/JS-прогоны НЕ выполнялись, red/green не доказан, вызывающие функции целиком не перепроверены. Статус UNVERIFIED, не PASS. Приватная подмена чтения не является публичным API; рабочий путь использует std::fs::read. Следующий шаг: прогнать cargo test --manifest-path experiments/tauri-app/core/Cargo.toml syncguard; cargo test --manifest-path experiments/tauri-app/core/Cargo.toml --test syncguard_guard; полный Rust/JS и сборку, проверить write_chapter/write_item прекращают запись при Err. Для red/green восстановить прежнее подавление ошибки в приватной функции при сохранённом тестовом шве и запустить регрессии; результат не предрешать. Не считать задачи 2/4/7/9/10 исправленными этой правкой.
+
+2026-11-14, агент (DeepSeek, локальный клон), база `5dd4a3d`, ОС Windows 10.0.26300, rustc/cargo 1.100.0, node 24.22.0: ПРОВЕРЕНО.
+- `cargo test ... syncguard` → 14 passed, 0 failed.
+- `cargo test ... --test syncguard_guard` → 10 passed, 0 failed; добавлен регрессионный тест вызывающего пути `caller_save_stops_and_keeps_known_hash_when_guard_cannot_read_the_file`.
+- Полный Rust: `cargo test ...` → 138 passed, 0 failed.
+- JS: `npm ci` exit 0; `npm test` 350/350; `node --test "test/*.test.js"` 557 (554 pass, 3 skipped, 0 fail); `node scripts/check.js` exit 0.
+- Red/green: во временном worktree восстановлено прежнее `let Ok(bytes) = read(file) else { return Ok(None) };` — оба теста чтения упали; после возврата исправления 2/2 ok. Worktree удалён.
+- Вызывающий путь: `store::write_chapter`/`write_item` используют `guard_write(...)?`; `write_atomic` вызывает `note_written` только после успешной записи. `write_chapter`/`write_item` при ошибке защиты возвращают Err, файл и known_hash не меняются (покрыто новым тестом). UI: `writeDocJob` (renderer/app/13-save.js) при ошибке сохраняет `failedWrite` и повторяет запись в тот же документ — покрыто `test/save-failure.test.js` (vm-симуляция).
+- Ограничения: ошибка чтения воспроизведена инъекцией (unit) и подменой файла каталогом (интеграционный контракт) — это не эквивалент всех ошибок доступа; полный UI на чистой ОС не проверялся. Статус PASS на базе `5dd4a3d`, регрессионный тест и эта запись — в коммите с обновлением карточки.
 
 ### 4. Пустота глав
 
@@ -131,3 +140,5 @@ tauri-app.yml уже делает Rust tests, exe и macOS app/zip, артефа
 2026-11-14: создан реестр 1–15 с оценками, зависимостями и группами причин; AGENTS.md обязывает читать и сопровождать его. Документационный коммит a353b1a352d0267550d8e0a67977393f7ff2fd5f; тесты не запускались, PASS нет.
 
 2026-11-14: подготовлена первая кодовая правка № 3 и четыре регрессионных теста; документ уплотнён с сохранением номеров, требований и исходных ограничений. Подробности/невыполненная проверка в карточке 3. Следующее действие — Rust-прогоны и проверка вызывающего сохранения, затем № 4.
+
+2026-11-14: задача № 3 проверена и закрыта PASS на базе `5dd4a3d` (Windows, rustc 1.100/node 24.22): Rust 138/138, JS 557 (554 pass), red/green в изолированном worktree, проверен вызывающий путь `write_chapter`/`write_item` и UI-повтор сохранения. Добавлен регрессионный тест вызывающего пути. Следующий шаг — № 4 (ошибка чтения не должна считаться пустой главой в `adopt_remote_structure`).

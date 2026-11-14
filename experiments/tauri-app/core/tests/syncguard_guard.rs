@@ -202,3 +202,37 @@ fn invalid_utf8_on_disk_is_kept_in_conflicts_like_js() {
     assert!(saved.contains('\u{fffd}'), "чужая версия сохранена с заменами, как в JS: {saved:?}");
     assert_eq!(fs::read_to_string(p.chapter_file()).unwrap(), "моя версия");
 }
+
+#[test]
+fn caller_save_stops_and_keeps_known_hash_when_guard_cannot_read_the_file() {
+    // Контракт вызывающего пути: ошибка чтения в защите доходит до write_chapter/write_item —
+    // файл не перезаписывается, успех не сообщается, «известный» хэш не обновляется.
+    // Ошибка воспроизводится подменой файла каталогом: это детерминированный тест контракта,
+    // а не эквивалент всех ошибок доступа (см. карточку № 3 в ТЗ).
+    let p = Project::new("caller_read_error");
+
+    // глава: окно открыло файл (known_hash записан), затем на его месте оказывается каталог
+    store::write_chapter(&p.dir, &p.id, "исходный текст").unwrap();
+    store::read_chapter(&p.dir, &p.id).unwrap();
+    let file = p.chapter_file();
+    fs::remove_file(&file).unwrap();
+    fs::create_dir(&file).unwrap();
+    let known_before = syncguard::known_hash(&file);
+    let res = store::write_chapter(&p.dir, &p.id, "моя правка");
+    assert!(res.is_err(), "write_chapter должен вернуть ошибку защиты, а не успех");
+    assert!(file.is_dir(), "файл не перезаписан: на его месте по-прежнему каталог");
+    assert_eq!(syncguard::known_hash(&file), known_before, "known_hash не обновлён после ошибки");
+
+    // карточка: тот же контракт
+    let cid = store::add_item(&p.dir, "character", None).unwrap()["id"].as_str().unwrap().to_string();
+    store::write_item(&p.dir, "character", &cid, r#"{"short":"моя 1"}"#).unwrap();
+    store::read_item(&p.dir, "character", &cid).unwrap();
+    let card = p.dir.join("Персонажи").join(format!("{}.json", cid));
+    fs::remove_file(&card).unwrap();
+    fs::create_dir(&card).unwrap();
+    let known_card = syncguard::known_hash(&card);
+    let res = store::write_item(&p.dir, "character", &cid, r#"{"short":"моя 2"}"#);
+    assert!(res.is_err(), "write_item должен вернуть ошибку защиты, а не успех");
+    assert!(card.is_dir(), "файл карточки не перезаписан");
+    assert_eq!(syncguard::known_hash(&card), known_card, "known_hash карточки не обновлён");
+}
