@@ -277,6 +277,26 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join("project.json")).unwrap(), "{}", "проект не изменён");
     }
 
+    #[test]
+    fn backup_skips_own_dir_trash_and_lock() {
+        let dir = tmpdir("skip").join("p");
+        fs::create_dir_all(dir.join(BACKUP_DIR)).unwrap();
+        fs::write(dir.join(BACKUP_DIR).join("old.txt"), "x").unwrap();
+        fs::create_dir_all(dir.join("Корзина")).unwrap();
+        fs::write(dir.join("Корзина").join("t.txt"), "x").unwrap();
+        fs::write(dir.join("kabinet.lock"), "x").unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("Главы/a.md"), "текст").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        let name = make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        let b = root.join(&name);
+        assert!(!b.join(BACKUP_DIR).exists(), "копии не вкладываются друг в друга");
+        assert!(!b.join("Корзина").exists(), "Корзина не копируется");
+        assert!(!b.join("kabinet.lock").exists(), "замок не копируется");
+        assert!(b.join("Главы/a.md").exists(), "главы копируются");
+    }
+
     #[cfg(windows)]
     #[test]
     fn backup_does_not_follow_directory_junctions() {
