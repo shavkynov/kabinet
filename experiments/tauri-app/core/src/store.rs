@@ -9,6 +9,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type R<T> = Result<T, String>;
 
+/// Базовая версия `project.json`, прочитанная на этом потоке. Нужна, чтобы сохранение
+/// не затирало чужую версию, которую проход синхронизации скачал между чтением и записью.
+/// Хранится отдельно от реестра `syncguard`: тот глобальный и обновляется любым чтением меты.
+mod meta_base {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    thread_local! {
+        static BASE: RefCell<HashMap<PathBuf, String>> = RefCell::new(HashMap::new());
+    }
+    pub fn remember(path: &Path, hash: String) {
+        BASE.with(|b| { b.borrow_mut().insert(path.to_path_buf(), hash); });
+    }
+    pub fn take(path: &Path) -> Option<String> {
+        BASE.with(|b| b.borrow_mut().remove(path))
+    }
+}
+
 /// Общий замок между штатным сохранением (write_chapter/write_item) и записью/удалением локальных
 /// файлов внутри прохода синхронизации (foldersync::sync): закрывает окно «свежий хеш → запись/удаление».
 /// write_atomic его НЕ берёт, чтобы guard_write (который сам вызывает write_atomic для копии в «Конфликты»)
@@ -287,6 +305,8 @@ pub fn load_meta(dir: &Path) -> R<Map<String, Value>> {
         Ok(s) => {
             // Запоминаем прочитанную версию до разбора: как noteRead в JS loadMeta.
             crate::syncguard::note_read(&meta_path(dir), &s);
+            // И отдельно — на этом потоке: с этой базой save_meta сверит версию перед записью.
+            meta_base::remember(&meta_path(dir), crate::syncguard::hash_text(&s));
             s
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -391,8 +411,33 @@ pub fn load_meta(dir: &Path) -> R<Map<String, Value>> {
 
 pub fn save_meta(dir: &Path, meta: &Map<String, Value>) -> R<()> {
     let p = meta_path(dir);
-    if p.exists() { let _ = fs::copy(&p, format!("{}.bak", p.display())); }
     let text = serde_json::to_string_pretty(&Value::Object(meta.clone())).map_err(|e| e.to_string())?;
+    // Замок: запись меты не должна вклиниваться в участок синхронизации «свежий хеш → write_local».
+    let _guard = sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+    // Защита от затирания: сохраняем, только если на диске всё ещё версия, которую читали.
+    // Если проход синхронизации успел скачать чужую версию — её кладём в «Конфликты», а не теряем.
+    if let Some(base) = meta_base::take(&p) {
+        match fs::read(&p) {
+            Ok(bytes) => {
+                let current = String::from_utf8_lossy(&bytes).into_owned();
+                if crate::syncguard::hash_text(&current) != base {
+                    let folder = dir.join(crate::syncguard::CONFLICT_DIR);
+                    fs::create_dir_all(&folder)
+                        .map_err(|e| format!("Не удалось создать папку «{}»: {}", crate::syncguard::CONFLICT_DIR, e))?;
+                    let name = format!(
+                        "{} {} (с другого устройства){}",
+                        crate::syncguard::stamp_now(),
+                        crate::syncguard::safe_name(META),
+                        crate::syncguard::extname(META)
+                    );
+                    write_atomic(&folder.join(&name), &current)?;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // файла нет — просто запишем
+            Err(e) => return Err(format!("Не удалось прочитать project.json перед сохранением: {}", e)),
+        }
+    }
+    if p.exists() { let _ = fs::copy(&p, format!("{}.bak", p.display())); }
     write_atomic(&p, &text)
 }
 
