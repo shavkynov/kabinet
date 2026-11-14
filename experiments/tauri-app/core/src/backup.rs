@@ -31,38 +31,33 @@ pub fn backup_root(data_dir: &Path, dir: &Path) -> PathBuf {
     data_dir.join("Копии").join(format!("{}-{}", if name.is_empty() { "project" } else { &name }, key))
 }
 
-fn list_files(root: &Path, rel: &Path, out: &mut Vec<String>) {
-    let Ok(rd) = fs::read_dir(root.join(rel)) else { return };
-    for e in rd.flatten() {
+fn list_files(root: &Path, rel: &Path, out: &mut Vec<String>) -> R<()> {
+    let rd = fs::read_dir(root.join(rel)).map_err(|e| format!("Не удалось прочитать папку «{}» для копии: {}. Копия не создана.", rel.display(), e))?;
+    for e in rd {
+        let e = e.map_err(|e| format!("Ошибка обхода папки для копии: {}. Копия не создана.", e))?;
         let name = e.file_name().to_string_lossy().to_string();
         let r = if rel.as_os_str().is_empty() { PathBuf::from(&name) } else { rel.join(&name) };
         if rel.as_os_str().is_empty() && SKIP.contains(&name.as_str()) { continue; }
         if name.ends_with(".tmp") || name == ".DS_Store" { continue; }
-        let Ok(ft) = e.file_type() else { continue };
-        if ft.is_dir() { list_files(root, &r, out); } else if ft.is_file() { out.push(r.to_string_lossy().to_string()); }
+        let ft = e.file_type().map_err(|e| format!("Не удалось определить тип «{}»: {}. Копия не создана.", r.display(), e))?;
+        if ft.is_dir() { list_files(root, &r, out)?; } else if ft.is_file() { out.push(r.to_string_lossy().to_string()); }
     }
+    Ok(())
 }
 
-fn is_text_file(name: &str) -> bool {
-    let l = name.to_lowercase();
-    l.ends_with(".md") || l.ends_with(".json") || l.ends_with(".txt")
-}
-
-fn signature(root: &Path, files: &[String]) -> String {
+fn signature(root: &Path, files: &[String]) -> R<String> {
     let mut h = Sha1::new();
     for f in files {
         let full = root.join(f);
         h.update(f.as_bytes());
         h.update([0u8]);
-        if is_text_file(f) {
-            if let Ok(b) = fs::read(&full) { h.update(&b); }
-        } else if let Ok(md) = fs::metadata(&full) {
-            let ms = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis()).unwrap_or(0);
-            h.update(format!("{}:{}", md.len(), ms).as_bytes());
-        }
+        // Хеш содержимого, а не размер/mtime: подмена бинарного файла при том же размере и времени
+        // не должна оставаться незамеченной. Ошибка чтения останавливает копию, а не даёт «нет изменений».
+        let b = fs::read(&full).map_err(|e| format!("Не удалось прочитать «{}» для копии: {}. Копия не создана.", f, e))?;
+        h.update(&b);
         h.update([0u8]);
     }
-    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    Ok(h.finalize().iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 fn is_backup_name(n: &str) -> bool {
@@ -96,10 +91,10 @@ pub fn copies_to_keep(all: &[String], keep: usize, keep_days: usize) -> BTreeSet
 pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Option<String>> {
     let (keep, keep_days) = (60, 30);
     let mut files = Vec::new();
-    list_files(dir, Path::new(""), &mut files);
+    list_files(dir, Path::new(""), &mut files)?;
     files.sort();
     if files.is_empty() { return Ok(None); }
-    let sig = signature(dir, &files);
+    let sig = signature(dir, &files)?;
     let existing = list_backups(root);
     if let Some(last) = existing.last() {
         if fs::read_to_string(root.join(last).join(".sig")).map(|s| s.trim() == sig).unwrap_or(false) { return Ok(None); }
@@ -164,6 +159,25 @@ mod tests {
         let r = backup_root(data, Path::new("/home/a/Dropbox/Roman"));
         assert!(r.starts_with("/data/Копии") && r.to_string_lossy().contains("Roman-"));
         assert_eq!(detect_cloud(Path::new("C:\\Users\\me\\OneDrive\\x")), Some("OneDrive"));
+    }
+
+    #[test]
+    fn backup_detects_binary_change_with_same_size_and_mtime() {
+        let dir = tmpdir("backup-bin").join("p");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("data.bin"), b"AAAA").unwrap();
+        let root = dir.join(BACKUP_DIR);
+        assert!(make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().is_some());
+        let mtime = fs::metadata(dir.join("data.bin")).unwrap().modified().unwrap();
+        // содержимое меняется, а размер и время изменения сохраняются
+        fs::write(dir.join("data.bin"), b"BBBB").unwrap();
+        fs::File::options().write(true).open(dir.join("data.bin")).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(mtime)).unwrap();
+        assert_eq!(fs::metadata(dir.join("data.bin")).unwrap().modified().unwrap(), mtime);
+        let second = make_backup(&dir, &root, Some("2026-01-01 10-00-01")).unwrap();
+        assert!(second.is_some(), "изменение бинарного файла при том же размере и времени не должно пропускаться");
+        assert_eq!(fs::read(root.join(second.unwrap()).join("data.bin")).unwrap(), b"BBBB");
     }
 
     #[cfg(windows)]
