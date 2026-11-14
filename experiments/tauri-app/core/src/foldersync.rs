@@ -64,9 +64,10 @@ pub fn walk_local(dir: &Path) -> R<BTreeMap<String, String>> {
         for entry in rd {
             let entry = entry.map_err(|e| io_err(what, &e))?;
             let name = entry.file_name().to_string_lossy().to_string();
-            match fs::metadata(entry.path()) {
+            match fs::symlink_metadata(entry.path()) {
+                Ok(m) if m.file_type().is_symlink() => {} // не следуем по ссылке (symlink/junction)
                 Ok(m) => out.push((name, m.is_file())),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // исчез по дороге (или битая ссылка)
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // исчез по дороге
                 Err(e) => return Err(io_err(&format!("{}/{}", what, name), &e)),
             }
         }
@@ -84,6 +85,8 @@ pub fn walk_local(dir: &Path) -> R<BTreeMap<String, String>> {
         if is_file && is_syncable(&name) { add(name)?; }
     }
     for folder in FOLDERS {
+        // Папку-ссылку (symlink/junction) не обходим: иначе прочитаем файлы вне корня проекта.
+        if let Ok(m) = fs::symlink_metadata(dir.join(folder)) { if m.file_type().is_symlink() { continue; } }
         for (name, is_file) in list(&dir.join(folder), folder, false)? {
             let rel = format!("{}/{}", folder, name);
             if is_file && is_syncable(&rel) { add(rel)?; }
@@ -1192,6 +1195,25 @@ mod tests {
         let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
         assert!(res.is_err(), "ошибка удаления в облаке должна возвращаться");
         assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "файл в облаке ещё не удалён");
+    }
+
+    /// Папка-ссылка (junction) не должна обходиться: иначе в синхронизацию попадут файлы вне проекта.
+    #[cfg(windows)]
+    #[test]
+    fn walk_local_does_not_enter_linked_folder() {
+        use std::process::Command;
+        let base = tmpdir("walk-link");
+        let dir = base.join("p");
+        project(&dir, &[("aaaaaa", "текст")]);
+        // Внешний каталог с файлом, на который указывает junction вместо папки «Главы».
+        let outside = base.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.md"), "внешний файл").unwrap();
+        fs::remove_dir_all(dir.join("Главы")).unwrap();
+        let st = Command::new("cmd").args(["/c", "mklink", "/J"]).arg(dir.join("Главы")).arg(&outside).status().unwrap();
+        assert!(st.success(), "не удалось создать junction");
+        let local = walk_local(&dir).unwrap();
+        assert!(local.keys().all(|k| !k.contains("secret.md")), "walk_local зашёл в папку-ссылку: {:?}", local.keys().collect::<Vec<_>>());
     }
 
     #[test]

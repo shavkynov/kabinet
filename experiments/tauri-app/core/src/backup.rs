@@ -165,4 +165,24 @@ mod tests {
         assert!(r.starts_with("/data/Копии") && r.to_string_lossy().contains("Roman-"));
         assert_eq!(detect_cloud(Path::new("C:\\Users\\me\\OneDrive\\x")), Some("OneDrive"));
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn backup_does_not_follow_directory_junctions() {
+        use std::process::Command;
+        let base = tmpdir("backup-link");
+        let dir = base.join("p");
+        fs::create_dir_all(dir.join("Главы")).unwrap();
+        fs::write(dir.join("project.json"), "{}").unwrap();
+        fs::write(dir.join("Главы/a.md"), "текст").unwrap();
+        let outside = base.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.md"), "внешний файл").unwrap();
+        let link = dir.join("Главы").join("link");
+        let st = Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&link).arg(&outside).status().unwrap();
+        assert!(st.success(), "не удалось создать junction");
+        let root = dir.join(BACKUP_DIR);
+        let name = make_backup(&dir, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        assert!(!root.join(&name).join("Главы").join("link").exists(), "копия не должна заходить в junction");
+    }
 }
