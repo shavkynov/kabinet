@@ -51,9 +51,9 @@ jobs:
           rustup default stable
           rustc -Vv
       - name: Тесты Rust (ядро — проекты, Яндекс Диск, синхронизация)
-        run: cargo test --manifest-path experiments/tauri-app/core/Cargo.toml
+        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
       - name: Сборка
-        run: cargo build --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+        run: cargo build --locked --release --features tauri/custom-protocol --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
       - name: Пакет .app для macOS (ссылка kabinet:// после входа в Яндекс работает только из пакета)
         if: runner.os == 'macOS'
         run: |
