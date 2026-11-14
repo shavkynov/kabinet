@@ -40,6 +40,10 @@ pub struct Fs {
     pub hide_prefixes: std::collections::BTreeSet<String>,
     /// Отказ УДАЛЕНИЯ для путей с этими префиксами — точечный сбой одной операции.
     pub fail_delete_prefixes: std::collections::BTreeSet<String>,
+    /// Отказ выдачи upload-ссылки для путей с этими префиксами.
+    pub fail_upload_link_prefixes: std::collections::BTreeSet<String>,
+    /// Отказ метаданных файла для путей с этими префиксами (проверка сохранения после PUT).
+    pub fail_meta_prefixes: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Default)]
@@ -108,6 +112,7 @@ impl Http for FakeServer {
                     let page: Vec<_> = if f.empty_page_at == Some(off) { vec![] } else { items.into_iter().skip(off).take(page_size).collect() };
                     js(serde_json::json!({ "type": "dir", "_embedded": { "total": total, "items": page } }))
                 } else if let Some((d, _)) = f.files.get(&path) {
+                    if f.fail_meta_prefixes.iter().any(|x| path.starts_with(x)) { return r(500, vec![]); }
                     js(serde_json::json!({ "type": "file", "size": d.len(), "md5": format!("{:x}", md5::compute(d)) }))
                 } else { r(404, vec![]) }
             }
@@ -120,8 +125,16 @@ impl Http for FakeServer {
             }
             ("cloud-api.yandex.net", "GET", "/v1/disk/resources/upload") => {
                 let parent = path.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
+                if f.fail_upload_link_prefixes.iter().any(|x| path.starts_with(x)) { return r(500, vec![]); }
                 if !parent.is_empty() && !f.dirs.contains(&parent) { return r(409, vec![]); }
-                if f.files.contains_key(&path) && q.get("overwrite").map(|v| v == "false").unwrap_or(false) { return r(409, vec![]); }
+                if f.files.contains_key(&path) && q.get("overwrite").map(|v| v == "false").unwrap_or(false) {
+                    // подтверждённый конфликт существующего ресурса — структурированный код ошибки API
+                    return Ok(Resp { status: 409, body: serde_json::json!({
+                        "error": "DiskResourceAlreadyExistsError",
+                        "message": "Ресурс уже существует.",
+                        "description": "Ресурс уже существует."
+                    }).to_string().into_bytes(), location: None });
+                }
                 js(serde_json::json!({ "href": format!("https://uploader.yandex.net/put?p={}", enc(&path)) }))
             }
             ("uploader.yandex.net", "PUT", _) => {

@@ -20,6 +20,13 @@ pub trait Remote: Send {
     fn create(&mut self, _rel: &str, _bytes: &[u8]) -> R<()> {
         Err("Создание без перезаписи не поддерживается этим хранилищем.".into())
     }
+    /// Создать файл, только если его ещё нет, с ЯВНОЙ классификацией результата:
+    /// `Ok(true)` — создание подтверждено; `Ok(false)` — подтверждён конфликт существующего ресурса;
+    /// `Err` — другой отказ либо результат не подтверждён. Нужен там, где «имя занято» и «сбой»
+    /// нельзя смешивать (взятие замка). По умолчанию — явная ошибка, а не угадывание.
+    fn create_if_absent(&mut self, _rel: &str, _bytes: &[u8]) -> R<bool> {
+        Err("Создание с классификацией конфликта не поддерживается этим хранилищем.".into())
+    }
     fn remove(&mut self, rel: &str) -> R<()>;
     fn mkdir(&mut self, rel: &str) -> R<()>;
 }
@@ -35,6 +42,7 @@ impl Remote for Box<dyn Folder> {
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { (**self).read(rel) }
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { (**self).write(rel, bytes) }
     fn create(&mut self, rel: &str, bytes: &[u8]) -> R<()> { (**self).create(rel, bytes) }
+    fn create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> R<bool> { (**self).create_if_absent(rel, bytes) }
     fn remove(&mut self, rel: &str) -> R<()> { (**self).remove(rel) }
     fn mkdir(&mut self, rel: &str) -> R<()> { (**self).mkdir(rel) }
 }

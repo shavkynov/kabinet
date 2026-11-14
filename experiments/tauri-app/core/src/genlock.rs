@@ -85,7 +85,9 @@ pub fn try_acquire(remote: &mut impl Remote, device: &str, token: &str, ttl_ms: 
             }
             Ok(false)
         }
-        None => Ok(remote.create(LOCK_FILE, &body(device, token)).is_ok()),
+        // Замка нет в списке: создаём. Подтверждённый конфликт имени — «занято» (false),
+        // любой другой отказ — ошибка, а не догадка «занято».
+        None => remote.create_if_absent(LOCK_FILE, &body(device, token)),
     }
 }
 
@@ -230,6 +232,32 @@ mod tests {
         let msg = try_acquire(&mut b, "B", "tok-b", 100_000).unwrap_err();
         assert!(msg.contains("список"), "первичная ошибка списка сохранена: {msg}");
         assert!(msg.contains("пробу"), "ошибка очистки тоже сообщена: {msg}");
+    }
+
+    /// L1b: замок есть в папке, но не в списке — подтверждённый конфликт создания → Ok(false).
+    #[test]
+    fn missing_lock_with_confirmed_conflict_is_not_acquired() {
+        let s = FakeServer::new();
+        let mut d = remote(&s);
+        assert!(d.create_if_absent("kabinet.lock", b"{\"device\":\"A\",\"token\":\"tok-a\"}").unwrap());
+        s.0.lock().unwrap().hide.insert("/Кабинет/Роман/kabinet.lock".to_string());
+        let mut b = remote(&s);
+        assert!(!try_acquire(&mut b, "B", "tok-b", 100_000).unwrap(), "подтверждённый конфликт — замок не наш");
+        let log = s.0.lock().unwrap().log.clone();
+        assert!(log.iter().any(|l| l.starts_with("DELETE /Кабинет/Роман/kabinet.probe.")), "своя проба прошла: {log:?}");
+    }
+
+    /// L1b: отказ создания LOCK_FILE — Err, а не «занято» (старая ветка `.is_ok()` давала Ok(false)).
+    #[test]
+    fn missing_lock_create_failure_is_error_not_busy() {
+        let s = FakeServer::new();
+        let mut d = remote(&s);
+        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/kabinet.lock".to_string());
+        let res = try_acquire(&mut d, "A", "tok-a", 100_000);
+        let log = s.0.lock().unwrap().log.clone();
+        assert!(res.is_err(), "отказ создания замка — Err, не Ok(false)");
+        assert!(log.iter().any(|l| l.starts_with("DELETE /Кабинет/Роман/kabinet.probe.")), "своя проба перед этим прошла: {log:?}");
+        assert!(s.get("Кабинет/Роман/kabinet.lock").is_none(), "замок не создан");
     }
 
     /// L1.6: штатный сценарий — своя проба создаётся, читается и убирается.

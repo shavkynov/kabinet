@@ -32,6 +32,16 @@ fn fail(status: u16) -> YErr {
     YErr { status, msg }
 }
 
+/// Подтверждённый конфликт существующего целевого ресурса: распознаётся ТОЛЬКО по структурированному
+/// коду ошибки API (`error`), без анализа локализованного текста, статуса «сам по себе» или подстрок.
+/// Если код не распознан — `false`, и вызывающий обязан вернуть `Err`, а не «занято».
+fn is_existing_resource_conflict(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(|s| s.to_string()))
+        .as_deref() == Some("DiskResourceAlreadyExistsError")
+}
+
 struct Sent { status: u16, data: Value }
 
 pub struct YandexDisk<H: Http> {
@@ -199,6 +209,53 @@ impl<H: Http> YandexDisk<H> {
         Err(plain("Яндекс ещё не подтвердил сохранение файла. Синхронизация будет повторена."))
     }
 
+    /// Создать файл, только если его ещё нет, с классификацией результата:
+    /// `Ok(true)` — создание подтверждено чтением содержимого; `Ok(false)` — подтверждён конфликт
+    /// существующего ресурса; `Err` — иной отказ (родитель, upload-ссылка, PUT, проверка) либо
+    /// результат не подтверждён.
+    fn do_create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> Result<bool, YErr> {
+        let p = parts(rel)?;
+        if p.is_empty() { return Err(plain("Не указан файл.")); }
+        self.ensure(&p[..p.len() - 1].join("/"))?;
+        let path = self.disk_path(rel)?;
+        let (status, body) = self.send_raw("GET", "/resources/upload", &[("path", &path), ("overwrite", "false")])?;
+        if status == 409 {
+            return if is_existing_resource_conflict(&body) { Ok(false) } else { Err(fail(409)) };
+        }
+        if !(200..300).contains(&status) { return Err(fail(status)); }
+        let data: Value = serde_json::from_slice(&body).map_err(|_| plain("Некорректный ответ Яндекс Диска."))?;
+        let href = data["href"].as_str().ok_or_else(|| plain("Яндекс не выдал ссылку для загрузки."))?;
+        let res = self.http.request(Req {
+            method: "PUT".into(), url: transfer_url(href)?,
+            headers: vec![("Content-Type".into(), "application/octet-stream".into())], body: Some(bytes.to_vec()),
+        }).map_err(|_| plain("Не удалось передать файл Яндекс Диску."))?;
+        if res.status == 409 {
+            return if is_existing_resource_conflict(&res.body) { Ok(false) } else { Err(fail(409)) };
+        }
+        if !(200..300).contains(&res.status) { return Err(fail(res.status)); }
+        let want = format!("{:x}", md5::compute(bytes));
+        for _ in 0..20 {
+            if let Some(c) = self.meta(&path, true)? {
+                if c.data["type"] == "file" && c.data["md5"] == want.as_str() { return Ok(true); }
+            }
+            std::thread::sleep(self.pause);
+        }
+        Err(plain("Яндекс ещё не подтвердил сохранение файла. Синхронизация будет повторена."))
+    }
+
+    /// Как `send`, но НЕ превращает не-2xx в ошибку и отдаёт тело: нужно, чтобы отличить
+    /// подтверждённый конфликт существующего ресурса от прочих отказов по коду ответа.
+    fn send_raw(&self, method: &str, suffix: &str, query: &[(&str, &str)]) -> Result<(u16, Vec<u8>), YErr> {
+        if now_ms() >= self.expires_at { return Err(fail(401)); }
+        let mut q = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in query { q.append_pair(k, v); }
+        let res = self.http.request(Req {
+            method: method.into(), url: format!("{}{}?{}", API, suffix, q.finish()),
+            headers: vec![("Authorization".into(), format!("OAuth {}", self.token))], body: None,
+        }).map_err(|_| plain("Нет связи с Яндекс Диском."))?;
+        Ok((res.status, res.body))
+    }
+
     fn do_remove(&mut self, rel: &str) -> Result<(), YErr> {
         if parts(rel)?.is_empty() { return Err(plain("Удаление корня запрещено.")); }
         let Some(res) = self.send("DELETE", "/resources", &[("path", &self.disk_path(rel)?)], true)? else { return Ok(()) };
@@ -226,6 +283,7 @@ impl<H: Http> Remote for YandexDisk<H> {
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { Ok(self.do_read(rel)?) }
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { Ok(self.do_write(rel, bytes)?) }
     fn create(&mut self, rel: &str, bytes: &[u8]) -> R<()> { Ok(self.do_create(rel, bytes)?) }
+    fn create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> R<bool> { Ok(self.do_create_if_absent(rel, bytes)?) }
     fn remove(&mut self, rel: &str) -> R<()> { Ok(self.do_remove(rel)?) }
     fn mkdir(&mut self, rel: &str) -> R<()> { Ok(self.ensure(rel)?) }
 }
@@ -333,6 +391,82 @@ mod tests {
         // обычная запись перезаписывает
         d.write("Главы/б.md", "третий".as_bytes()).unwrap();
         assert_eq!(d.read("Главы/б.md").unwrap().unwrap(), "третий".as_bytes());
+    }
+
+    /// L1b: свободное имя — создание подтверждено, байты на месте.
+    #[test]
+    fn create_if_absent_creates_free_name() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        assert!(d.create_if_absent("a.txt", b"one").unwrap(), "свободное имя — создано");
+        assert_eq!(s.get("Кабинет/Роман/a.txt").unwrap(), b"one");
+    }
+
+    /// L1b: подтверждённо существующий ресурс — Ok(false), байты не изменены, перезаписи не было.
+    #[test]
+    fn create_if_absent_reports_existing_resource_without_overwrite() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        s.put("Кабинет/Роман/a.txt", b"old");
+        assert!(!d.create_if_absent("a.txt", b"new").unwrap(), "занятое имя — подтверждённый конфликт");
+        assert_eq!(s.get("Кабинет/Роман/a.txt").unwrap(), b"old", "существующие байты не изменены");
+        let log = s.0.lock().unwrap().log.clone();
+        assert!(!log.iter().any(|l| l == "PUT /Кабинет/Роман/a.txt"), "перезаписывающей загрузки не было: {log:?}");
+    }
+
+    /// L1b: отказ выдачи upload-ссылки — Err, не Ok(false).
+    #[test]
+    fn create_if_absent_link_error_is_not_conflict() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        s.0.lock().unwrap().fail_upload_link_prefixes.insert("/Кабинет/Роман/c.txt".to_string());
+        assert!(d.create_if_absent("c.txt", b"x").is_err(), "отказ ссылки — Err, не «занято»");
+        assert!(s.get("Кабинет/Роман/c.txt").is_none());
+    }
+
+    /// L1b: отказ подготовки родительского пути — Err, не Ok(false).
+    #[test]
+    fn create_if_absent_parent_prepare_error_is_not_conflict() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        s.0.lock().unwrap().fail_mkdir_paths.insert("/Кабинет/Роман/sub".to_string());
+        assert!(d.create_if_absent("sub/d.txt", b"x").is_err(), "отказ подготовки родителя — Err");
+    }
+
+    /// L1b: отказ PUT — Err, не Ok(false).
+    #[test]
+    fn create_if_absent_put_error_is_not_conflict() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/e1.txt".to_string());
+        assert!(d.create_if_absent("e1.txt", b"x").is_err(), "отказ PUT — Err");
+        assert!(s.get("Кабинет/Роман/e1.txt").is_none());
+    }
+
+    /// L1b: загрузка принята, но результат не подтверждён — Err, не Ok(false).
+    #[test]
+    fn create_if_absent_unconfirmed_result_is_error() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d = crate::testutil::dav_on(&s, "/Кабинет/Роман");
+        d.ensure_root().unwrap();
+        s.0.lock().unwrap().fail_meta_prefixes.insert("/Кабинет/Роман/e2.txt".to_string());
+        assert!(d.create_if_absent("e2.txt", b"x").is_err(), "неподтверждённый результат — Err, не «занято»");
+    }
+
+    /// L1b: делегирование через Box<dyn Folder> не теряет результат.
+    #[test]
+    fn create_if_absent_delegates_through_boxed_folder() {
+        let s = crate::testutil::FakeServer::new();
+        let mut d: Box<dyn Folder> = Box::new(crate::testutil::dav_on(&s, "/Кабинет/Роман"));
+        d.ensure_root().unwrap();
+        assert!(d.create_if_absent("g.txt", b"g").unwrap(), "делегирование сохраняет true");
+        assert!(!d.create_if_absent("g.txt", b"g2").unwrap(), "делегирование сохраняет false");
+        assert_eq!(s.get("Кабинет/Роман/g.txt").unwrap(), b"g");
     }
 
     #[test]
