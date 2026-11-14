@@ -252,102 +252,57 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
 
   const labelOf = (rel) => (rel.includes('/') ? path.basename(rel, path.extname(rel)) : rel);
 
-  const META_LISTS = [
-    ['chapters', 'Главы', 'md'], ['characters', 'Персонажи', 'json'], ['places', 'Места', 'json'],
-    ['items', 'Предметы', 'json'], ['notes', 'Заметки', 'md'],
-  ];
-  const ID_RE = /^[a-z0-9]{6,32}$/;
-  const isMeta = (m) => !!m && typeof m === 'object' && !Array.isArray(m) && Array.isArray(m.chapters);
-  const asText = (bytes) => Buffer.from(bytes).toString('utf8');
-
-  /** Сохраняем вытесненную локальную структуру в «Конфликты» и в папке, как и любую чужую версию. */
+  /** Сохранить вытесняемую локальную версию в «Конфликты» и в папке. Ошибка папки не подавляется. */
   async function keepLocalCopy(rel, bytes, label) {
     const name = await freeConflictName(rel, label, 'было на этом устройстве', bytes, true);
     const relConflict = `${CONFLICT_DIR}/${name}`;
     const target = path.join(dir, relConflict);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     writeFileAtomic(target, Buffer.from(bytes));
-    try {
-      await adapter.mkdir(CONFLICT_DIR);
-      await adapter.write(relConflict, new Uint8Array(bytes));
-      state[relConflict] = hashBytes(bytes);
-    } catch (err) { console.error('local copy to folder:', err); }
+    await adapter.mkdir(CONFLICT_DIR);
+    await adapter.write(relConflict, new Uint8Array(bytes));
+    state[relConflict] = hashBytes(bytes);
     return name;
   }
 
   /**
-   * На первом соединении нет базового снимка для сравнения. Структуру из облака берём за основу, чтобы новый пустой
-   * проект на телефоне не заменил старый роман. Непустые локальные главы и локальные карточки добавляем; пустые главы
-   * нового проекта отбрасываем. Если локальная структура содержит авторскую работу, её исходный project.json и
-   * накопленная статистика сохраняются в «Конфликты» до объединения.
+   * Взять облако за основу при первом подключении к непустой папке: локальные версии, которые облако
+   * заменит или не содержит, сначала сохраняются в «Конфликты», затем папка скачивается целиком,
+   * а лишние локальные файлы убираются из проекта после подтверждённого сохранения их версий.
    */
-  async function adoptRemoteStructure(remote, local) {
-    const entry = remote.get('project.json');
-    let remoteRaw, remoteMeta, localMeta;
-    try {
-      remoteRaw = await remoteBytes(entry, 'project.json');
-      remoteMeta = JSON.parse(asText(remoteRaw));
-      localMeta = JSON.parse(asText(readLocal('project.json')));
-    } catch { return; }
-    if (!isMeta(remoteMeta) || !isMeta(localMeta)) return;
-
-    const merged = { ...remoteMeta };
-    const added = [];
-    const dropped = [];
-    for (const [list, folderName, ext] of META_LISTS) {
-      const base = Array.isArray(remoteMeta[list]) ? remoteMeta[list] : [];
-      const have = new Set(base.map((e) => e && e.id));
-      const extra = [];
-      for (const e of Array.isArray(localMeta[list]) ? localMeta[list] : []) {
-        if (!e || typeof e.id !== 'string' || !ID_RE.test(e.id) || have.has(e.id)) continue;
-        const rel = `${folderName}/${e.id}.${ext}`;
-        if (list === 'chapters') {
-          let text = '';
-          try { text = asText(readLocal(rel)); } catch { /* файла нет */ }
-          if (!text.trim()) { dropped.push(rel); continue; }
-        }
-        extra.push(e);
-        added.push(rel);
-      }
-      if (extra.length) merged[list] = [...base, ...extra];
+  async function takeCloudOnce() {
+    const remote = await walkRemote(adapter);
+    const local = walkLocal(dir);
+    const conflictPrefix = `${CONFLICT_DIR}/`;
+    const keep = [];
+    for (const [rel, hash] of local) {
+      if (rel.startsWith(conflictPrefix)) continue;
+      const there = remote.get(rel);
+      if (there && there.hash === hash) continue;
+      keep.push([rel, readLocal(rel)]);
     }
-    const baseTrash = Array.isArray(remoteMeta.trash) ? remoteMeta.trash : [];
-    const trashIds = new Set(baseTrash.map((e) => e && e.tid));
-    const trashExtra = (Array.isArray(localMeta.trash) ? localMeta.trash : []).filter((e) => e && typeof e.tid === 'string' && !trashIds.has(e.tid));
-    if (trashExtra.length) merged.trash = [...baseTrash, ...trashExtra];
-
-    const metaDiffers = JSON.stringify(remoteMeta) !== JSON.stringify(localMeta);
-    const hasLocalContent = added.length > 0 || trashExtra.length > 0
-      || Object.hasOwn(localMeta, 'words')
-      || (Array.isArray(localMeta.chapters) && localMeta.chapters.some((c) => {
-        if (!c || typeof c.id !== 'string') return false;
-        try { return !!asText(readLocal(`Главы/${c.id}.md`)).trim(); } catch { return false; }
-      }))
-      || ['characters', 'places', 'items', 'notes'].some((k) => Array.isArray(localMeta[k]) && localMeta[k].length > 0)
-      || (localMeta.name && localMeta.name !== '1' && localMeta.name !== 'Проект' && localMeta.name !== remoteMeta.name);
-    if (metaDiffers && hasLocalContent) {
-      await keepLocalCopy('project.json', readLocal('project.json'), 'project');
-      if (local.has('stats.json') && remote.has('stats.json') && remote.get('stats.json').hash !== local.get('stats.json')) {
-        await keepLocalCopy('stats.json', readLocal('stats.json'), 'stats');
+    for (const [rel, bytes] of keep) await keepLocalCopy(rel, bytes, labelOf(rel));
+    const after = walkLocal(dir);
+    for (const [rel, hash] of after) {
+      if (rel.startsWith(conflictPrefix)) continue;
+      if (local.get(rel) !== hash) throw new Error('Проект менялся во время подключения к папке. Ничего не перезаписано, повторите подключение.');
+    }
+    for (const rel of local.keys()) {
+      if (!rel.startsWith(conflictPrefix) && !after.has(rel)) {
+        throw new Error('Проект менялся во время подключения к папке. Ничего не перезаписано, повторите подключение.');
       }
     }
-
-    for (const rel of dropped) {
-      try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
-      local.delete(rel);
+    await importAllOnce();
+    for (const [rel, hash] of local) {
+      if (rel.startsWith(conflictPrefix) || remote.has(rel)) continue;
+      let nowHash = null;
+      try { nowHash = hashBytes(readLocal(rel)); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+      if (nowHash !== null && nowHash !== hash) {
+        throw new Error(`Файл «${rel}» изменился во время подключения. Он не удалён; повторите подключение.`);
+      }
+      fs.rmSync(path.join(dir, rel), { force: true });
     }
-    const out = added.length || trashExtra.length ? Buffer.from(JSON.stringify(merged, null, 2), 'utf8') : Buffer.from(remoteRaw);
-    writeFileAtomic(path.join(dir, 'project.json'), out);
-    local.set('project.json', hashBytes(new Uint8Array(out)));
-    // База — версия из облака; объединённые локальные записи уйдут наружу следующим обычным проходом.
-    state['project.json'] = entry.hash;
-
-    if (local.has('stats.json') && remote.has('stats.json') && remote.get('stats.json').hash !== local.get('stats.json')) {
-      const statsRaw = await remoteBytes(remote.get('stats.json'), 'stats.json');
-      writeFileAtomic(path.join(dir, 'stats.json'), Buffer.from(statsRaw));
-      local.set('stats.json', remote.get('stats.json').hash);
-      state['stats.json'] = remote.get('stats.json').hash;
-    }
+    return keep.length;
   }
 
   /** Один проход: что снаружи — к нам, что у нас — наружу. Возвращает списки изменений. */
@@ -362,12 +317,6 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     const hasRoot = [...remote.keys()].some((k) => ROOT_FILES.test(k));
     if (hadRoot && !hasRoot) {
       throw new Error('В папке не видно файлов проекта (облако не отвечает или папка пуста). Синхронизация остановлена, ничего не удалено.');
-    }
-
-    // Первый проход двух независимых проектов: у них пока нет общей истории проекта.
-    if (state['project.json'] === undefined && remote.has('project.json') && local.has('project.json')
-      && remote.get('project.json').hash !== local.get('project.json')) {
-      await adoptRemoteStructure(remote, local);
     }
 
     const rels = [...new Set([...remote.keys(), ...local.keys(), ...Object.keys(state)])]
@@ -576,6 +525,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     sync: () => serial(syncOnce),
     push: (rels) => serial(() => pushOnce(rels)),
     replaceAll: () => serial(replaceAllOnce),
+    takeCloud: () => serial(takeCloudOnce),
     importAll: () => serial(importAllOnce),
     exportAll: () => serial(exportAllOnce),
     hasProject,

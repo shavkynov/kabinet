@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | Сохранение главы (атомарно) | `folder.js`/`writeFileAtomic` | `store::write_atomic` + `syncguard` | `tests/syncguard_guard.rs`, тесты `store` | тест |
 | Ошибка чтения ≠ «пусто» | — | `syncguard::guard_write_at_with_read` (№ 3) | `caller_save_stops_and_keeps_known_hash_*` | тест |
-| Пустота глав при переносе структуры | — | `foldersync::read_local_opt` (№ 4) | `unreadable_chapter_is_not_treated_as_empty_in_adopt` | тест |
+| Первое подключение к непустой папке | `folder.js::takeCloud` | `foldersync::take_cloud`, режим `attach` `cloud` (№ 4 закрыт) | `take_cloud_replaces_local_project_and_keeps_local_versions`, `take_cloud_leaves_identical_files_alone`, `take_cloud_stops_when_conflict_copy_fails`, `attach_cloud_choice_takes_cloud_and_keeps_local_version`; JS `folder-first-merge` (4) | тест |
 | Статистика без затирания оригинала | — | `stats::read_days_strict` + `sync_save_lock` (№ 9) | `set_day_words_*` (3 теста) | тест |
 | Резервные копии | `backup.js` | `backup::make_backup` (№ 7) | `backup_detects_binary_change_*`, `backup_does_not_follow_directory_junctions` | тест |
 | Проверка целостности копии | нет | `backup::verify_backup` (№ 7) | `backup_verification_detects_corruption_and_missing_signature` | тест |

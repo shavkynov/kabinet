@@ -202,9 +202,6 @@ pub struct FolderSync<T: Remote> {
     cancel: Option<Arc<AtomicBool>>,
 }
 
-fn text(b: &[u8]) -> String { String::from_utf8_lossy(b).to_string() }
-fn is_meta(v: &Value) -> bool { v.as_object().map(|o| o.get("chapters").map(|c| c.is_array()).unwrap_or(false)).unwrap_or(false) }
-fn arr<'a>(v: &'a Value, k: &str) -> &'a [Value] { v.get(k).and_then(|x| x.as_array()).map(|x| x.as_slice()).unwrap_or(&[]) }
 fn label_of(rel: &str) -> String { if rel.contains('/') { stem(rel) } else { rel.to_string() } }
 
 impl<T: Remote> FolderSync<T> {
@@ -293,16 +290,6 @@ impl<T: Remote> FolderSync<T> {
     pub fn state(&self) -> BTreeMap<String, String> { self.state.clone() }
 
     fn read_local(&self, rel: &str) -> R<Vec<u8>> { fs::read(self.dir.join(rel)).map_err(|e| format!("{}: {}", rel, e)) }
-
-    /// Отличие отсутствия от ошибки чтения: `Ok(None)` — файла нет (NotFound), `Err` — ошибка доступа/ввода.
-    /// Ошибку нельзя превращать в «пустоту»: нечитаемая глава не должна выпадать из слияния или удаляться.
-    fn read_local_opt(&self, rel: &str) -> R<Option<Vec<u8>>> {
-        match fs::read(self.dir.join(rel)) {
-            Ok(b) => Ok(Some(b)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(format!("{}: {}", rel, e)),
-        }
-    }
 
     /// Хэш локального файла на диске; None, если файла уже нет. Позволяет заметить сохранение,
     /// случившееся после walk_local, но до обработки файла в проходе.
@@ -428,132 +415,6 @@ impl<T: Remote> FolderSync<T> {
 
     fn keep_foreign(&mut self, rel: &str, bytes: &[u8], label: &str) -> R<String> { self.keep(rel, bytes, label, "с другого устройства") }
 
-    fn adopt_remote_structure(&mut self, remote: &mut BTreeMap<String, RemoteEntry>, local: &mut BTreeMap<String, String>) -> R<()> {
-        let mut entry = remote.remove("project.json").unwrap();
-        let entry_hash = entry.hash.clone();
-        let remote_raw = self.remote_bytes(&mut entry, "project.json");
-        remote.insert("project.json".into(), entry);
-        let Ok(remote_raw) = remote_raw else { return Ok(()) };
-        let (Ok(remote_meta), Ok(local_raw)) = (serde_json::from_slice::<Value>(&remote_raw), self.read_local("project.json")) else { return Ok(()) };
-        let Ok(local_meta) = serde_json::from_slice::<Value>(&local_raw) else { return Ok(()) };
-        if !is_meta(&remote_meta) || !is_meta(&local_meta) { return Ok(()); }
-
-        let id_re = Regex::new(r"^[a-z0-9]{6,32}$").unwrap();
-        let lists = [("chapters", "Главы", "md"), ("characters", "Персонажи", "json"), ("places", "Места", "json"), ("items", "Предметы", "json"), ("notes", "Заметки", "md")];
-        let mut merged = remote_meta.as_object().unwrap().clone();
-        let mut added: Vec<String> = vec![];
-        let mut dropped: Vec<String> = vec![];
-        for (list, folder, ext) in lists {
-            let base = arr(&remote_meta, list).to_vec();
-            let have: BTreeSet<String> = base.iter().filter_map(|e| e.get("id").and_then(|x| x.as_str()).map(String::from)).collect();
-            let mut extra = vec![];
-            for e in arr(&local_meta, list) {
-                let Some(id) = e.get("id").and_then(|x| x.as_str()) else { continue };
-                if !id_re.is_match(id) || have.contains(id) { continue; }
-                let rel = format!("{}/{}.{}", folder, id, ext);
-                if list == "chapters" {
-                    // Пустота — только по успешно прочитанному файлу. Ошибку чтения нельзя принимать
-                    // за пустоту: иначе нечитаемая глава выпадет из слияния и её текст останется без ссылки.
-                    let empty = match self.read_local_opt(&rel) {
-                        Ok(Some(b)) => text(&b).trim().is_empty(),
-                        Ok(None) => false, // файла нет — отдельный безопасный случай, ссылку сохраняем
-                        Err(e) => return Err(format!(
-                            "Не удалось прочитать главу «{}» при слиянии структуры: {}. Слияние остановлено, чтобы не потерять текст.",
-                            rel, e
-                        )),
-                    };
-                    if empty { dropped.push(rel); continue; }
-                }
-                extra.push(e.clone());
-                added.push(rel);
-            }
-            if !extra.is_empty() { let mut all = base; all.extend(extra); merged.insert(list.into(), Value::Array(all)); }
-        }
-        let base_trash = arr(&remote_meta, "trash").to_vec();
-        let trash_ids: BTreeSet<String> = base_trash.iter().filter_map(|e| e.get("tid").and_then(|x| x.as_str()).map(String::from)).collect();
-        let trash_extra: Vec<Value> = arr(&local_meta, "trash").iter()
-            .filter(|e| e.get("tid").and_then(|x| x.as_str()).map(|t| !trash_ids.contains(t)).unwrap_or(false)).cloned().collect();
-        if !trash_extra.is_empty() { let mut all = base_trash; all.extend(trash_extra.iter().cloned()); merged.insert("trash".into(), Value::Array(all)); }
-
-        let meta_differs = remote_meta != local_meta;
-        let has_local_content = !added.is_empty() || !trash_extra.is_empty()
-            || local_meta.get("words").is_some()
-            || arr(&local_meta, "chapters").iter().any(|c| c.get("id").and_then(|x| x.as_str())
-                .map(|id| match self.read_local_opt(&format!("Главы/{}.md", id)) {
-                    Ok(Some(b)) => !text(&b).trim().is_empty(),
-                    Ok(None) => false,
-                    // Ошибка чтения: считаем, что содержимое может быть, и сохраняем копию project.json.
-                    Err(_) => true,
-                }).unwrap_or(false))
-            || ["characters", "places", "items", "notes"].iter().any(|k| !arr(&local_meta, k).is_empty())
-            || local_meta.get("name").and_then(|x| x.as_str()).map(|n| !n.is_empty() && n != "1" && n != "Проект" && Some(n) != remote_meta.get("name").and_then(|x| x.as_str())).unwrap_or(false);
-        if meta_differs && has_local_content {
-            self.keep("project.json", &local_raw, "project", "было на этом устройстве")?;
-            if local.contains_key("stats.json") && remote.get("stats.json").map(|e| Some(&e.hash) != local.get("stats.json")).unwrap_or(false) {
-                let raw = self.read_local("stats.json")?;
-                self.keep("stats.json", &raw, "stats", "было на этом устройстве")?;
-            }
-        }
-        for rel in &dropped {
-            // Глава была пустой при чтении, но за время прохода (сеть выше) в неё могли напечатать текст.
-            let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-            let still_empty = match self.read_local_opt(rel) {
-                Ok(Some(b)) => text(&b).trim().is_empty(),
-                Ok(None) => true, // файла уже нет: удалять нечего, это не ошибка данных
-                Err(e) => return Err(format!(
-                    "Не удалось прочитать главу «{}» перед удалением: {}. Удаление остановлено, чтобы не потерять текст.",
-                    rel, e
-                )),
-            };
-            if still_empty {
-                match fs::remove_file(self.dir.join(rel)) {
-                    Ok(()) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(format!("Не удалось удалить пустую главу «{}»: {}. Удаление остановлено.", rel, e)),
-                }
-                local.remove(rel);
-            }
-        }
-        let out = if !added.is_empty() || !trash_extra.is_empty() { serde_json::to_string_pretty(&Value::Object(merged)).unwrap().into_bytes() } else { remote_raw };
-        // Локальную мету могли сохранить за время прохода (сеть выше). Пишем результат, только если файл не менялся
-        // с момента чтения; иначе эту версию тоже кладём в «Конфликты» (сеть — вне замка) и проверяем снова.
-        let mut seen = local_raw.clone();
-        let mut attempts = 0;
-        loop {
-            {
-                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                let fresh = self.read_local("project.json")?;
-                if fresh == seen {
-                    self.write_local("project.json", &out)?;
-                    break;
-                }
-                seen = fresh;
-            }
-            attempts += 1;
-            if attempts >= 3 {
-                return Err("Проект менялся во время первой синхронизации. Ничего не удалено, повторим при следующем проходе.".into());
-            }
-            self.keep("project.json", &seen, "project", "было на этом устройстве")?;
-        }
-        local.insert("project.json".into(), hash_bytes(&out));
-        self.state.insert("project.json".into(), entry_hash);
-
-        if local.contains_key("stats.json") && remote.get("stats.json").map(|e| Some(&e.hash) != local.get("stats.json")).unwrap_or(false) {
-            let mut e = remote.remove("stats.json").unwrap();
-            let raw = self.remote_bytes(&mut e, "stats.json");
-            let h = e.hash.clone();
-            remote.insert("stats.json".into(), e);
-            {
-                // Сериализуем со статистикой окна (set_day_words): их read–modify–write не должен пересекаться.
-                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                self.write_local("stats.json", &raw?)?;
-            }
-            local.insert("stats.json".into(), h.clone());
-            self.state.insert("stats.json".into(), h);
-        }
-        Ok(())
-    }
-
     /// Один проход: что снаружи — к нам, что у нас — наружу.
     pub fn sync(&mut self) -> R<SyncResult> {
         self.ensure_not_cancelled()?;
@@ -570,11 +431,6 @@ impl<T: Remote> FolderSync<T> {
         if had_root && !has_root {
             return Err("В папке не видно файлов проекта (облако не отвечает или папка пуста). Синхронизация остановлена, ничего не удалено.".into());
         }
-        if !self.state.contains_key("project.json") && remote.contains_key("project.json") && local.contains_key("project.json")
-            && Some(&remote["project.json"].hash) != local.get("project.json") {
-            self.adopt_remote_structure(&mut remote, &mut local)?;
-        }
-
         let rels: BTreeSet<String> = remote.keys().chain(local.keys()).chain(self.state.keys()).filter(|r| is_syncable(r)).cloned().collect();
         let vanished = rels.iter().filter(|r| self.state.contains_key(*r) && !remote.contains_key(*r) && local.get(*r) == self.state.get(*r)).count();
         let tracked = self.state.keys().filter(|r| is_syncable(r)).count();
@@ -764,6 +620,56 @@ impl<T: Remote> FolderSync<T> {
         }
         self.export_all()?;
         Ok(hidden)
+    }
+
+    /// Взять облачный проект за основу при первом подключении к непустой папке.
+    /// Локальные версии, которые облако заменит или не содержит, сначала сохраняются в «Конфликты»
+    /// (локально и в папке). Затем облако скачивается целиком, а лишние локальные файлы убираются
+    /// из проекта — только после того, как их версии подтверждённо сохранены.
+    pub fn take_cloud(&mut self) -> R<usize> {
+        self.ensure_not_cancelled()?;
+        let remote = walk_remote(&mut self.remote, None)?;
+        let local = walk_local(&self.dir)?;
+        // Сначала читаем все вытесняемые версии: ошибка чтения останавливает операцию до любых изменений.
+        let mut keep: Vec<(String, Vec<u8>)> = vec![];
+        for (rel, lh) in &local {
+            if rel.starts_with(&format!("{}/", CONFLICT_DIR)) { continue; }
+            let differs = match remote.get(rel) { Some(e) => &e.hash != lh, None => true };
+            if differs { keep.push((rel.clone(), self.read_local(rel)?)); }
+        }
+        for (rel, bytes) in &keep {
+            self.keep(rel, bytes, &label_of(rel), "было на этом устройстве")?;
+        }
+        // Пока шли сетевые чтения, в проект могли сохранить текст. Не перезаписываем его вслепую.
+        let after = walk_local(&self.dir)?;
+        let conflict_prefix = format!("{}/", CONFLICT_DIR);
+        let changed = after.iter().any(|(rel, h)| !rel.starts_with(&conflict_prefix) && local.get(rel) != Some(h))
+            || local.keys().any(|rel| !rel.starts_with(&conflict_prefix) && !after.contains_key(rel));
+        if changed {
+            return Err("Проект менялся во время подключения к папке. Ничего не перезаписано, повторите подключение.".into());
+        }
+        self.import_all()?;
+        // Облако уже скачано; лишние локальные файлы убираем, только если их содержимое не изменилось
+        // с момента снимка (иначе поздняя правка потерялась бы).
+        for (rel, lh) in &local {
+            if rel.starts_with(&conflict_prefix) || remote.contains_key(rel) { continue; }
+            match self.local_hash(rel) {
+                Ok(Some(h)) if &h != lh => {
+                    return Err(format!("Файл «{}» изменился во время подключения. Он не удалён; повторите подключение.", rel));
+                }
+                Ok(_) => {}
+                Err(e) => return Err(format!("Не удалось перечитать «{}» перед удалением: {}. Файл не удалён.", rel, e)),
+            }
+            match fs::remove_file(self.dir.join(rel)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!(
+                    "Не удалось убрать локальный файл «{}» после сохранения его версии в «Конфликты»: {}. Файл не удалён, повторите подключение.",
+                    rel, e
+                )),
+            }
+        }
+        Ok(keep.len())
     }
 
     pub fn has_project(&mut self) -> R<bool> {
@@ -1293,129 +1199,66 @@ mod tests {
         assert_eq!(s.0.lock().unwrap().log.iter().filter(|l| l.starts_with("GET")).count(), 0);
     }
 
+    /// «Взять облако»: локальные версии вытесняются, но сначала сохраняются в «Конфликты».
     #[test]
-    fn first_connection_adopts_cloud_structure_and_keeps_authors_work() {
+    fn take_cloud_replaces_local_project_and_keeps_local_versions() {
         let s = FakeServer::new();
-        let a = tmpdir("a").join("p");
-        project(&a, &[("aaaaaa", "старый роман")]);
+        let a = tmpdir("tc-a").join("p");
+        project(&a, &[("aaaaaa", "облако")]);
         sync_of(&a, &s, "a").export_all().unwrap();
 
-        let b = tmpdir("b").join("p");
-        project(&b, &[("zzzzzz", ""), ("yyyyyy", "мой черновик")]);
+        let b = tmpdir("tc-b").join("p");
+        project(&b, &[("aaaaaa", "локально"), ("bbbbbb", "местная глава")]);
         let mut sb = sync_of(&b, &s, "b");
-        sb.sync().unwrap();
+        let kept = sb.take_cloud().unwrap();
+        assert_eq!(kept, 3, "project.json, вытесненная глава и лишняя местная глава");
+        assert_eq!(r(&b, "Главы/aaaaaa.md"), "облако", "основным стал облачный текст");
+        assert!(!b.join("Главы/bbbbbb.md").exists(), "лишняя глава убрана из проекта");
         let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
         let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["aaaaaa", "yyyyyy"]); // пустая новая глава отброшена, непустая добавлена
-        assert_eq!(r(&b, "Главы/aaaaaa.md"), "старый роман");
-        assert!(!b.join("Главы/zzzzzz.md").exists());
-        assert!(fs::read_dir(b.join("Конфликты")).unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains("было на этом устройстве")));
+        assert_eq!(ids, vec!["aaaaaa"], "структура проекта — из облака");
+        let local = local_conflicts(&b);
+        assert!(local.iter().any(|t| t.contains("локально")), "локальный текст сохранён в «Конфликты»: {local:?}");
+        assert!(local.iter().any(|t| t.contains("местная глава")), "лишняя глава сохранена в «Конфликты»: {local:?}");
+        assert!(local.iter().any(|t| t.contains("bbbbbb")), "локальная мета сохранена: {local:?}");
+        let remote = remote_conflicts(&s);
+        assert!(remote.iter().any(|t| t.contains("локально")) && remote.iter().any(|t| t.contains("местная глава")),
+            "копии видны и в папке: {remote:?}");
+        assert_eq!(sb.state.get("Главы/aaaaaa.md"), Some(&hash_bytes("облако".as_bytes())), "снимок указывает на облако");
     }
 
-    /// Ошибку чтения главы нельзя принимать за пустоту: иначе нечитаемая глава выпадет из слияния
-    /// и её текст останется без ссылки в проекте, а повторная проверка могла бы удалить файл.
-    /// Подмена файла каталогом даёт ошибку чтения, отличную от NotFound; это воспроизводимый
-    /// тест контракта, а не эквивалент всех ошибок доступа (см. карточку № 4 в ТЗ).
+    /// «Взять облако» при совпадающих файлах не создаёт лишних копий.
     #[test]
-    fn unreadable_chapter_is_not_treated_as_empty_in_adopt() {
+    fn take_cloud_leaves_identical_files_alone() {
         let s = FakeServer::new();
-        let a = tmpdir("adopt-read-err-a").join("p");
-        project(&a, &[("aaaaaa", "старый роман")]);
-        sync_of(&a, &s, "a").export_all().unwrap();
-
-        let b = tmpdir("adopt-read-err-b").join("p");
-        project(&b, &[("yyyyyy", "мой черновик")]);
-        let file = b.join("Главы/yyyyyy.md");
-        fs::remove_file(&file).unwrap();
-        fs::create_dir(&file).unwrap();
-        let meta_before = r(&b, "project.json");
-
-        let mut sb = sync_of(&b, &s, "b");
-        let res = sb.sync();
-        assert!(res.is_err(), "слияние с нечитаемой главой должно остановиться, а не считать главу пустой");
-        assert!(file.is_dir(), "файл не удалён: на его месте по-прежнему каталог");
-        assert_eq!(r(&b, "project.json"), meta_before, "мета не должна потерять главу при ошибке чтения");
-    }
-
-    /// Отсутствие файла главы — отдельный безопасный случай: ссылку в мете сохраняем, за пустоту не считаем.
-    #[test]
-    fn adopt_keeps_chapter_reference_when_its_file_is_missing() {
-        let s = FakeServer::new();
-        let a = tmpdir("adopt-missing-a").join("p");
-        project(&a, &[("aaaaaa", "старый роман")]);
-        sync_of(&a, &s, "a").export_all().unwrap();
-
-        let b = tmpdir("adopt-missing-b").join("p");
-        project(&b, &[("yyyyyy", "черновик")]);
-        fs::remove_file(b.join("Главы/yyyyyy.md")).unwrap(); // файла нет, ссылка в мете осталась
-        let mut sb = sync_of(&b, &s, "b");
-        sb.sync().unwrap();
-        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
-        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-        assert!(ids.contains(&"yyyyyy"), "отсутствие файла не повод терять ссылку на главу: {ids:?}");
-        assert!(ids.contains(&"aaaaaa"));
-    }
-
-    /// Ошибка удаления пустой главы в adopt доходит до вызывающего кода; файл и мета не публикуются.
-    #[cfg(windows)]
-    #[test]
-    fn adopt_reports_failure_to_remove_empty_chapter() {
-        use std::os::windows::fs::OpenOptionsExt;
-        let s = FakeServer::new();
-        let a = tmpdir("adopt-del-err-a").join("p");
-        project(&a, &[("aaaaaa", "старый роман")]);
-        sync_of(&a, &s, "a").export_all().unwrap();
-
-        let b = tmpdir("adopt-del-err-b").join("p");
-        project(&b, &[("zzzzzz", "")]); // пустая глава, которой нет в облаке → adopt её удалит
-        let file = b.join("Главы/zzzzzz.md");
-        // Читать файл можно, удалить — нельзя: воспроизводимый отказ удаления без chmod.
-        let lock = fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
-        let mut sb = sync_of(&b, &s, "b");
-        let err = match sb.sync() {
-            Err(e) => e,
-            Ok(r) => panic!("ожидалась ошибка удаления, получено Ok: {:?}", r.pulled),
-        };
-        assert!(err.contains("Не удалось удалить пустую главу"), "ошибка именно от удаления в adopt, а не раньше: {}", err);
-        assert!(file.exists(), "файл пустой главы остался на месте");
-        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
-        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["zzzzzz"], "после отказа мета сохраняет свою главу и не публикует новую структуру: {ids:?}");
-
-        // После снятия блокировки повтор тем же объектом должен завершиться штатно.
-        drop(lock);
-        sb.sync().expect("повтор после снятия блокировки должен завершиться штатно");
-        assert!(!file.exists(), "пустая глава удалена при повторе");
-        assert!(b.join("Главы/aaaaaa.md").exists(), "облачная глава скачана при повторе");
-        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
-        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-        assert_eq!(ids, vec!["aaaaaa"], "облачная структура присутствует в локальной мете: {ids:?}");
-    }
-
-    /// Ветка `Err(_) => true` в `has_local_content`: нечитаемая глава уже есть в облаке (слияние её не читает),
-    /// мета отличается нейтральным полем — без защиты локальная копия project.json не сохранилась бы.
-    #[test]
-    fn has_local_content_keeps_project_copy_when_chapter_read_fails() {
-        let s = FakeServer::new();
-        let a = tmpdir("hlc-a").join("p");
+        let a = tmpdir("tc-same-a").join("p");
         project(&a, &[("aaaaaa", "текст")]);
         sync_of(&a, &s, "a").export_all().unwrap();
 
-        let b = tmpdir("hlc-b").join("p");
+        let b = tmpdir("tc-same-b").join("p");
         project(&b, &[("aaaaaa", "текст")]);
-        let mut meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
-        meta["neutralMarker"] = json!(1); // мета отличается, но это поле не входит в has_local_content
-        w(&b, "project.json", &serde_json::to_string_pretty(&meta).unwrap());
-        let file = b.join("Главы/aaaaaa.md");
-        fs::remove_file(&file).unwrap();
-        fs::create_dir(&file).unwrap(); // ошибка чтения возникает именно внутри has_local_content
-
         let mut sb = sync_of(&b, &s, "b");
-        let _ = sb.sync(); // дальнейшие шаги могут упереться в каталог на месте файла — это не предмет теста
-        let conflicts: Vec<String> = fs::read_dir(b.join("Конфликты"))
-            .map(|d| d.flatten().filter_map(|e| fs::read_to_string(e.path()).ok()).collect()).unwrap_or_default();
-        assert!(conflicts.iter().any(|t| t.contains("neutralMarker")),
-            "ошибка чтения в has_local_content должна сохранить локальную копию project.json: {:?}", conflicts);
+        assert_eq!(sb.take_cloud().unwrap(), 0);
+        assert!(!b.join("Конфликты").exists(), "копий нет: всё совпало");
+        assert_eq!(r(&b, "Главы/aaaaaa.md"), "текст");
+    }
+
+    /// Отказ сохранения конфликтной копии останавливает «взять облако» до перезаписи локального.
+    #[test]
+    fn take_cloud_stops_when_conflict_copy_fails() {
+        let s = FakeServer::new();
+        let a = tmpdir("tc-keep-a").join("p");
+        project(&a, &[("aaaaaa", "облако")]);
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("tc-keep-b").join("p");
+        project(&b, &[("aaaaaa", "локально")]);
+        s.0.lock().unwrap().fail_mkdir_paths.insert("/Кабинет/Роман/Конфликты".to_string());
+        let mut sb = sync_of(&b, &s, "b");
+        let res = sb.take_cloud();
+        assert!(res.is_err(), "отказ копии должен вернуть ошибку");
+        assert_eq!(r(&b, "Главы/aaaaaa.md"), "локально", "локальный текст не перезаписан");
+        assert!(r(&b, "project.json").contains("aaaaaa"));
     }
 
     /// stats.json синхронизируется как обычный файл: статистика с другого устройства не теряется.

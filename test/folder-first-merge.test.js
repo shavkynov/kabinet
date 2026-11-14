@@ -1,7 +1,7 @@
 'use strict';
-// Первое соединение проекта с папкой, где уже лежит другой проект (общей истории нет).
-// Раньше «Соединить» записывало в облако project.json нового проекта поверх настоящего, а главы из облака приходили на телефон
-// отдельными файлами и становились «Найденными главами». Здесь проверяется, что этого больше не происходит и ничего не теряется.
+// Первое подключение проекта к папке, где уже лежит другой проект (общей истории нет).
+// Явный выбор «взять облако»: проект из папки становится основным, а локальные версии
+// сохраняются в «Конфликты» и только после этого убираются из проекта. Ничего не теряется.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -57,9 +57,8 @@ function makeProject(dir, { name, chapters, extra = {} }) {
 
 const metaOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
 const chapterFiles = (dir) => fs.readdirSync(path.join(dir, 'Главы')).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort();
-// Именно такие файлы openProject добавляет в список как «Найденная глава»: файл есть, записи в project.json нет.
-const orphans = (dir) => { const known = new Set(metaOf(dir).chapters.map((c) => c.id)); return chapterFiles(dir).filter((id) => !known.has(id)); };
 const conflictNames = (nodes) => [...nodes.keys()].filter((k) => k.startsWith('Конфликты/') && !k.endsWith('.keep'));
+const conflictTexts = (dir) => fs.readdirSync(path.join(dir, 'Конфликты')).map((n) => fs.readFileSync(path.join(dir, 'Конфликты', n), 'utf8'));
 
 const BOOK = [
   { id: 'aaaaaa01', title: 'Начало', text: 'Текст первой главы.\n' },
@@ -76,131 +75,59 @@ async function cloudWithBook() {
   return { ext, desktop, original: utf8(ext.nodes.get('project.json')) };
 }
 
-test('новый пустой проект, соединённый с папкой, где лежит роман: структура облака не меняется, лишних глав нет', async () => {
+test('взять облако: проект из папки становится основным, локальные версии — в «Конфликты»', async () => {
   const { ext, original } = await cloudWithBook();
   const phone = tmp('phone');
   makeProject(phone, { name: '1', chapters: [{ id: 'bbbbbb01', title: 'Глава 1', text: '' }] });
 
   const sync = folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') });
-  const res = await sync.sync();
+  const kept = await sync.takeCloud();
 
   assert.equal(utf8(ext.nodes.get('project.json')), original, 'project.json в облаке не изменился ни на байт');
   for (const c of BOOK) assert.ok(utf8(ext.nodes.get(`Главы/${c.id}.md`)).includes(c.text.trim()), 'тексты глав в облаке целы');
   assert.deepEqual(metaOf(phone).chapters.map((c) => c.title), ['Начало', 'Середина', 'Финал'], 'на телефоне те же главы, что в облаке');
   assert.equal(metaOf(phone).name, 'Мой роман');
-  assert.deepEqual(orphans(phone), [], 'нет файлов глав без записи (будущих «Найденных глав»)');
+  assert.deepEqual(chapterFiles(phone), BOOK.map((c) => c.id).sort(), 'в проекте нет лишних глав');
   assert.ok(!ext.nodes.has('Главы/bbbbbb01.md'), 'пустая глава нового проекта в облако не уехала');
-  assert.deepEqual(conflictNames(ext.nodes), [], 'мусора в «Конфликтах» нет');
-  assert.deepEqual(res.conflicts.filter((x) => x === 'project.json'), []);
+  assert.ok(kept >= 2, 'сохранены локальная мета и глава');
+  const texts = conflictTexts(phone);
+  assert.ok(texts.some((t) => t.includes('bbbbbb01')), 'локальная мета сохранена в «Конфликты»');
+  assert.ok(conflictNames(ext.nodes).length >= 2, 'копии сохранены и в папке');
   for (const c of BOOK) assert.ok(fs.readFileSync(path.join(phone, 'Главы', `${c.id}.md`), 'utf8').includes(c.text.trim()));
 });
 
-test('проект со своим текстом: главы обеих сторон сохраняются, чужая структура остаётся основой', async () => {
-  const { ext } = await cloudWithBook();
+test('взять облако: текст со своего проекта не теряется и уходит в «Конфликты»', async () => {
+  const { ext, original } = await cloudWithBook();
   const phone = tmp('phone2');
-  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой рассказ', text: 'Живой текст с телефона.\n' }, { id: 'bbbbbb02', title: 'Глава 2', text: '' }] });
+  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой рассказ', text: 'Живой текст с телефона.\n' }] });
 
-  const res = await folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') }).sync();
+  await folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') }).takeCloud();
 
-  const titles = metaOf(phone).chapters.map((c) => c.title);
-  assert.deepEqual(titles, ['Начало', 'Середина', 'Финал', 'Мой рассказ'], 'главы облака впереди, непустая глава телефона добавлена, пустая отброшена');
-  assert.deepEqual(metaOf(phone).chapters.map((c) => c.title), metaOf(phone).chapters.map((c) => c.title));
-  assert.deepEqual(JSON.parse(utf8(ext.nodes.get('project.json'))).chapters.map((c) => c.title), titles, 'облако получило объединённый список');
-  assert.ok(utf8(ext.nodes.get('Главы/bbbbbb01.md')).includes('Живой текст с телефона'), 'текст телефона ушёл в облако');
-  assert.ok(fs.readFileSync(path.join(phone, 'Главы', 'bbbbbb01.md'), 'utf8').includes('Живой текст'), 'и остался на телефоне');
-  assert.deepEqual(orphans(phone), []);
-  assert.ok(!fs.existsSync(path.join(phone, 'Главы', 'bbbbbb02.md')), 'пустая глава удалена локально');
-  assert.equal(metaOf(phone).name, 'Мой роман');
-  const kept = conflictNames(ext.nodes).filter((k) => k.includes('было на этом устройстве'));
-  assert.equal(kept.length, 1, 'прежний project.json телефона сохранён в «Конфликты»');
-  assert.ok(kept[0].endsWith('.json'));
-  assert.equal(JSON.parse(utf8(ext.nodes.get(kept[0]))).name, 'Рассказ');
-  assert.ok(fs.readdirSync(path.join(phone, 'Конфликты')).some((n) => n.includes('было на этом устройстве')), 'и локально');
-  assert.deepEqual(res.pulled.sort(), res.pulled.sort());
+  assert.equal(utf8(ext.nodes.get('project.json')), original, 'облачный project.json не изменён');
+  assert.ok(!ext.nodes.has('Главы/bbbbbb01.md'), 'текст телефона не выгружен в облако: выбран вариант «взять облако»');
+  assert.deepEqual(chapterFiles(phone), BOOK.map((c) => c.id).sort(), 'в проекте остались только облачные главы');
+  const texts = conflictTexts(phone);
+  assert.ok(texts.some((t) => t.includes('Живой текст с телефона')), 'текст телефона сохранён в «Конфликты»');
+  assert.ok(texts.some((t) => t.includes('Рассказ')), 'прежняя мета телефона сохранена в «Конфликты»');
+  assert.ok(conflictNames(ext.nodes).some((k) => k.endsWith('.md')), 'и в папке есть копия главы');
 });
 
-test('повторная синхронизация после первого соединения ничего не меняет', async () => {
+test('взять облако при совпадающих файлах не создаёт копий', async () => {
   const { ext } = await cloudWithBook();
   const phone = tmp('phone3');
-  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой рассказ', text: 'Текст.\n' }] });
+  makeProject(phone, { name: 'Мой роман', chapters: BOOK });
   const sync = folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') });
-  await sync.sync();
-  const cloudBefore = utf8(ext.nodes.get('project.json'));
-  const localBefore = fs.readFileSync(path.join(phone, 'project.json'), 'utf8');
-  const second = await sync.sync();
-  assert.deepEqual(second.pushed, []);
-  assert.deepEqual(second.pulled, []);
-  assert.deepEqual(second.conflicts, []);
-  assert.equal(utf8(ext.nodes.get('project.json')), cloudBefore);
-  assert.equal(fs.readFileSync(path.join(phone, 'project.json'), 'utf8'), localBefore);
-  assert.deepEqual(orphans(phone), []);
+  assert.equal(await sync.takeCloud(), 0);
+  assert.ok(!fs.existsSync(path.join(phone, 'Конфликты')), 'копий нет: всё совпало');
 });
 
-test('второе устройство, подключившееся позже, получает то же самое и тоже без лишних глав', async () => {
-  const { ext } = await cloudWithBook();
+test('после «взять облако» обычный проход ничего не выгружает обратно', async () => {
+  const { ext, original } = await cloudWithBook();
   const phone = tmp('phone4');
-  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой рассказ', text: 'Текст.\n' }] });
-  await folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') }).sync();
-
-  const tablet = tmp('tablet');
-  makeProject(tablet, { name: '2', chapters: [{ id: 'cccccc01', title: 'Глава 1', text: '' }] });
-  await folder.createFolderSync(tablet, ext, { stateFile: stateIn(tablet, 's') }).sync();
-  assert.deepEqual(metaOf(tablet).chapters.map((c) => c.title), ['Начало', 'Середина', 'Финал', 'Мой рассказ']);
-  assert.deepEqual(orphans(tablet), []);
-});
-
-test('если project.json в облаке нельзя прочитать, действует прежнее правило: чужая версия уходит в «Конфликты»', async () => {
-  const ext = fakeFolder({ 'project.json': 'это не JSON', 'Главы/zzzzzz01.md': 'Текст.' });
-  const phone = tmp('phone5');
-  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой рассказ', text: 'Текст.\n' }] });
-  const res = await folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') }).sync();
-  assert.ok(res.conflicts.includes('project.json'));
-  assert.ok(conflictNames(ext.nodes).some((k) => utf8(ext.nodes.get(k)) === 'это не JSON'), 'испорченная версия сохранена, а не потеряна');
-  assert.equal(JSON.parse(utf8(ext.nodes.get('project.json'))).name, 'Рассказ');
-});
-
-test('когда общая история есть, правка структуры с двух сторон по-прежнему даёт конфликт', async () => {
-  const { ext } = await cloudWithBook();
-  const other = tmp('other');
-  const a = folder.createFolderSync(other, ext, { stateFile: stateIn(other, 's') });
-  await a.importAll();
-
-  const edited = JSON.parse(utf8(ext.nodes.get('project.json')));
-  edited.chapters[0].title = 'Облачное название';
-  ext.nodes.set('project.json', bytes(JSON.stringify(edited, null, 2)));
-  const mine = metaOf(other);
-  mine.chapters[0].title = 'Своё название';
-  fs.writeFileSync(path.join(other, 'project.json'), JSON.stringify(mine, null, 2));
-
-  const res = await a.sync();
-  assert.ok(res.conflicts.includes('project.json'));
-  assert.equal(metaOf(other).chapters[0].title, 'Своё название', 'своя версия не потеряна');
-  assert.ok(conflictNames(ext.nodes).some((k) => utf8(ext.nodes.get(k)).includes('Облачное название')));
-});
-
-test('статистика: пустой проект не затирает накопленную в облаке', async () => {
-  const { ext } = await cloudWithBook();
-  ext.nodes.set('stats.json', bytes('{"days":{"2026-10-01":4200}}'));
-  const phone = tmp('phone6');
-  makeProject(phone, { name: '1', chapters: [{ id: 'bbbbbb01', title: 'Глава 1', text: '' }] });
-  fs.writeFileSync(path.join(phone, 'stats.json'), '{"days":{"2026-11-01":0}}');
-  await folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') }).sync();
-  assert.equal(utf8(ext.nodes.get('stats.json')), '{"days":{"2026-10-01":4200}}');
-  assert.equal(fs.readFileSync(path.join(phone, 'stats.json'), 'utf8'), '{"days":{"2026-10-01":4200}}');
-  assert.deepEqual(conflictNames(ext.nodes), []);
-});
-
-test('одинаковые id, но разные названия: локальный project.json сохранён как конфликт, облачная структура остаётся базой', async () => {
-  const { ext } = await cloudWithBook();
-  const phone = tmp('same-ids');
-  makeProject(phone, { name: 'Мой вариант', chapters: BOOK.map((c, i) => ({ ...c, title: i === 0 ? 'Моя версия названия' : c.title, text: `Локальный ${c.text}` })) });
+  makeProject(phone, { name: 'Рассказ', chapters: [{ id: 'bbbbbb01', title: 'Мой', text: 'Мой текст.\n' }] });
   const sync = folder.createFolderSync(phone, ext, { stateFile: stateIn(phone, 's') });
-  const res = await sync.sync();
-  assert.equal(metaOf(phone).chapters[0].title, 'Начало');
-  assert.equal(metaOf(phone).name, 'Мой роман');
-  const backup = conflictNames(ext.nodes).find((k) => k.endsWith('.json') && k.includes('project'));
-  assert.ok(backup, 'локальный project.json помещён в «Конфликты»');
-  assert.equal(JSON.parse(utf8(ext.nodes.get(backup))).chapters[0].title, 'Моя версия названия');
-  assert.deepEqual(res.conflicts, BOOK.map((c) => `Главы/${c.id}.md`), 'тексты глав с одинаковыми id обрабатываются прежней защитой от конфликтов');
-  for (const c of BOOK) assert.ok(utf8(ext.nodes.get(`Главы/${c.id}.md`)).includes(`Локальный ${c.text.trim()}`));
+  await sync.takeCloud();
+  await sync.sync();
+  assert.equal(utf8(ext.nodes.get('project.json')), original, 'мета в облаке не изменилась повторным проходом');
+  assert.ok(!ext.nodes.has('Главы/bbbbbb01.md'), 'вытесненная глава не вернулась в облако');
 });

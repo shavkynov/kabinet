@@ -192,7 +192,8 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
 
   /**
    * Связать открытый проект с папкой. mode: 'ask' — если в папке уже есть проект, вернуть { exists: true } и ничего не менять;
-   * 'merge' — соединить; 'replace' — выгрузить этот проект, чужое уйдёт в «Конфликты».
+   * 'cloud' — взять облако за основу, локальные версии уйдут в «Конфликты»;
+   * 'replace' — выгрузить этот проект, облачное уйдёт в «Конфликты».
    */
   async function attach(dir, acc, mode = 'ask') {
     const previousDir = cur ? cur.dir : null;
@@ -206,7 +207,8 @@ function createDavLink({ dataDir, request, secret = { seal: (s) => s, open: (s) 
         return { exists: true };
       }
       if (exists && mode === 'replace') await probe.replaceAll();
-      else if (exists) await probe.sync();
+      else if (exists && mode === 'cloud') await probe.takeCloud();
+      else if (exists) throw new Error('Выберите, что делать с проектом в папке: взять облако или выгрузить своё.');
       else await probe.exportAll();
       setLink(dir, acc);
       start(dir);

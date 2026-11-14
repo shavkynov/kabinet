@@ -398,7 +398,8 @@ impl DavLink {
     }
 
     /// Связать проект с папкой. mode: "ask" — если в папке уже есть проект, вернуть { exists: true } и ничего не менять;
-    /// "merge" — соединить; "replace" — выгрузить этот проект, чужое уйдёт в «Конфликты».
+    /// "cloud" — взять облако за основу, локальные версии уйдут в «Конфликты»; "replace" — выгрузить этот
+    /// проект, облачное уйдёт в «Конфликты».
     pub fn attach(&self, dir: &Path, acc: &Acc, mode: &str) -> R<Value> {
         let _g = self.config.lock().unwrap();
         let previous = self.cur.lock().unwrap().as_ref().map(|w| w.dir.clone());
@@ -409,7 +410,10 @@ impl DavLink {
             let exists = probe.has_project()?;
             if exists && mode == "ask" { return Ok(json!({ "exists": true })); }
             if exists && mode == "replace" { probe.replace_all()?; }
-            else if exists { probe.sync()?; }
+            else if exists && mode == "cloud" { probe.take_cloud()?; }
+            else if exists {
+                return Err("Выберите, что делать с проектом в папке: взять облако или выгрузить своё.".into());
+            }
             else { probe.export_all()?; }
             self.set_link(dir, Some(acc))?;
             self.start(dir);
@@ -615,6 +619,24 @@ mod tests {
         assert_eq!(v["exists"], json!(true));
         assert!(d.link_of(&dir).is_none());
         assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none());
+    }
+
+    #[test]
+    fn attach_cloud_choice_takes_cloud_and_keeps_local_version() {
+        let s = FakeServer::new();
+        s.put("Кабинет/Роман/project.json", r#"{"name":"облако","chapters":[{"id":"aaaaaa","title":"1"}]}"#.as_bytes());
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "облако".as_bytes());
+        let data = tmpdir("data-cloud");
+        let d = link(&data, &s, Default::default());
+        let dir = tmpdir("proj-cloud");
+        project(&dir); // локально: «Роман» с текстом «текст»
+        let v = d.attach(&dir, &acc(), "cloud").unwrap();
+        assert_eq!(v["exists"], json!(true));
+        assert_eq!(std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).unwrap(), "облако", "основным стал облачный проект");
+        let conflicts: Vec<String> = std::fs::read_dir(dir.join("Конфликты")).unwrap().flatten()
+            .filter_map(|e| std::fs::read_to_string(e.path()).ok()).collect();
+        assert!(conflicts.iter().any(|t| t.contains("текст")), "локальная версия сохранена в «Конфликты»: {conflicts:?}");
+        d.stop();
     }
 
     #[test]
