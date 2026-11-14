@@ -164,6 +164,13 @@ pub(crate) mod sync_hook {
     type Hook = Box<dyn FnOnce()>;
     thread_local! {
         static HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+        static REMOTE_HOOK: RefCell<Option<Hook>> = RefCell::new(None);
+    }
+    /// Вторая точка: в write_checked перед проверкой версии в облаке (имитирует запись с другого устройства).
+    pub fn set_remote<F: FnOnce() + 'static>(f: F) { REMOTE_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
+    pub fn fire_remote() {
+        let hook = REMOTE_HOOK.with(|h| h.borrow_mut().take());
+        if let Some(hook) = hook { hook(); }
     }
     pub fn set<F: FnOnce() + 'static>(f: F) { HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f))); }
     pub fn fire() {
@@ -269,6 +276,25 @@ impl<T: Remote> FolderSync<T> {
         if pushed.is_ok() { self.state.insert(rel_conflict, hash_bytes(bytes)); }
         Ok(name)
     }
+    /// Запись в облако с проверкой версии: перед записью файл читается заново, и если он не такой, каким мы его видели
+    /// (`expect` — хэш, None — «файла не было»), чужая версия сначала сохраняется в «Конфликтах». Список в начале прохода
+    /// может быть старше записи на минуты, а кэш по размеру и дате не видит правку с тем же размером и временем.
+    /// Ошибка чтения отменяет запись: лучше повторить проход, чем затереть чужую версию вслепую.
+    fn write_checked(&mut self, rel: &str, data: &[u8], expect: Option<&str>, res: &mut SyncResult) -> R<()> {
+        #[cfg(test)]
+        sync_hook::fire_remote();
+        if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
+        let fresh = self.remote.read(rel)?;
+        if let Some(b) = &fresh {
+            let h = hash_bytes(b);
+            if Some(h.as_str()) != expect && h != hash_bytes(data) {
+                self.keep_foreign(rel, b, &label_of(rel))?;
+                if !res.conflicts.contains(&rel.to_string()) { res.conflicts.push(rel.to_string()); }
+            }
+        }
+        self.remote.write(rel, data)
+    }
+
     fn keep_foreign(&mut self, rel: &str, bytes: &[u8], label: &str) -> R<String> { self.keep(rel, bytes, label, "с другого устройства") }
 
     fn adopt_remote_structure(&mut self, remote: &mut BTreeMap<String, RemoteEntry>, local: &mut BTreeMap<String, String>) -> R<()> {
@@ -405,7 +431,7 @@ impl<T: Remote> FolderSync<T> {
                 if let (Some(rh), Some(lh)) = (&r, &l) {
                     if b.as_ref() == Some(rh) {
                         let data = self.read_local(rel)?;
-                        self.remote.write(rel, &data)?;
+                        self.write_checked(rel, &data, Some(rh), &mut res)?;
                         self.state.insert(rel.clone(), lh.clone());
                         res.pushed.push(rel.clone());
                         break;
@@ -447,7 +473,8 @@ impl<T: Remote> FolderSync<T> {
                         merged
                     };
                     let now_local = self.read_local(rel)?;
-                    self.remote.write(rel, &now_local)?;
+                    let foreign_hash = hash_bytes(&foreign);
+                    self.write_checked(rel, &now_local, Some(&foreign_hash), &mut res)?;
                     self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
                     res.pushed.push(rel.clone());
                     res.conflicts.push(rel.clone());
@@ -474,9 +501,8 @@ impl<T: Remote> FolderSync<T> {
                 // у нас есть, снаружи нет
                 let lh = l.unwrap();
                 if b.is_none() {
-                    if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
                     let data = self.read_local(rel)?;
-                    self.remote.write(rel, &data)?;
+                    self.write_checked(rel, &data, None, &mut res)?;
                     self.state.insert(rel.clone(), lh);
                     res.pushed.push(rel.clone());
                 } else if Some(&lh) == b.as_ref() {
@@ -740,6 +766,59 @@ mod tests {
     }
     fn remote_conflicts(s: &FakeServer) -> Vec<String> {
         s.names().iter().filter(|n| n.contains("/Конфликты/")).filter_map(|n| s.get(n)).map(|b| String::from_utf8_lossy(&b).into_owned()).collect()
+    }
+
+    /// P1: облако изменилось уже после списка в начале прохода. Наша запись не должна затереть чужую версию молча.
+    #[test]
+    fn cloud_change_after_listing_is_kept_before_our_push() {
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "исходный")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        sa.sync().unwrap();
+        w(&a, "Главы/aaaaaa.md", "правка на этом устройстве");
+        let s2 = s.clone();
+        sync_hook::set_remote(move || s2.put("Кабинет/Роман/Главы/aaaaaa.md", "правка с другого устройства".as_bytes()));
+        let res = sa.sync().unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "правка на этом устройстве".as_bytes());
+        assert!(remote_conflicts(&s).contains(&"правка с другого устройства".to_string()), "чужая версия не сохранена: {:?}", remote_conflicts(&s));
+        assert!(local_conflicts(&a).contains(&"правка с другого устройства".to_string()));
+        assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()));
+    }
+
+    /// То же для нового файла: на момент списка его в облаке не было, к моменту записи другое устройство его создало.
+    #[test]
+    fn file_created_in_cloud_after_listing_is_kept_before_our_push() {
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "один")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        sa.sync().unwrap();
+        w(&a, "Главы/bbbbbb.md", "новая глава здесь");
+        let s2 = s.clone();
+        sync_hook::set_remote(move || s2.put("Кабинет/Роман/Главы/bbbbbb.md", "новая глава там".as_bytes()));
+        sa.sync().unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/bbbbbb.md").unwrap(), "новая глава здесь".as_bytes());
+        assert!(remote_conflicts(&s).contains(&"новая глава там".to_string()));
+    }
+
+    /// Обычная запись без чужих правок не создаёт ложных конфликтов.
+    #[test]
+    fn plain_push_makes_no_false_conflict() {
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "исходный")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        sa.sync().unwrap();
+        w(&a, "Главы/aaaaaa.md", "обновлённый");
+        w(&a, "Главы/cccccc.md", "новый");
+        let res = sa.sync().unwrap();
+        assert!(res.conflicts.is_empty() && remote_conflicts(&s).is_empty() && !a.join("Конфликты").exists());
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "обновлённый".as_bytes());
+        assert_eq!(s.get("Кабинет/Роман/Главы/cccccc.md").unwrap(), "новый".as_bytes());
     }
 
     #[test]
