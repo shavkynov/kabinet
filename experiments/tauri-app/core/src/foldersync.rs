@@ -422,7 +422,11 @@ impl<T: Remote> FolderSync<T> {
             let raw = self.remote_bytes(&mut e, "stats.json");
             let h = e.hash.clone();
             remote.insert("stats.json".into(), e);
-            self.write_local("stats.json", &raw?)?;
+            {
+                // Сериализуем со статистикой окна (set_day_words): их read–modify–write не должен пересекаться.
+                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                self.write_local("stats.json", &raw?)?;
+            }
             local.insert("stats.json".into(), h.clone());
             self.state.insert("stats.json".into(), h);
         }
@@ -1099,6 +1103,22 @@ mod tests {
         assert!(res.is_err(), "слияние с нечитаемой главой должно остановиться, а не считать главу пустой");
         assert!(file.is_dir(), "файл не удалён: на его месте по-прежнему каталог");
         assert_eq!(r(&b, "project.json"), meta_before, "мета не должна потерять главу при ошибке чтения");
+    }
+
+    /// stats.json синхронизируется как обычный файл: статистика с другого устройства не теряется.
+    #[test]
+    fn stats_file_is_synced_between_devices() {
+        let s = FakeServer::new();
+        let a = tmpdir("stats-sync-a").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        w(&a, "stats.json", &serde_json::to_string(&json!({ "days": { "2026-11-10": 100 } })).unwrap());
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("stats-sync-b").join("p");
+        let mut sb = sync_of(&b, &s, "b");
+        sb.import_all().unwrap();
+        let days: Value = serde_json::from_str(&r(&b, "stats.json")).unwrap();
+        assert_eq!(days["days"]["2026-11-10"], 100, "статистика должна прийти с другого устройства");
     }
 
     #[test]

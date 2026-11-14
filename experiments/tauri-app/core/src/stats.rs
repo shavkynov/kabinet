@@ -15,16 +15,29 @@ pub fn valid_date(s: &str) -> bool {
 fn day_num(s: &str) -> i64 { NaiveDate::parse_from_str(s, "%Y-%m-%d").map(|d| d.signed_duration_since(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()).num_days()).unwrap_or(0) }
 fn day_str(n: i64) -> String { (NaiveDate::from_ymd_opt(1970, 1, 1).unwrap() + chrono::Duration::days(n)).format("%Y-%m-%d").to_string() }
 
+/// Ленивое чтение для показа: ошибка/порча → пусто. Для записи использовать `read_days_strict`.
 pub fn read_days(dir: &Path) -> Map<String, Value> {
+    read_days_strict(dir).unwrap_or_default()
+}
+
+/// Строгое чтение перед записью: отсутствие файла → пустая статистика; ошибка чтения или порча JSON → Err.
+/// Запись после Err запрещена, чтобы не затереть исходные дни пустым файлом.
+fn read_days_strict(dir: &Path) -> R<Map<String, Value>> {
+    let text = match std::fs::read_to_string(dir.join(FILE)) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(e) => return Err(format!("Не удалось прочитать статистику: {}. Запись остановлена, чтобы не затереть данные.", e)),
+    };
+    let raw: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Файл статистики повреждён: {}. Запись остановлена, чтобы не затереть данные.", e))?;
     let mut out = Map::new();
-    let raw: Value = std::fs::read_to_string(dir.join(FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     if let Some(days) = raw["days"].as_object() {
         for (k, v) in days {
             let n = v.as_f64().map(|x| x.floor()).unwrap_or(0.0);
             if valid_date(k) && n.is_finite() && n > 0.0 { out.insert(k.clone(), json!(n.min(1_000_000.0) as i64)); }
         }
     }
-    out
+    Ok(out)
 }
 
 fn get(days: &Map<String, Value>, d: &str) -> i64 { days.get(d).and_then(|v| v.as_i64()).unwrap_or(0) }
@@ -34,7 +47,9 @@ pub fn set_day_words(dir: &Path, date: &str, words: &Value) -> R<()> {
     if !valid_date(date) { return Err("Неверная дата.".into()); }
     let n = words.as_f64().or_else(|| words.as_str().and_then(|s| s.trim().parse().ok())).map(|x| x.floor());
     let n = match n { Some(n) if n.is_finite() && n >= 0.0 => n.min(1_000_000.0) as i64, _ => return Err("Неверное число слов.".into()) };
-    let mut days = read_days(dir);
+    // Сериализуем со всеми писателями (главы, мета, синхронизация): read–modify–write не должен пересекаться.
+    let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+    let mut days = read_days_strict(dir)?; // порча/ошибка чтения → Err; исходный файл не трогаем
     let v = get(&days, date).max(n);
     days.insert(date.into(), json!(v));
     let mut keys: Vec<String> = days.keys().cloned().collect();
@@ -86,6 +101,7 @@ pub fn summary(dir: &Path, i: SummaryIn) -> R<Value> {
 mod tests {
     use super::*;
     use crate::testutil::tmpdir;
+    use std::fs;
 
     #[test]
     fn matches_rules_of_electron_version() {
@@ -106,5 +122,58 @@ mod tests {
         let done = summary(&d, SummaryIn { today: "2026-11-12", today_words: &json!(0), goal: Some(300), deadline: Some("2026-11-15"), total: 350 }).unwrap();
         assert_eq!(done["plan"]["done"], true);
         assert!(summary(&d, SummaryIn { today: "2026-11-12", today_words: &json!(0), goal: None, deadline: None, total: 0 }).unwrap()["plan"].is_null());
+    }
+
+    #[test]
+    fn set_day_words_rejects_corrupt_and_unreadable_without_overwriting() {
+        // Порча JSON: запись запрещена, исходный файл не меняется.
+        let d = tmpdir("stats-corrupt");
+        fs::write(d.join("stats.json"), "{ битый").unwrap();
+        assert!(set_day_words(&d, "2026-11-10", &json!(5)).is_err());
+        assert_eq!(fs::read_to_string(d.join("stats.json")).unwrap(), "{ битый");
+        // Ошибка чтения (на месте файла каталог): запись запрещена, каталог не трогаем.
+        let e = tmpdir("stats-readerr");
+        fs::create_dir(e.join("stats.json")).unwrap();
+        assert!(set_day_words(&e, "2026-11-10", &json!(5)).is_err());
+        assert!(e.join("stats.json").is_dir());
+    }
+
+    #[test]
+    fn set_day_words_creates_when_absent_and_keeps_max() {
+        let d = tmpdir("stats-absent");
+        assert!(read_days(&d).is_empty());
+        set_day_words(&d, "2026-11-10", &json!(100)).unwrap();
+        set_day_words(&d, "2026-11-10", &json!(40)).unwrap(); // стирание не уменьшает
+        set_day_words(&d, "2026-11-10", &json!(120)).unwrap();
+        assert_eq!(read_days(&d)["2026-11-10"], 120);
+    }
+
+    #[test]
+    fn set_day_words_serializes_parallel_writes() {
+        use std::sync::Arc;
+        // Разные даты: ни одна параллельная запись не теряется.
+        let d = Arc::new(tmpdir("stats-par"));
+        let mut threads = Vec::new();
+        for i in 0..21u32 {
+            let d = d.clone();
+            threads.push(std::thread::spawn(move || {
+                let day = format!("2026-11-{:02}", (i % 7) + 1);
+                set_day_words(d.as_path(), &day, &json!(i + 1)).unwrap();
+            }));
+        }
+        for t in threads { t.join().unwrap(); }
+        let days = read_days(d.as_path());
+        for k in 1..=7 {
+            assert!(days.contains_key(&format!("2026-11-{:02}", k)), "параллельная запись потеряла день {}", k);
+        }
+        // Одинаковая дата: правило дневного максимума сохраняется и под параллелью.
+        let same = tmpdir("stats-par-same");
+        let mut threads = Vec::new();
+        for i in 0..16u32 {
+            let same = same.clone();
+            threads.push(std::thread::spawn(move || { set_day_words(&same, "2026-11-15", &json!((i + 1) * 10)).unwrap(); }));
+        }
+        for t in threads { t.join().unwrap(); }
+        assert_eq!(read_days(&same)["2026-11-15"], 160);
     }
 }
