@@ -121,6 +121,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let backups = SubmenuBuilder::new(app, "Резервные копии")
         .item(&it("ui:backupNow", "Сделать копию сейчас", None)?)
         .item(&it("backup:restore", "Восстановить из копии…", None)?)
+        .item(&it("backup:info", "Где хранятся копии…", None)?)
         .item(&it("ui:openBackups", "Открыть папку копий", None)?)
         .build()?;
 
@@ -195,6 +196,25 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
                 let on = w.is_fullscreen().unwrap_or(false);
                 let _ = w.set_fullscreen(!on);
             }
+        }
+        "backup:info" => {
+            // Текст о месте хранения копий берётся из существующего раздела «Резервные копии».
+            // Путь вычисляется ровно той же `backup_root`, что и `make_backup`, — в интерфейсе алгоритм не дублируется.
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let dir = app2.state::<AppState>().current.lock().ok().and_then(|g| g.clone());
+                let text = match dir {
+                    Some(dir) => match app2.path().app_data_dir() {
+                        Ok(data) => {
+                            let folder = backup::backup_root(&data, &dir);
+                            format!("Автоматические копии: до 30 на этом устройстве\n\nПапка копий: {}", folder.display())
+                        }
+                        Err(e) => format!("Не удалось определить папку копий: {}", e),
+                    },
+                    None => "Откройте проект, чтобы узнать папку его резервных копий.".to_string(),
+                };
+                rfd::AsyncMessageDialog::new().set_title("Резервные копии").set_description(text).show().await;
+            });
         }
         "backup:restore" => {
             // Восстановление из копии без участия renderer: меню → нативный выбор копии → согласованное восстановление.

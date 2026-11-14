@@ -345,6 +345,28 @@ mod tests {
     }
 
     #[test]
+    fn backup_root_is_where_make_backup_writes() {
+        let data = tmpdir("data");
+        // обычный локальный проект: копии внутри проекта
+        let local = tmpdir("local").join("p");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("project.json"), "{}").unwrap();
+        let root = backup_root(&data, &local);
+        assert_eq!(root, local.join(BACKUP_DIR), "локальный проект: папка копий внутри проекта");
+        let name = make_backup(&local, &root, Some("2026-01-01 10-00-00")).unwrap().unwrap();
+        assert!(root.join(&name).join(".sig").exists(), "make_backup пишет именно в backup_root");
+        // проект в облачной папке: копии в данных приложения, вне проекта
+        let cloud = tmpdir("cloud").join("OneDrive").join("Роман");
+        fs::create_dir_all(&cloud).unwrap();
+        fs::write(cloud.join("project.json"), "{}").unwrap();
+        let cloud_root = backup_root(&data, &cloud);
+        assert!(cloud_root.starts_with(&data), "облачный проект: копии в данных приложения: {:?}", cloud_root);
+        assert!(!cloud_root.starts_with(&cloud), "копии не внутри облачной папки");
+        let cname = make_backup(&cloud, &cloud_root, Some("2026-01-01 10-00-01")).unwrap().unwrap();
+        assert!(cloud_root.join(&cname).join(".sig").exists(), "make_backup пишет именно в backup_root");
+    }
+
+    #[test]
     fn retention_keeps_at_most_30_with_recent_and_daily() {
         // 20 дней по 2 копии = 40 копий → остаётся ровно 30 суммарно
         let all: Vec<String> = (1..=20).flat_map(|d| (0..2).map(move |h| format!("2026-01-{:02} 1{}-00-00", d, h))).collect();

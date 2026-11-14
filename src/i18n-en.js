@@ -587,6 +587,7 @@ module.exports = {
   "Шаблоны карточек…": "Card templates…",
   "Резервные копии": "Backups",
   "Открыть папку копий": "Open the backups folder",
+  "До 30 автоматических копий на проект. Хранятся внутри приложения на этом устройстве.": "Up to 30 automatic backups per project. They are stored inside the app on this device.",
   "Проверка текста": "Text check",
   "Язык текста": "Text language",
   "Английский": "English",
