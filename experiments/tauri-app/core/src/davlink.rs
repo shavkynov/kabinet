@@ -83,11 +83,31 @@ struct Work {
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
-/// Ограниченное ожидание потока: если он не успел за `STOP_BOUND`, отцепляем его — он доделает
+/// Ограниченное ожидание потока: если он не успел за `stop_wait_bound()`, отцепляем его — он доделает
 /// текущий проход (состояние сохраняется в конце) и выйдет сам; закрытие окна не блокируется.
 fn join_bounded(w: &mut Work) {
-    let finished = w.done.take().map(|rx| rx.recv_timeout(STOP_BOUND).is_ok()).unwrap_or(true);
+    let finished = w.done.take().map(|rx| rx.recv_timeout(stop_wait_bound()).is_ok()).unwrap_or(true);
     if let Some(t) = w.thread.take() { if finished { let _ = t.join(); } }
+}
+
+/// Граница ожидания остановки: production — `STOP_BOUND`; в тестах можно задать короткую границу
+/// (thread-local), чтобы не ждать реальные 5 секунд. Production-значение не меняется.
+fn stop_wait_bound() -> Duration {
+    #[cfg(test)]
+    {
+        if let Some(b) = TEST_STOP_BOUND.with(|b| *b.borrow()) { return b; }
+    }
+    STOP_BOUND
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_STOP_BOUND: std::cell::RefCell<Option<Duration>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_stop_bound(bound: Option<Duration>) {
+    TEST_STOP_BOUND.with(|b| *b.borrow_mut() = bound);
 }
 
 pub struct DavLink {
@@ -408,6 +428,127 @@ mod tests {
         std::fs::create_dir_all(dir.join("Главы")).unwrap();
         std::fs::write(dir.join("project.json"), r#"{"name":"Роман","chapters":[{"id":"aaaaaa","title":"1"}]}"#).unwrap();
         std::fs::write(dir.join("Главы/aaaaaa.md"), "текст").unwrap();
+    }
+
+    // ==== S1: диагностика остановки работников (характеризация, НЕ доказательство безопасности) ====
+    //
+    // Порядок событий задаётся управляемой паузой внутри РЕАЛЬНОГО HTTP-запроса прохода; ожидания
+    // ограничены deadline. Тесты проходят, воспроизводя известное небезопасное поведение.
+
+    /// HTTP-обёртка: приостанавливает первый GET реального прохода (до ответа сервера).
+    struct SlowHttp { inner: FakeServer, gate: Gate, armed: Arc<AtomicBool> }
+    impl Http for SlowHttp {
+        fn request(&self, req: crate::http::Req) -> Result<crate::http::Resp, String> {
+            // Сначала метод, потом снятие флага: иначе armed «сгорает» на первом PUT.
+            if req.method == "GET" && self.armed.swap(false, Ordering::SeqCst) { self.gate.hold(); }
+            self.inner.request(req)
+        }
+    }
+
+    /// Подготовить проект и облако без `attach` (он запускает свой работник и мешает порядку).
+    /// `export_all` создаёт state «как после прошлой синхронизации»; затем в облако кладётся чужая правка.
+    fn seed(d: &DavLink, s: &FakeServer, dir: &Path) {
+        project(dir);
+        d.folder_sync(dir, &acc()).unwrap().export_all().unwrap();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "правка с телефона".as_bytes());
+        d.set_link(dir, Some(&acc())).unwrap();
+    }
+
+    fn slow_link(data: &Path, s: &FakeServer, events: Arc<Mutex<Vec<String>>>, gate: &Gate, armed: &Arc<AtomicBool>) -> DavLink {
+        let (s2, g2, a2) = (s.clone(), gate.clone(), armed.clone());
+        DavLink::new(data, Arc::new(PlainSecret), "Тест",
+            Arc::new(move || Box::new(SlowHttp { inner: s2.clone(), gate: g2.clone(), armed: a2.clone() }) as Box<dyn Http>),
+            Arc::new(move |e| events.lock().unwrap().push(format!("{:?}", e))))
+    }
+
+    fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + limit;
+        while Instant::now() < end { if done() { return true; } std::thread::sleep(Duration::from_millis(20)); }
+        done()
+    }
+
+    fn pulled(dir: &Path) -> bool {
+        std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).map(|t| t == "правка с телефона").unwrap_or(false)
+    }
+
+    /// S1.1 ХАРАКТЕРИЗАЦИЯ: stop() отцепляет поток по границе, и старый проход продолжает работу —
+    /// локальные записи и события происходят после возврата stop.
+    #[test]
+    fn s1_1_background_pass_continues_after_stop_characterization() {
+        let s = FakeServer::new();
+        let data = tmpdir("data");
+        let events: Arc<Mutex<Vec<String>>> = Default::default();
+        let gate = Gate::with_timeout(Duration::from_secs(3));
+        let _release = gate.allow_on_drop(); // cleanup: при панике сценария проход будет освобождён
+        let armed = Arc::new(AtomicBool::new(false));
+        let d = slow_link(&data, &s, events.clone(), &gate, &armed);
+        let dir = tmpdir("proj");
+        seed(&d, &s, &dir);
+        armed.store(true, Ordering::SeqCst);
+        assert!(d.start(&dir));
+        gate.wait_reached(); // проход остановлен внутри реальной HTTP-операции
+        set_test_stop_bound(Some(Duration::from_millis(100)));
+        d.stop(); // возвращается, не дождавшись прохода
+        set_test_stop_bound(None);
+        assert!(!pulled(&dir), "до освобождения проход ещё не завершён");
+        gate.allow();
+        // Сначала дожидаемся события прохода (оно приходит после sync), затем проверяем запись.
+        let changed = wait_until(Duration::from_secs(5), || events.lock().unwrap().iter().any(|e| e.contains("Changed")));
+        assert!(changed,
+            "ХАРАКТЕРИЗАЦИЯ: отцепленный проход продолжился и отправил события после возврата stop");
+        assert!(pulled(&dir), "локальная запись выполнена после возврата stop");
+    }
+
+    /// S1.2 ХАРАКТЕРИЗАЦИЯ: после stop старый проход ещё жив, а start того же проекта запускает
+    /// второй проход — два прохода над одним проектом одновременно.
+    #[test]
+    fn s1_2_restart_while_old_pass_still_running_characterization() {
+        let s = FakeServer::new();
+        let data = tmpdir("data");
+        let events: Arc<Mutex<Vec<String>>> = Default::default();
+        let gate = Gate::with_timeout(Duration::from_secs(3));
+        let _release = gate.allow_on_drop();
+        let armed = Arc::new(AtomicBool::new(false));
+        let d = slow_link(&data, &s, events, &gate, &armed);
+        let dir = tmpdir("proj");
+        seed(&d, &s, &dir);
+        armed.store(true, Ordering::SeqCst);
+        assert!(d.start(&dir));
+        gate.wait_reached(); // проход #1 приостановлен
+        set_test_stop_bound(Some(Duration::from_millis(100)));
+        d.stop(); // #1 отцеплен, но жив
+        set_test_stop_bound(None);
+        assert!(d.start(&dir), "второй работник того же проекта запущен");
+        assert!(wait_until(Duration::from_secs(5), || pulled(&dir)),
+            "ХАРАКТЕРИЗАЦИЯ: проход #2 завершился, пока проход #1 ещё приостановлен");
+        gate.allow();
+    }
+
+    /// S1.3 ХАРАКТЕРИЗАЦИЯ: stop снимает Work и останавливает фоновый поток, но уже вошедший в
+    /// run_pass ручной sync_now продолжается и делает записи после возврата stop.
+    #[test]
+    fn s1_3_manual_sync_now_continues_after_stop_characterization() {
+        let s = FakeServer::new();
+        let data = tmpdir("data");
+        let events: Arc<Mutex<Vec<String>>> = Default::default();
+        let gate = Gate::with_timeout(Duration::from_secs(3));
+        let _release = gate.allow_on_drop();
+        let armed = Arc::new(AtomicBool::new(false));
+        let d = Arc::new(slow_link(&data, &s, events, &gate, &armed));
+        let dir = tmpdir("proj");
+        seed(&d, &s, &dir);
+        armed.store(true, Ordering::SeqCst);
+        assert!(d.start(&dir));
+        let d2 = Arc::clone(&d);
+        let manual = std::thread::spawn(move || d2.sync_now());
+        gate.wait_reached(); // ручной проход остановлен внутри HTTP
+        set_test_stop_bound(Some(Duration::from_millis(100)));
+        d.stop(); // возвращается; Work снят
+        set_test_stop_bound(None);
+        gate.allow();
+        let res = manual.join().unwrap();
+        assert!(res.is_ok(), "ручной sync_now вернулся: {:?}", res.as_ref().err());
+        assert!(pulled(&dir), "ХАРАКТЕРИЗАЦИЯ: ручной проход продолжился после stop");
     }
 
     #[test]
