@@ -298,17 +298,43 @@ impl<T: Remote> FolderSync<T> {
     }
 
     /// Чужую (или вытесненную) версию кладём в «Конфликты» и у нас, и в папке.
+    /// Ошибка чтения имени-кандидата и ошибка облачного сохранения копии НЕ подавляются: иначе вызывающая
+    /// операция (перезапись/удаление вытесняемой версии) продолжилась бы, хотя копия не подтверждена.
     fn keep(&mut self, rel: &str, bytes: &[u8], label: &str, suffix: &str) -> R<String> {
         // Имя должно подойти и у нас, и в папке: другая версия под тем же именем (та же секунда) не затирается,
         // тогда берётся имя с SHA-256. Проверка папки идёт без замка: сеть под замком не держим.
-        let candidates: Vec<String> = conflict_names(&now_local(), label, suffix, &extname(rel), bytes).into_iter()
-            .filter(|name| !matches!(self.remote.read(&format!("{}/{}", CONFLICT_DIR, name)), Ok(Some(b)) if b.as_slice() != bytes))
-            .collect();
+        let mut candidates: Vec<String> = Vec::new();
+        for name in conflict_names(&now_local(), label, suffix, &extname(rel), bytes) {
+            let rel_conflict = format!("{}/{}", CONFLICT_DIR, name);
+            match self.remote.read(&rel_conflict) {
+                Ok(None) => candidates.push(name),
+                // содержимое уже подтверждено чтением — ту же версию можно переиспользовать
+                Ok(Some(b)) if b.as_slice() == bytes => candidates.push(name),
+                // известная ДРУГАЯ версия под этим именем: имя не занимаем
+                Ok(Some(_)) => {}
+                Err(e) => {
+                    return Err(format!(
+                        "Не удалось прочитать конфликтную копию «{}»: {}. Вытесненная версия не сохранена — операция остановлена.",
+                        rel_conflict, e
+                    ))
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return Err("Не удалось подобрать имя для конфликтной копии: все имена заняты другими версиями. Операция остановлена.".into());
+        }
         let name = save_conflict_copy(&self.dir.join(CONFLICT_DIR), &candidates, bytes)?;
         let rel_conflict = format!("{}/{}", CONFLICT_DIR, name);
-        let pushed = self.remote.mkdir(CONFLICT_DIR).and_then(|_| self.remote.write(&rel_conflict, bytes));
-        if pushed.is_ok() { self.state.insert(rel_conflict, hash_bytes(bytes)); }
-        Ok(name)
+        match self.remote.mkdir(CONFLICT_DIR).and_then(|_| self.remote.write(&rel_conflict, bytes)) {
+            Ok(()) => {
+                self.state.insert(rel_conflict, hash_bytes(bytes));
+                Ok(name)
+            }
+            Err(e) => Err(format!(
+                "Не удалось сохранить конфликтную копию «{}» в папке: {}. Локальная копия сохранена, вытесняемая версия не изменялась. Операция остановлена.",
+                rel_conflict, e
+            )),
+        }
     }
     /// Запись в облако с проверкой версии: перед записью файл читается заново, и если он не такой, каким мы его видели
     /// (`expect` — хэш, None — «файла не было»), чужая версия сначала сохраняется в «Конфликтах». Список в начале прохода
@@ -948,6 +974,110 @@ mod tests {
         crate::syncguard::set_test_now(None);
         assert_eq!(first, second);
         assert_eq!((local.len(), remote.len()), (1, 1));
+    }
+
+    /// C1.1: ошибка чтения кандидата имени — Err, запись в непроверенный кандидат не выполняется.
+    #[test]
+    fn keep_read_error_returns_error_without_writing_candidate() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        s.0.lock().unwrap().fail_get_prefixes.insert("/Кабинет/Роман/Конфликты/".to_string());
+        let res = sa.keep_foreign("Главы/aaaaaa.md", "чужая версия".as_bytes(), "aaaaaa");
+        let log = s.0.lock().unwrap().log.clone();
+        let local_created = a.join("Конфликты").exists();
+        crate::syncguard::set_test_now(None);
+        assert!(res.is_err(), "ошибка чтения кандидата должна возвращать Err");
+        assert!(log.iter().any(|l| l.starts_with("GETLINK /Кабинет/Роман/Конфликты/")), "ветка достигнута — чтение кандидата: {log:?}");
+        assert!(!log.iter().any(|l| l.starts_with("PUT ")), "запись в непроверенный кандидат: {log:?}");
+        assert!(!local_created, "локальная копия не должна создаваться при непроверенном имени");
+    }
+
+    /// C1.2: отказ mkdir «Конфликты» возвращается; состояние не отмечает несохранённую облачную копию.
+    #[test]
+    fn keep_mkdir_error_is_returned_and_state_not_marked() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        s.0.lock().unwrap().fail_mkdir_paths.insert("/Кабинет/Роман/Конфликты".to_string());
+        let res = sa.keep_foreign("Главы/aaaaaa.md", "чужая версия".as_bytes(), "aaaaaa");
+        let log = s.0.lock().unwrap().log.clone();
+        let marked = sa.state.keys().any(|k| k.starts_with("Конфликты/"));
+        let local = local_conflicts(&a);
+        crate::syncguard::set_test_now(None);
+        assert!(res.is_err(), "отказ mkdir должен возвращаться вызывающему");
+        assert!(log.iter().any(|l| l == "MKDIR /Кабинет/Роман/Конфликты"), "ветка достигнута: {log:?}");
+        assert!(!marked, "состояние не должно отмечать облачную копию сохранённой");
+        assert_eq!(local, vec!["чужая версия".to_string()], "локальная копия сохранена с правильными байтами");
+    }
+
+    /// C1.3: отказ записи облачной копии возвращается; локальная копия цела; повтор её не теряет.
+    #[test]
+    fn keep_cloud_write_error_is_returned_and_retry_keeps_local_copy() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "x")]);
+        let mut sa = sync_of(&a, &s, "a");
+        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/Конфликты/".to_string());
+        let res = sa.keep_foreign("Главы/aaaaaa.md", "чужая версия".as_bytes(), "aaaaaa");
+        let log = s.0.lock().unwrap().log.clone();
+        let marked = sa.state.keys().any(|k| k.starts_with("Конфликты/"));
+        assert!(res.is_err(), "отказ записи облачной копии должен возвращаться");
+        assert!(log.iter().any(|l| l.starts_with("PUT ") && l.contains("Конфликты")), "ветка достигнута — запись копии: {log:?}");
+        assert!(!marked, "состояние не должно отмечать несуществующую облачную копию");
+        assert_eq!(local_conflicts(&a), vec!["чужая версия".to_string()], "локальная копия цела");
+        s.0.lock().unwrap().fail_put_prefixes.clear();
+        let name = sa.keep_foreign("Главы/aaaaaa.md", "чужая версия".as_bytes(), "aaaaaa").unwrap();
+        let local_after = local_conflicts(&a);
+        crate::syncguard::set_test_now(None);
+        assert!(a.join("Конфликты").join(&name).exists(), "повтор указывает на прежнюю локальную копию");
+        assert_eq!(local_after, vec!["чужая версия".to_string()], "копия не потеряна и не задвоена");
+        assert!(s.get(&format!("Кабинет/Роман/Конфликты/{}", name)).is_some(), "облачная копия подтверждена после повтора");
+    }
+
+    /// C1.4a: отказ копии перед ПЕРЕЗАПИСЬЮ останавливает запись; чужая версия не затёрта.
+    #[test]
+    fn keep_error_blocks_overwrite_of_foreign_version() {
+        fixed_second();
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "моё")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "чужая".as_bytes());
+        w(&a, "Главы/aaaaaa.md", "моё новое");
+        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/Конфликты/".to_string());
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
+        assert!(res.is_err(), "отказ копии должен останавливать перезапись");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "чужая".as_bytes(), "вытесняемая версия не перезаписана");
+        assert_eq!(local_conflicts(&a), vec!["чужая".to_string()], "локальная копия вытесненной версии сохранена");
+        s.0.lock().unwrap().fail_put_prefixes.clear();
+        sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "моё новое".as_bytes(), "повтор проходит после снятия отказа");
+        assert_eq!(local_conflicts(&a), vec!["чужая".to_string()], "прежняя локальная копия не потеряна");
+        crate::syncguard::set_test_now(None);
+    }
+
+    /// C1.4b: отказ копии перед УДАЛЕНИЕМ останавливает удаление облачной версии.
+    #[test]
+    fn keep_error_blocks_cloud_delete_of_foreign_version() {
+        let s = FakeServer::new();
+        let a = tmpdir("a").join("p");
+        project(&a, &[("aaaaaa", "моё")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.put("Кабинет/Роман/Главы/aaaaaa.md", "чужая".as_bytes());
+        fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap();
+        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/Конфликты/".to_string());
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
+        assert!(res.is_err(), "отказ копии должен останавливать удаление");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "чужая".as_bytes(), "облачная версия не удалена");
+        assert_eq!(local_conflicts(&a), vec!["чужая".to_string()], "вытесненная версия сохранена локально");
     }
 
     #[test]

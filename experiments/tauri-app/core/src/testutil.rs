@@ -30,6 +30,12 @@ pub struct Fs {
     pub total_shrink: bool,
     /// Отложенные операции удаления: id операции → путь, который будет удалён при успехе.
     pub pending_ops: BTreeMap<String, String>,
+    /// Отказ ЧТЕНИЯ (ссылка на скачивание) для путей с этими префиксами — точечный сбой одной операции.
+    pub fail_get_prefixes: std::collections::BTreeSet<String>,
+    /// Отказ ЗАГРУЗКИ для путей с этими префиксами — точечный сбой одной операции.
+    pub fail_put_prefixes: std::collections::BTreeSet<String>,
+    /// Отказ СОЗДАНИЯ ПАПКИ для точных путей — точечный сбой одной операции.
+    pub fail_mkdir_paths: std::collections::BTreeSet<String>,
 }
 
 #[derive(Clone, Default)]
@@ -94,6 +100,7 @@ impl Http for FakeServer {
             }
             ("cloud-api.yandex.net", "PUT", "/v1/disk/resources") => {
                 f.log.push(format!("MKDIR {}", path));
+                if f.fail_mkdir_paths.contains(&path) { return r(500, vec![]); }
                 let parent = path.rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
                 if !parent.is_empty() && !f.dirs.contains(&parent) { return r(409, vec![]); }
                 if f.dirs.insert(path) { r(201, vec![]) } else { r(409, vec![]) }
@@ -106,12 +113,15 @@ impl Http for FakeServer {
             }
             ("uploader.yandex.net", "PUT", _) => {
                 f.log.push(format!("PUT {}", path));
+                if f.fail_put_prefixes.iter().any(|p| path.starts_with(p)) { return r(500, vec![]); }
                 f.clock += 1000;
                 let t = f.clock;
                 f.files.insert(path, (req.body.unwrap_or_default(), t));
                 r(201, vec![])
             }
             ("cloud-api.yandex.net", "GET", "/v1/disk/resources/download") => {
+                f.log.push(format!("GETLINK {}", path));
+                if f.fail_get_prefixes.iter().any(|p| path.starts_with(p)) { return r(500, vec![]); }
                 if f.files.contains_key(&path) { js(serde_json::json!({ "href": format!("https://downloader.yandex.net/a?p={}", enc(&path)) })) } else { r(404, vec![]) }
             }
             ("downloader.yandex.net", "GET", _) => Ok(Resp { status: 302, body: vec![], location: Some(format!("https://cdn.yandex.net/b?p={}", enc(&path))) }),
