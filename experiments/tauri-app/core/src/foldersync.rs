@@ -1252,6 +1252,34 @@ mod tests {
 
     /// Неполный список облака (файл пропал из списка, но не удалён) не должен удалять локальную главу.
     #[test]
+    fn remote_list_paginates_without_losing_files() {
+        let s = FakeServer::new();
+        let a = tmpdir("pages").join("p");
+        project(&a, &[("aaaaaa", "1"), ("bbbbbb", "2"), ("cccccc", "3"), ("dddddd", "4")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().page_limit = Some(2); // сервер отдаёт по 2 записи
+        let mut r = dav_on(&s, "/Кабинет/Роман");
+        let items = r.list("Главы").unwrap();
+        assert_eq!(items.len(), 4, "пагинация не теряет записи: {:?}", items.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
+    }
+
+    /// Пустая промежуточная страница при непустом total — отказ, а не «файлов нет».
+    #[test]
+    fn empty_intermediate_page_is_rejected() {
+        let s = FakeServer::new();
+        let a = tmpdir("page-gap").join("p");
+        project(&a, &[("aaaaaa", "1"), ("bbbbbb", "2"), ("cccccc", "3"), ("dddddd", "4")]);
+        let mut sa = sync_of(&a, &s, "a");
+        sa.export_all().unwrap();
+        s.0.lock().unwrap().page_limit = Some(2);
+        s.0.lock().unwrap().empty_page_at = Some(2);
+        let mut r = dav_on(&s, "/Кабинет/Роман");
+        assert!(r.list("Главы").is_err(), "пустая промежуточная страница должна останавливать список");
+    }
+
+    /// Неполный список облака (файл пропал из списка, но не удалён) не должен удалять локальную главу.
+    #[test]
     fn incomplete_listing_does_not_delete_local_chapter() {
         let s = FakeServer::new();
         let a = tmpdir("hidden-one").join("p");

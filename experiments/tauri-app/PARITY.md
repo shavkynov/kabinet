@@ -19,6 +19,7 @@
 | Синхронизация с общей папкой | `folder.js` | `foldersync::FolderSync` | `foldersync`-тесты (34) | тест |
 | Удаление: ошибки чтения/удаления не глушатся | — | `after_local_delete`, `remove_local` (№ 2) | `delete_keeps_cloud_file_*`, `delete_reports_cloud_remove_error`, `local_delete_failure_is_reported_not_hidden`, `local_delete_preserves_changed_cloud_version_*` | тест |
 | Неполный список облака не удаляет локальное | — | прямое чтение перед удалением (№ 5) | `incomplete_listing_does_not_delete_local_chapter` | тест |
+| Пагинация списка и отказ от пустой страницы | — | `yandexdisk::do_list` (№ 5) | `remote_list_paginates_without_losing_files`, `empty_intermediate_page_is_rejected` | тест |
 | Ссылки/junction не обходятся | — | `walk_local` (№ 6) | `walk_local_does_not_enter_linked_folder` | тест |
 | Гонка создания нового файла | — | `write_checked` create-only (№ 1) | `push_new_file_does_not_overwrite_concurrent_creation` | тест |
 | Create-only примитив | — | `Remote::create` (`overwrite=false`) | `create_only_does_not_overwrite_existing` | тест |

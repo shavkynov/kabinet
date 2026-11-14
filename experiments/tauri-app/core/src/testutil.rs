@@ -16,6 +16,10 @@ pub struct Fs {
     pub hide: std::collections::BTreeSet<String>,
     pub fail_gets: bool,
     pub fail_deletes: bool,
+    /// Максимум записей в одной странице списка (если задан) — проверка пагинации.
+    pub page_limit: Option<usize>,
+    /// На этом offset сервер отдаёт пустую страницу при непустом total — проверка отказа.
+    pub empty_page_at: Option<usize>,
 }
 
 #[derive(Clone, Default)]
@@ -65,7 +69,12 @@ impl Http for FakeServer {
                             items.push(serde_json::json!({ "name": n, "type": "file", "size": data.len(), "modified": iso(*t) }));
                         } } }
                     }
-                    js(serde_json::json!({ "type": "dir", "_embedded": { "total": items.len(), "items": items } }))
+                    let total = items.len();
+                    let lim: usize = q.get("limit").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1000).max(1);
+                    let off: usize = q.get("offset").and_then(|v| v.parse::<usize>().ok()).unwrap_or(0);
+                    let page_size = f.page_limit.unwrap_or(lim).min(lim);
+                    let page: Vec<_> = if f.empty_page_at == Some(off) { vec![] } else { items.into_iter().skip(off).take(page_size).collect() };
+                    js(serde_json::json!({ "type": "dir", "_embedded": { "total": total, "items": page } }))
                 } else if let Some((d, _)) = f.files.get(&path) {
                     js(serde_json::json!({ "type": "file", "size": d.len(), "md5": format!("{:x}", md5::compute(d)) }))
                 } else { r(404, vec![]) }
