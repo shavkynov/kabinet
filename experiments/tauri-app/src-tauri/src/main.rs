@@ -120,6 +120,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let about = it("app:about", "О программе «Кабинет»", None)?;
     let backups = SubmenuBuilder::new(app, "Резервные копии")
         .item(&it("ui:backupNow", "Сделать копию сейчас", None)?)
+        .item(&it("backup:restore", "Восстановить из копии…", None)?)
         .item(&it("ui:openBackups", "Открыть папку копий", None)?)
         .build()?;
 
@@ -195,6 +196,16 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
                 let _ = w.set_fullscreen(!on);
             }
         }
+        "backup:restore" => {
+            // Восстановление из копии без участия renderer: меню → нативный выбор копии → согласованное восстановление.
+            let app2 = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let dav = app2.state::<Arc<DavApi>>().inner().clone();
+                let state = app2.state::<AppState>();
+                let Ok(dir) = current_dir(&state) else { return; };
+                let _ = restore_interactive(&app2, dir, dav).await;
+            });
+        }
         other if other.starts_with("ui:") => { let _ = app.emit(other, ()); }
         _ => {}
     }
@@ -213,6 +224,21 @@ async fn switch_sync(dav: &Arc<DavApi>, dir: Option<PathBuf>) {
         d.link.stop();
         if let Some(dir) = dir { d.link.start(&dir); }
     }).await;
+}
+
+/// Выбор копии нативным диалогом и согласованное восстановление (обмен на время восстановления останавливается).
+async fn restore_interactive(app: &tauri::AppHandle, dir: PathBuf, dav: Arc<DavApi>) -> Result<Option<Vec<String>>, String> {
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let root = backup::backup_root(&data, &dir);
+    let picked = rfd::AsyncFileDialog::new().set_title("Выберите резервную копию").set_directory(&root).pick_folder().await;
+    let Some(folder) = picked else { return Ok(None) };
+    let name = folder.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    if name.is_empty() { return Ok(None); }
+    switch_sync(&dav, None).await;
+    let d = dir.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || backup::restore_backup(&d, &root, &name)).await.map_err(|e| e.to_string())?;
+    switch_sync(&dav, Some(dir)).await;
+    Ok(Some(result?))
 }
 
 #[derive(Default)]
@@ -489,18 +515,7 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
         }
         "backup:restoreInteractive" => {
             let dir = current_dir(&state)?;
-            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-            let root = backup::backup_root(&data, &dir);
-            let picked = rfd::AsyncFileDialog::new().set_title("Выберите резервную копию").set_directory(&root).pick_folder().await;
-            let Some(folder) = picked else { return Ok(Value::Null) };
-            let name = folder.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if name.is_empty() { return Ok(Value::Null); }
-            // Остановить обмен, чтобы в облако не ушёл частично восстановленный проект.
-            switch_sync(&dav, None).await;
-            let d = dir.clone();
-            let result = tauri::async_runtime::spawn_blocking(move || backup::restore_backup(&d, &root, &name)).await.map_err(|e| e.to_string())?;
-            switch_sync(&dav, Some(dir)).await;
-            Ok(json!(result?))
+            Ok(match restore_interactive(&app, dir, dav.clone()).await? { Some(v) => json!(v), None => Value::Null })
         }
         "project:import" => {
             let dir = current_dir(&state)?;
