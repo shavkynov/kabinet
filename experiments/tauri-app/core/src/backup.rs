@@ -110,6 +110,13 @@ pub fn make_backup(dir: &Path, root: &Path, name_override: Option<&str>) -> R<Op
         fs::copy(dir.join(f), &to).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
     }
     fs::write(tmp.join(".sig"), &sig).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
+    // Проверка до публикации: подпись, пересчитанная по СКОПИРОВАННЫМ файлам, должна совпасть с исходной.
+    // Если нет — копия не публикуется (rename не выполняется), проект не изменён.
+    let check = signature(&tmp, &files)?;
+    if check != sig {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err("Копия не совпала с исходником при проверке. Копия не опубликована.".into());
+    }
     fs::rename(&tmp, &target).map_err(|e| format!("Не удалось сделать копию: {}", e))?;
     let all = list_backups(root);
     let mut keep_set = copies_to_keep(&all, keep, keep_days);
