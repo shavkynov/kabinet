@@ -1290,6 +1290,46 @@ mod tests {
         assert_eq!(r(&b, "project.json"), meta_before, "мета не должна потерять главу при ошибке чтения");
     }
 
+    /// Отсутствие файла главы — отдельный безопасный случай: ссылку в мете сохраняем, за пустоту не считаем.
+    #[test]
+    fn adopt_keeps_chapter_reference_when_its_file_is_missing() {
+        let s = FakeServer::new();
+        let a = tmpdir("adopt-missing-a").join("p");
+        project(&a, &[("aaaaaa", "старый роман")]);
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("adopt-missing-b").join("p");
+        project(&b, &[("yyyyyy", "черновик")]);
+        fs::remove_file(b.join("Главы/yyyyyy.md")).unwrap(); // файла нет, ссылка в мете осталась
+        let mut sb = sync_of(&b, &s, "b");
+        sb.sync().unwrap();
+        let meta: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
+        let ids: Vec<&str> = meta["chapters"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"yyyyyy"), "отсутствие файла не повод терять ссылку на главу: {ids:?}");
+        assert!(ids.contains(&"aaaaaa"));
+    }
+
+    /// Ошибка удаления пустой главы в adopt доходит до вызывающего кода; файл остаётся.
+    #[cfg(windows)]
+    #[test]
+    fn adopt_reports_failure_to_remove_empty_chapter() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let s = FakeServer::new();
+        let a = tmpdir("adopt-del-err-a").join("p");
+        project(&a, &[("aaaaaa", "старый роман")]);
+        sync_of(&a, &s, "a").export_all().unwrap();
+
+        let b = tmpdir("adopt-del-err-b").join("p");
+        project(&b, &[("zzzzzz", "")]); // пустая глава, которой нет в облаке → adopt её удалит
+        let file = b.join("Главы/zzzzzz.md");
+        // Читать файл можно, удалить — нельзя: воспроизводимый отказ удаления без chmod.
+        let _lock = fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
+        let mut sb = sync_of(&b, &s, "b");
+        let res = sb.sync();
+        assert!(res.is_err(), "ошибка удаления пустой главы должна дойти до вызывающего: {:?}", res.as_ref().map(|r| r.pulled.clone()));
+        assert!(file.exists(), "файл пустой главы остался на месте");
+    }
+
     /// stats.json синхронизируется как обычный файл: статистика с другого устройства не теряется.
     #[test]
     fn stats_file_is_synced_between_devices() {
