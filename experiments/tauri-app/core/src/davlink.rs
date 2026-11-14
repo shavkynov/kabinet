@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -77,10 +77,20 @@ struct Shared {
     /// Один флаг для фонового и ручного прохода: копия передаётся в FolderSync как cancel.
     stop: Arc<AtomicBool>,
     busy: AtomicBool,
+    /// Сколько РЕАЛЬНЫХ проходов этой сессии сейчас выполняется (фоновый и/или ручной).
+    passes: AtomicUsize,
+    /// Все сессии DavLink: новый проход того же проекта не начинается, пока прежний активен.
+    /// Слабые ссылки — реестр не продлевает жизнь сессиям; блокировка пересечения — локальная,
+    /// облачный genlock для этой гарантии не используется.
+    peers: Arc<Mutex<Vec<Weak<Shared>>>>,
     dirty_at: Mutex<Option<Instant>>,
     quiet_until: Mutex<Instant>,
     st: Mutex<St>,
 }
+
+/// Учитывает реальный проход сессии: счётчик уменьшается на любом выходе, включая ошибку и отмену.
+struct PassGuard(Arc<Shared>);
+impl Drop for PassGuard { fn drop(&mut self) { self.0.passes.fetch_sub(1, Ordering::SeqCst); } }
 
 struct Work {
     dir: PathBuf,
@@ -130,6 +140,8 @@ pub struct DavLink {
     /// Отцепленные проходы: их поток уже вне `Work`, но работа ещё не завершена. Держим, чтобы
     /// «остановка» не означала «забыли о старом работнике»; записи им запрещены stop-флагом.
     orphans: Mutex<Vec<Arc<Shared>>>,
+    /// Реестр всех сессий (слабые ссылки) — общий для фонового и ручного прохода.
+    peers: Arc<Mutex<Vec<Weak<Shared>>>>,
     config: Mutex<()>,
 }
 
@@ -148,6 +160,21 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, device: &str, on
     // но новых записей не делает (cancel-флаг в FolderSync).
     if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
     if shared.busy.swap(true, Ordering::SeqCst) { return PassOutcome::Skipped; }
+    // Учёт РЕАЛЬНОГО прохода, а не только фонового потока: новый проход того же проекта не начинается,
+    // пока прежний проход (фоновый или ручной) ещё выполняется. Проверка и счётчик — под одним локальным
+    // замком, чтобы два прохода не проскочили её одновременно. Облачный genlock для этого не используется.
+    {
+        let mut peers = shared.peers.lock().unwrap();
+        peers.retain(|w| w.upgrade().map(|s| !s.stop.load(Ordering::SeqCst) || s.passes.load(Ordering::SeqCst) > 0).unwrap_or(false));
+        let blocked = peers.iter().filter_map(|w| w.upgrade())
+            .any(|s| !Arc::ptr_eq(&s, shared) && s.dir == shared.dir && s.passes.load(Ordering::SeqCst) > 0);
+        if blocked {
+            shared.busy.store(false, Ordering::SeqCst);
+            return PassOutcome::Skipped;
+        }
+        shared.passes.fetch_add(1, Ordering::SeqCst);
+    }
+    let _pass = PassGuard(shared.clone());
     // Замок общего доступа: проходы с других устройств не должны пересекаться. Не взяли замок —
     // пропускаем проход (повторим позже), чтобы не воевать за одни и те же файлы.
     let token = format!("{}-{:x}", device, rand::random::<u64>());
@@ -204,7 +231,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, device: &str, on
 
 impl DavLink {
     pub fn new(data_dir: &Path, secret: Arc<dyn Secret>, device: &str, make_http: HttpFactory, on_event: OnEvent) -> Self {
-        DavLink { data_dir: data_dir.to_path_buf(), secret, device: device.to_string(), make_http, on_event, cur: Mutex::new(None), orphans: Mutex::new(Vec::new()), config: Mutex::new(()) }
+        DavLink { data_dir: data_dir.to_path_buf(), secret, device: device.to_string(), make_http, on_event, cur: Mutex::new(None), orphans: Mutex::new(Vec::new()), peers: Arc::new(Mutex::new(Vec::new())), config: Mutex::new(()) }
     }
 
     fn links_file(&self) -> PathBuf { self.data_dir.join("dav-links.json") }
@@ -270,14 +297,19 @@ impl DavLink {
     }
 
     pub fn start(&self, dir: &Path) -> bool {
-        self.stop_work();
+        // Старый работник мог не завершиться: новый проход того же проекта будет отложен (skipped),
+        // пока реальный проход прежней сессии не закончится. Вызывающий не блокируется — локальное
+        // письмо и главный поток UI не ждут сеть.
+        let _old_finished = self.stop_work();
         let Some(acc) = self.link_of(dir) else { return false };
         let Ok(mut fs_) = self.folder_sync(dir, &acc) else { return false };
         let shared = Arc::new(Shared {
             dir: dir.to_path_buf(),
-            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
+            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false), passes: AtomicUsize::new(0),
+            peers: self.peers.clone(),
             dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
         });
+        self.peers.lock().unwrap().push(Arc::downgrade(&shared));
         // Один флаг для фонового и ручного прохода: после stop проход не делает новых записей.
         fs_.set_cancel(Some(shared.stop.clone()));
         let sync = Arc::new(Mutex::new(fs_));
@@ -557,6 +589,10 @@ mod tests {
         assert!(!d.stop(), "старый проход ещё в сети, граница истекла");
         set_test_stop_bound(None);
         assert!(d.start(&dir), "новый работник того же проекта запущен");
+        // Прежний проход этой сессии ещё выполняется — новый проход того же проекта откладывается
+        // локальным реестром проходов (не genlock-ом) и не пересекается с ним.
+        assert_eq!(d.sync_now().unwrap()["status"], json!("skipped"), "второй проход отложен до завершения старого");
+        assert!(!pulled(&dir), "пересечения записей нет");
         gate.allow();
         let freed = wait_until(Duration::from_secs(10), || d.orphans.lock().unwrap().iter().all(|s| !s.busy.load(Ordering::SeqCst)));
         assert!(freed, "отцепленный проход #1 завершился");
@@ -697,6 +733,7 @@ mod tests {
             shared: Arc::new(Shared {
                 dir: dir.clone(),
                 stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
+                passes: AtomicUsize::new(0), peers: Arc::new(Mutex::new(Vec::new())),
                 dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
             }),
             sync: Arc::new(Mutex::new(sync)),
@@ -788,6 +825,8 @@ mod tests {
                 dir: dir.clone(),
                 stop: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
+                passes: AtomicUsize::new(0),
+                peers: Arc::new(Mutex::new(Vec::new())),
                 dirty_at: Mutex::new(None),
                 quiet_until: Mutex::new(Instant::now()),
                 st: Mutex::new(St::default()),

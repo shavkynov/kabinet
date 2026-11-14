@@ -127,7 +127,7 @@ async function davQuickSync() {
     if (!result || !result.linked) {
       setStatus('error', t('Проект не связан с сетевой папкой.'));
     } else if (result.status === 'stopped') {
-      setStatus('ok', t('Обмен остановлен. Изменения сохранены на этом компьютере.'));
+      setStatus('ok', t('Обмен остановлен.'));
     } else if (result.status === 'skipped') {
       setStatus('ok', t('Обмен отложен: сейчас идёт другой обмен.'));
     } else if (result.error) {
@@ -136,7 +136,7 @@ async function davQuickSync() {
       setStatus('ok', t('Идёт обмен…'));
     } else if (result.conflict) {
       setStatus('error', t('Был конфликт: чужая версия текста лежит в папке «Конфликты» проекта.'));
-    } else if (result.status === 'done' && result.lastSync > 0 && !davHasUnsavedChanges()) {
+    } else if (result.lastSync > 0 && !davHasUnsavedChanges()) {
       setStatus('ok', t('Синхронизировано'));
     } else if (!result.lastSync) {
       setStatus('error', t('Ещё не обновлялось.'));

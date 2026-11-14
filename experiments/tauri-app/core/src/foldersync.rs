@@ -355,8 +355,11 @@ impl<T: Remote> FolderSync<T> {
         if candidates.is_empty() {
             return Err("Не удалось подобрать имя для конфликтной копии: все имена заняты другими версиями. Операция остановлена.".into());
         }
+        // Подбор имени ходил в сеть: не сохраняем локальную копию и не начинаем новую облачную запись после отмены.
+        self.ensure_not_cancelled()?;
         let name = save_conflict_copy(&self.dir.join(CONFLICT_DIR), &candidates, bytes)?;
         let rel_conflict = format!("{}/{}", CONFLICT_DIR, name);
+        self.ensure_not_cancelled()?;
         match self.remote.mkdir(CONFLICT_DIR).and_then(|_| self.remote.write(&rel_conflict, bytes)) {
             Ok(()) => {
                 self.state.insert(rel_conflict, hash_bytes(bytes));
@@ -385,6 +388,9 @@ impl<T: Remote> FolderSync<T> {
                 if !res.conflicts.contains(&rel.to_string()) { res.conflicts.push(rel.to_string()); }
             }
         }
+        // Сетевые чтения и сохранение конфликтной копии — реальное ожидание: перед новой записью
+        // проверяем отмену ещё раз (проверка в начале функции уже устарела).
+        self.ensure_not_cancelled()?;
         #[cfg(test)]
         sync_hook::fire_remote_after();
         if expect.is_none() {
@@ -393,6 +399,8 @@ impl<T: Remote> FolderSync<T> {
             match self.remote.create(rel, data) {
                 Ok(()) => return Ok(()),
                 Err(_) => {
+                    // Отказ create — не повод начинать fallback-запись после отмены.
+                    self.ensure_not_cancelled()?;
                     if fresh.is_none() {
                         if let Some(b) = self.remote.read(rel)? {
                             if hash_bytes(&b) != hash_bytes(data) {
@@ -401,9 +409,11 @@ impl<T: Remote> FolderSync<T> {
                             }
                         }
                     }
+                    self.ensure_not_cancelled()?;
                 }
             }
         }
+        self.ensure_not_cancelled()?;
         self.remote.write(rel, data)
     }
 
@@ -726,6 +736,8 @@ impl<T: Remote> FolderSync<T> {
         if let Some(b) = bytes {
             if Some(&hash_bytes(&b)) != self.state.get(rel) { self.keep_foreign(rel, &b, &label_of(rel))?; res.conflicts.push(rel.to_string()); }
         }
+        // Прямое удаление в облаке не должно обходить механизм отмены (чтение и keep могли ждать сеть).
+        self.ensure_not_cancelled()?;
         // Ошибку удаления не выдаём за успешно выполненное удаление: состояние не меняем, повторим при следующем проходе.
         self.remote.remove(rel)?;
         self.state.remove(rel);
