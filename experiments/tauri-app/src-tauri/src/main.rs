@@ -470,6 +470,23 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             open_path(&folder);
             Ok(json!(true))
         }
+        "backup:list" => {
+            let dir = current_dir(&state)?;
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            Ok(json!(backup::list_backups(&backup::backup_root(&data, &dir))))
+        }
+        "backup:restore" => {
+            let dir = current_dir(&state)?;
+            let name = arg_str(a, 0)?;
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let root = backup::backup_root(&data, &dir);
+            // Остановить обмен, чтобы в облако не ушёл частично восстановленный проект.
+            switch_sync(&dav, None).await;
+            let d = dir.clone();
+            let result = tauri::async_runtime::spawn_blocking(move || backup::restore_backup(&d, &root, &name)).await.map_err(|e| e.to_string())?;
+            switch_sync(&dav, Some(dir)).await;
+            Ok(json!(result?))
+        }
         "project:import" => {
             let dir = current_dir(&state)?;
             let picked = rfd::AsyncFileDialog::new().set_title("Импорт глав")
