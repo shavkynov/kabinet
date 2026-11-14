@@ -124,7 +124,7 @@ mod tests {
 
     fn api(s: &FakeServer, data: &Path) -> DavApi {
         let s = s.clone();
-        DavApi::new(DavLink::new(data, Arc::new(PlainSecret), "Т", Arc::new(move || Box::new(s.clone()) as Box<dyn Http>), Arc::new(|_| {})))
+        DavApi::new(DavLink::new(data, Arc::new(PlainSecret), "Т", Arc::new(move || Box::new(s.clone()) as Box<dyn Http>), Arc::new(|_, _| {})))
     }
 
     #[test]

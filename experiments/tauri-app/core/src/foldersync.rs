@@ -10,6 +10,8 @@ use sha1::{Digest, Sha1};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub const FOLDERS: [&str; 9] = ["Главы", "Персонажи", "Места", "Предметы", "Заметки", "Изображения", "Картинки", "Корзина", CONFLICT_DIR];
 const MASS_DELETE_MIN: usize = 5;
@@ -195,6 +197,9 @@ pub struct FolderSync<T: Remote> {
     state_file: Option<PathBuf>,
     state: BTreeMap<String, String>,
     cache: Cache,
+    /// Флаг остановки сессии (владелец — davlink). Проверяется перед каждой НОВОЙ записью:
+    /// уже отправленный запрос доигрывается, но результат не приводит к новым записям/сохранению.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 fn text(b: &[u8]) -> String { String::from_utf8_lossy(b).to_string() }
@@ -204,9 +209,20 @@ fn label_of(rel: &str) -> String { if rel.contains('/') { stem(rel) } else { rel
 
 impl<T: Remote> FolderSync<T> {
     pub fn new(dir: &Path, remote: T, state_file: Option<PathBuf>) -> R<Self> {
-        let mut s = FolderSync { dir: dir.to_path_buf(), remote, state_file, state: BTreeMap::new(), cache: HashMap::new() };
+        let mut s = FolderSync { dir: dir.to_path_buf(), remote, state_file, state: BTreeMap::new(), cache: HashMap::new(), cancel: None };
         s.load()?;
         Ok(s)
+    }
+
+    /// Подключить флаг остановки сессии (davlink::Work). Отмена кооперативная: проверяется
+    /// перед каждой новой записью в локальные файлы, облако, «Конфликты» и state.
+    pub fn set_cancel(&mut self, cancel: Option<Arc<AtomicBool>>) { self.cancel = cancel; }
+
+    fn ensure_not_cancelled(&self) -> R<()> {
+        if self.cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+            return Err("Синхронизация остановлена. Изменения сохранены локально и уйдут при следующем обмене.".into());
+        }
+        Ok(())
     }
 
     fn cache_file(&self) -> Option<PathBuf> { self.state_file.as_ref().map(|p| PathBuf::from(format!("{}.cache", p.display()))) }
@@ -259,6 +275,7 @@ impl<T: Remote> FolderSync<T> {
     /// Сохранение состояния: ошибка записи возвращается. Кэш — производная величина, его ошибка
     /// не отменяет уже выполненную синхронизацию.
     fn save(&self) -> R<()> {
+        self.ensure_not_cancelled()?;
         let Some(f) = &self.state_file else { return Ok(()) };
         if let Some(p) = f.parent() { fs::create_dir_all(p).map_err(|e| format!("Не удалось создать папку состояния синхронизации: {}.", e))?; }
         let st: serde_json::Map<String, Value> = self.state.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
@@ -298,6 +315,7 @@ impl<T: Remote> FolderSync<T> {
     }
 
     fn write_local(&self, rel: &str, bytes: &[u8]) -> R<()> {
+        self.ensure_not_cancelled()?;
         let target = self.dir.join(rel);
         if let Some(p) = target.parent() { fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         write_atomic_bytes(&target, bytes)
@@ -314,6 +332,7 @@ impl<T: Remote> FolderSync<T> {
     /// Ошибка чтения имени-кандидата и ошибка облачного сохранения копии НЕ подавляются: иначе вызывающая
     /// операция (перезапись/удаление вытесняемой версии) продолжилась бы, хотя копия не подтверждена.
     fn keep(&mut self, rel: &str, bytes: &[u8], label: &str, suffix: &str) -> R<String> {
+        self.ensure_not_cancelled()?;
         // Имя должно подойти и у нас, и в папке: другая версия под тем же именем (та же секунда) не затирается,
         // тогда берётся имя с SHA-256. Проверка папки идёт без замка: сеть под замком не держим.
         let mut candidates: Vec<String> = Vec::new();
@@ -354,6 +373,7 @@ impl<T: Remote> FolderSync<T> {
     /// может быть старше записи на минуты, а кэш по размеру и дате не видит правку с тем же размером и временем.
     /// Ошибка чтения отменяет запись: лучше повторить проход, чем затереть чужую версию вслепую.
     fn write_checked(&mut self, rel: &str, data: &[u8], expect: Option<&str>, res: &mut SyncResult) -> R<()> {
+        self.ensure_not_cancelled()?;
         #[cfg(test)]
         sync_hook::fire_remote();
         if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
@@ -388,6 +408,7 @@ impl<T: Remote> FolderSync<T> {
     }
 
     fn remove_local(&self, rel: &str) -> R<()> {
+        self.ensure_not_cancelled()?;
         match fs::remove_file(self.dir.join(rel)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -525,6 +546,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Один проход: что снаружи — к нам, что у нас — наружу.
     pub fn sync(&mut self) -> R<SyncResult> {
+        self.ensure_not_cancelled()?;
         let cache = std::mem::take(&mut self.cache);
         let walked = walk_remote(&mut self.remote, Some(&cache));
         self.cache = cache;

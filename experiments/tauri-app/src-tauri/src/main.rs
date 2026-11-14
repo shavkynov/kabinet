@@ -237,11 +237,12 @@ fn reveal(p: &Path) {
     #[cfg(not(any(windows, target_os = "macos")))] { if let Some(d) = p.parent() { open_path(d); } }
 }
 
-/// Остановить обмен с облаком прежнего проекта (с дозаписью) и запустить для нового, если он связан.
+/// Остановить обмен с облаком прежнего проекта и запустить для нового, если он связан.
+/// Остановка ограниченная: незавершённый проход не забыт (учитывается в DavLink) и новых записей не делает.
 async fn switch_sync(dav: &Arc<DavApi>, dir: Option<PathBuf>) {
     let d = dav.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
-        d.link.stop();
+        let _ = d.link.stop();
         if let Some(dir) = dir { d.link.start(&dir); }
     }).await;
 }
@@ -662,10 +663,15 @@ fn main() {
             let handle = app.handle().clone();
             let h2 = handle.clone();
             let _ = app.state::<AppState>().on_external.set(Arc::new(move |files: Vec<String>| { let _ = h2.emit("sync:changed", files); }));
-            let on_event = Arc::new(move |e: Event| match e {
-                Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
-                Event::Error(m) => { let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
-                Event::Changed(files) => { let _ = handle.emit("sync:changed", files); }
+            let on_event = Arc::new(move |dir: &Path, e: Event| {
+                // Запоздавшие события старого проекта не должны обновлять интерфейс другого открытого проекта.
+                let cur = handle.state::<AppState>().current.lock().ok().and_then(|g| g.clone());
+                if cur.as_deref() != Some(dir) { return; }
+                match e {
+                    Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
+                    Event::Error(m) => { let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
+                    Event::Changed(files) => { let _ = handle.emit("sync:changed", files); }
+                }
             });
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),
                 Arc::new(|| Box::new(Retrying::new(UreqHttp::new())) as Box<dyn Http>), on_event);

@@ -1,7 +1,7 @@
 //! Проект на компьютере, связанный с папкой на Яндекс Диске. Порт src/davlink.js.
 //! Фоновый поток: полный проход раз в 30 с, выгрузка через 4 с после правки (наблюдение за папкой),
 //! замок «kabinet.lock» раз в минуту. Проходы идут строго по одному.
-use crate::foldersync::{is_syncable, FolderSync, SyncResult};
+use crate::foldersync::{is_syncable, FolderSync};
 use crate::store::{write_atomic, R};
 use crate::remote::Folder;
 use crate::http::Http;
@@ -57,7 +57,13 @@ pub enum Event {
 
 type Rm = Box<dyn Folder>;
 type HttpFactory = Arc<dyn Fn() -> Box<dyn Http> + Send + Sync>;
-type OnEvent = Arc<dyn Fn(Event) + Send + Sync>;
+/// Событие сессии: `dir` — проект, к которому относится событие. UI сравнивает его с открытым,
+/// чтобы запоздавшие события старого проекта не обновляли другой проект.
+type OnEvent = Arc<dyn Fn(&Path, Event) + Send + Sync>;
+
+/// Исход прохода: ручной обмен возвращает его в UI, чтобы пропущенный проход не выглядел успехом.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PassOutcome { Done, Skipped, Stopped, Error }
 
 #[derive(Default)]
 struct St {
@@ -67,7 +73,9 @@ struct St {
 }
 
 struct Shared {
-    stop: AtomicBool,
+    dir: PathBuf,
+    /// Один флаг для фонового и ручного прохода: копия передаётся в FolderSync как cancel.
+    stop: Arc<AtomicBool>,
     busy: AtomicBool,
     dirty_at: Mutex<Option<Instant>>,
     quiet_until: Mutex<Instant>,
@@ -83,11 +91,13 @@ struct Work {
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
-/// Ограниченное ожидание потока: если он не успел за `stop_wait_bound()`, отцепляем его — он доделает
-/// текущий проход (состояние сохраняется в конце) и выйдет сам; закрытие окна не блокируется.
-fn join_bounded(w: &mut Work) {
+/// Ограниченное ожидание потока: если он не успел за `stop_wait_bound()`, отцепляем его — записи ему уже
+/// запрещены (stop-флаг), он доиграет текущий запрос и выйдет сам; закрытие окна не блокируется.
+/// Возвращает true, если поток завершился в границе.
+fn join_bounded(w: &mut Work) -> bool {
     let finished = w.done.take().map(|rx| rx.recv_timeout(stop_wait_bound()).is_ok()).unwrap_or(true);
     if let Some(t) = w.thread.take() { if finished { let _ = t.join(); } }
+    finished
 }
 
 /// Граница ожидания остановки: production — `STOP_BOUND`; в тестах можно задать короткую границу
@@ -117,6 +127,9 @@ pub struct DavLink {
     make_http: HttpFactory,
     on_event: OnEvent,
     cur: Mutex<Option<Work>>,
+    /// Отцепленные проходы: их поток уже вне `Work`, но работа ещё не завершена. Держим, чтобы
+    /// «остановка» не означала «забыли о старом работнике»; записи им запрещены stop-флагом.
+    orphans: Mutex<Vec<Arc<Shared>>>,
     config: Mutex<()>,
 }
 
@@ -130,8 +143,11 @@ fn dav_of(http: Box<dyn Http>, acc: &Acc, root: Option<&str>) -> R<Rm> {
     Ok(Box::new(YandexDisk::new(http, &acc.pass, root)?))
 }
 
-fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, device: &str, on_event: &OnEvent) -> Option<SyncResult> {
-    if shared.busy.swap(true, Ordering::SeqCst) { return None; }
+fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, device: &str, on_event: &OnEvent) -> PassOutcome {
+    // Остановка сессии запрещает НОВЫЕ проходы. Уже идущий проход доигрывает текущий запрос,
+    // но новых записей не делает (cancel-флаг в FolderSync).
+    if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
+    if shared.busy.swap(true, Ordering::SeqCst) { return PassOutcome::Skipped; }
     // Замок общего доступа: проходы с других устройств не должны пересекаться. Не взяли замок —
     // пропускаем проход (повторим позже), чтобы не воевать за одни и те же файлы.
     let token = format!("{}-{:x}", device, rand::random::<u64>());
@@ -143,13 +159,14 @@ fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, device: &str, on_even
         Ok(true) => {}
         Ok(false) => { // обмен уже идёт на другом устройстве — пропускаем проход, повторим позже
             shared.busy.store(false, Ordering::SeqCst);
-            return None;
+            return PassOutcome::Skipped;
         }
         Err(e) => {
-            shared.st.lock().unwrap().last_error = e.clone();
-            on_event(Event::Error(e));
             shared.busy.store(false, Ordering::SeqCst);
-            return None;
+            if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
+            shared.st.lock().unwrap().last_error = e.clone();
+            on_event(&shared.dir, Event::Error(e));
+            return PassOutcome::Error;
         }
     }
     let result = {
@@ -157,7 +174,12 @@ fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, device: &str, on_even
         s.sync()
     };
     if let Ok(mut s) = sync.lock() { let _ = crate::genlock::release(&mut s.remote, &token); }
-    let out = match result {
+    *shared.quiet_until.lock().unwrap() = Instant::now() + Duration::from_secs(3);
+    shared.busy.store(false, Ordering::SeqCst);
+    // Уже отправленный запрос не отзываем задним числом: результат пришёл в контексте ИСХОДНОЙ сессии.
+    // После остановки он не считается успехом и не обновляет интерфейс другого проекта.
+    if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
+    match result {
         Ok(res) => {
             {
                 let mut st = shared.st.lock().unwrap();
@@ -165,26 +187,24 @@ fn run_pass(shared: &Shared, sync: &Mutex<FolderSync<Rm>>, device: &str, on_even
                 st.last_error.clear();
                 if !res.conflicts.is_empty() { st.conflict = true; }
             }
-            if !res.conflicts.is_empty() { on_event(Event::Conflict); }
+            if !res.conflicts.is_empty() { on_event(&shared.dir, Event::Conflict); }
             let mut touched: Vec<String> = res.pulled.clone();
             for c in &res.conflicts { if !touched.contains(c) { touched.push(c.clone()); } }
-            if !touched.is_empty() { on_event(Event::Changed(touched)); }
-            Some(res)
+            if !touched.is_empty() { on_event(&shared.dir, Event::Changed(touched)); }
+            PassOutcome::Done
         }
         Err(e) => {
+            if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
             shared.st.lock().unwrap().last_error = e.clone();
-            on_event(Event::Error(e));
-            None
+            on_event(&shared.dir, Event::Error(e));
+            PassOutcome::Error
         }
-    };
-    *shared.quiet_until.lock().unwrap() = Instant::now() + Duration::from_secs(3);
-    shared.busy.store(false, Ordering::SeqCst);
-    out
+    }
 }
 
 impl DavLink {
     pub fn new(data_dir: &Path, secret: Arc<dyn Secret>, device: &str, make_http: HttpFactory, on_event: OnEvent) -> Self {
-        DavLink { data_dir: data_dir.to_path_buf(), secret, device: device.to_string(), make_http, on_event, cur: Mutex::new(None), config: Mutex::new(()) }
+        DavLink { data_dir: data_dir.to_path_buf(), secret, device: device.to_string(), make_http, on_event, cur: Mutex::new(None), orphans: Mutex::new(Vec::new()), config: Mutex::new(()) }
     }
 
     fn links_file(&self) -> PathBuf { self.data_dir.join("dav-links.json") }
@@ -237,23 +257,30 @@ impl DavLink {
 
     // ---------- работа открытого проекта ----------
 
-    fn stop_work(&self) {
+    /// Остановить работника открытого проекта. Возвращает true, если поток завершился в границе.
+    /// Если нет — работник не забыт: он учитывается в `orphans`, а его записи уже запрещены stop-флагом.
+    fn stop_work(&self) -> bool {
         let work = self.cur.lock().unwrap().take();
-        if let Some(mut w) = work {
-            w.shared.stop.store(true, Ordering::SeqCst);
-            join_bounded(&mut w);
-        }
+        let Some(mut w) = work else { return true };
+        w.shared.stop.store(true, Ordering::SeqCst);
+        let finished = join_bounded(&mut w);
+        if !finished { self.orphans.lock().unwrap().push(w.shared.clone()); }
+        self.orphans.lock().unwrap().retain(|s| s.busy.load(Ordering::SeqCst) || !s.stop.load(Ordering::SeqCst));
+        finished
     }
 
     pub fn start(&self, dir: &Path) -> bool {
         self.stop_work();
         let Some(acc) = self.link_of(dir) else { return false };
-        let Ok(fs_) = self.folder_sync(dir, &acc) else { return false };
-        let sync = Arc::new(Mutex::new(fs_));
+        let Ok(mut fs_) = self.folder_sync(dir, &acc) else { return false };
         let shared = Arc::new(Shared {
-            stop: AtomicBool::new(false), busy: AtomicBool::new(false),
+            dir: dir.to_path_buf(),
+            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
             dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
         });
+        // Один флаг для фонового и ручного прохода: после stop проход не делает новых записей.
+        fs_.set_cancel(Some(shared.stop.clone()));
+        let sync = Arc::new(Mutex::new(fs_));
         let watcher = {
             use notify::{RecursiveMode, Watcher};
             let sh = shared.clone();
@@ -296,12 +323,8 @@ impl DavLink {
     /// Остановить обмен и снять замок (закрытие проекта, выход). Обязательный сетевой проход
     /// на выходе не делаем: незавершённое сохранено локально и уйдёт при следующем запуске,
     /// а блокирующий проход мешает закрытию окна при медленной/недоступной сети.
-    pub fn stop(&self) {
-        let work = self.cur.lock().unwrap().take();
-        let Some(mut w) = work else { return };
-        w.shared.stop.store(true, Ordering::SeqCst);
-        join_bounded(&mut w);
-    }
+    /// Возвращает true, если фоновый поток завершился в границе ожидания.
+    pub fn stop(&self) -> bool { self.stop_work() }
 
     pub fn status(&self, dir: Option<&Path>) -> Value {
         let Some(dir) = dir else { return json!({ "linked": false }) };
@@ -323,11 +346,25 @@ impl DavLink {
             let w = cur.as_ref().ok_or("Проект не связан с сетевой папкой.")?;
             (w.dir.clone(), w.shared.clone(), w.sync.clone())
         };
+        // Сессия остановлена: ручной обмен не запускает проход старого проекта.
+        if shared.stop.load(Ordering::SeqCst) {
+            let mut v = self.status(Some(&dir));
+            v["status"] = json!("stopped");
+            return Ok(v);
+        }
         shared.st.lock().unwrap().conflict = false;
         // если фоновый проход уже идёт, подождать его конца и запустить свой
         for _ in 0..600 { if !shared.busy.load(Ordering::SeqCst) { break; } std::thread::sleep(Duration::from_millis(100)); }
-        run_pass(&shared, &sync, &self.device, &self.on_event);
-        Ok(self.status(Some(&dir)))
+        let outcome = run_pass(&shared, &sync, &self.device, &self.on_event);
+        let mut v = self.status(Some(&dir));
+        // Фактический исход, а не «успешное» состояние: пропуск/остановка видны в UI.
+        v["status"] = json!(match outcome {
+            PassOutcome::Done => "done",
+            PassOutcome::Skipped => "skipped",
+            PassOutcome::Stopped => "stopped",
+            PassOutcome::Error => "error",
+        });
+        Ok(v)
     }
 
     // ---------- подключение ----------
@@ -421,7 +458,7 @@ mod tests {
     fn link(data: &Path, s: &FakeServer, events: Arc<Mutex<Vec<String>>>) -> DavLink {
         let s = s.clone();
         DavLink::new(data, Arc::new(PlainSecret), "Тест", Arc::new(move || Box::new(s.clone()) as Box<dyn Http>),
-            Arc::new(move |e| events.lock().unwrap().push(format!("{:?}", e))))
+            Arc::new(move |_dir, e| events.lock().unwrap().push(format!("{:?}", e))))
     }
     fn acc() -> Acc { Acc { url: "https://webdav.yandex.ru".into(), user: OAUTH_USER.into(), pass: oauth_pass(), root: "/Кабинет/Роман".into(), label: "Облако".into() } }
     fn project(dir: &Path) {
@@ -458,7 +495,7 @@ mod tests {
         let (s2, g2, a2) = (s.clone(), gate.clone(), armed.clone());
         DavLink::new(data, Arc::new(PlainSecret), "Тест",
             Arc::new(move || Box::new(SlowHttp { inner: s2.clone(), gate: g2.clone(), armed: a2.clone() }) as Box<dyn Http>),
-            Arc::new(move |e| events.lock().unwrap().push(format!("{:?}", e))))
+            Arc::new(move |_dir, e| events.lock().unwrap().push(format!("{:?}", e))))
     }
 
     fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
@@ -471,10 +508,10 @@ mod tests {
         std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).map(|t| t == "правка с телефона").unwrap_or(false)
     }
 
-    /// S1.1 ХАРАКТЕРИЗАЦИЯ: stop() отцепляет поток по границе, и старый проход продолжает работу —
-    /// локальные записи и события происходят после возврата stop.
+    /// S1.1 ИНВАРИАНТ: stop() отцепляет поток по границе, но отцепленный проход НЕ делает локальных
+    /// записей и не эмитит события после возврата stop (cancel-флаг проверяется перед каждой записью).
     #[test]
-    fn s1_1_background_pass_continues_after_stop_characterization() {
+    fn s1_1_stopped_pass_makes_no_writes_after_stop() {
         let s = FakeServer::new();
         let data = tmpdir("data");
         let events: Arc<Mutex<Vec<String>>> = Default::default();
@@ -488,67 +525,74 @@ mod tests {
         assert!(d.start(&dir));
         gate.wait_reached(); // проход остановлен внутри реальной HTTP-операции
         set_test_stop_bound(Some(Duration::from_millis(100)));
-        d.stop(); // возвращается, не дождавшись прохода
+        let finished = d.stop(); // возвращается, не дождавшись прохода
         set_test_stop_bound(None);
+        assert!(!finished, "ответ на запрос ещё не получен — граница ожидания истекла");
         assert!(!pulled(&dir), "до освобождения проход ещё не завершён");
         gate.allow();
-        // Сначала дожидаемся события прохода (оно приходит после sync), затем проверяем запись.
-        let changed = wait_until(Duration::from_secs(5), || events.lock().unwrap().iter().any(|e| e.contains("Changed")));
-        assert!(changed,
-            "ХАРАКТЕРИЗАЦИЯ: отцепленный проход продолжился и отправил события после возврата stop");
-        assert!(pulled(&dir), "локальная запись выполнена после возврата stop");
+        // Отцепленный проход доигрывает запрос, но новых записей и событий от него быть не должно.
+        let ended = wait_until(Duration::from_secs(5), || d.orphans.lock().unwrap().iter().all(|s| !s.busy.load(Ordering::SeqCst)));
+        assert!(ended, "отцепленный проход завершился");
+        assert!(!pulled(&dir), "остановленный проход не делает локальных записей");
+        assert!(events.lock().unwrap().is_empty(), "остановленный проход не эмитит события: {:?}", events.lock().unwrap());
     }
 
-    /// S1.2 ХАРАКТЕРИЗАЦИЯ: после stop старый проход ещё жив, а start того же проекта запускает
-    /// второй проход — два прохода над одним проектом одновременно.
+    /// S1.2 ИНВАРИАНТ: start после незавершённого stop не запускает параллельный проход поверх старого;
+    /// старый проход не пишет, а новый работник после границы штатно завершает проход.
     #[test]
-    fn s1_2_restart_while_old_pass_still_running_characterization() {
+    fn s1_2_restart_after_unfinished_stop_waits_for_boundary_and_works() {
         let s = FakeServer::new();
         let data = tmpdir("data");
         let events: Arc<Mutex<Vec<String>>> = Default::default();
         let gate = Gate::with_timeout(Duration::from_secs(3));
         let _release = gate.allow_on_drop();
         let armed = Arc::new(AtomicBool::new(false));
-        let d = slow_link(&data, &s, events, &gate, &armed);
+        let d = slow_link(&data, &s, events.clone(), &gate, &armed);
         let dir = tmpdir("proj");
         seed(&d, &s, &dir);
         armed.store(true, Ordering::SeqCst);
         assert!(d.start(&dir));
-        gate.wait_reached(); // проход #1 приостановлен
+        gate.wait_reached(); // проход #1 приостановлен в сети
         set_test_stop_bound(Some(Duration::from_millis(100)));
-        d.stop(); // #1 отцеплен, но жив
+        assert!(!d.stop(), "старый проход ещё в сети, граница истекла");
         set_test_stop_bound(None);
-        assert!(d.start(&dir), "второй работник того же проекта запущен");
-        assert!(wait_until(Duration::from_secs(5), || pulled(&dir)),
-            "ХАРАКТЕРИЗАЦИЯ: проход #2 завершился, пока проход #1 ещё приостановлен");
+        assert!(d.start(&dir), "новый работник того же проекта запущен");
         gate.allow();
+        let freed = wait_until(Duration::from_secs(10), || d.orphans.lock().unwrap().iter().all(|s| !s.busy.load(Ordering::SeqCst)));
+        assert!(freed, "отцепленный проход #1 завершился");
+        // Отменённый старый проход не сделал записей и не эмитил событий (писать ему запрещено).
+        assert!(events.lock().unwrap().is_empty(), "старый отменённый проход не эмитит события: {:?}", events.lock().unwrap());
+        assert!(d.sync_now().unwrap()["status"] == json!("done"), "новый работник завершил проход после границы");
+        assert!(pulled(&dir), "новый работник докачал правку");
+        assert!(events.lock().unwrap().iter().any(|e| e.contains("Changed")), "событие относится к текущему проекту");
     }
 
-    /// S1.3 ХАРАКТЕРИЗАЦИЯ: stop снимает Work и останавливает фоновый поток, но уже вошедший в
-    /// run_pass ручной sync_now продолжается и делает записи после возврата stop.
+    /// S1.3 ИНВАРИАНТ: ручной sync_now, уже отправивший запрос, после stop не делает записей
+    /// и возвращает фактический исход «stopped» (пропуск не выдаётся за успех).
     #[test]
-    fn s1_3_manual_sync_now_continues_after_stop_characterization() {
+    fn s1_3_manual_sync_now_after_stop_reports_stopped_without_writes() {
         let s = FakeServer::new();
         let data = tmpdir("data");
         let events: Arc<Mutex<Vec<String>>> = Default::default();
         let gate = Gate::with_timeout(Duration::from_secs(3));
         let _release = gate.allow_on_drop();
         let armed = Arc::new(AtomicBool::new(false));
-        let d = Arc::new(slow_link(&data, &s, events, &gate, &armed));
+        let d = Arc::new(slow_link(&data, &s, events.clone(), &gate, &armed));
         let dir = tmpdir("proj");
         seed(&d, &s, &dir);
         armed.store(true, Ordering::SeqCst);
         assert!(d.start(&dir));
         let d2 = Arc::clone(&d);
         let manual = std::thread::spawn(move || d2.sync_now());
-        gate.wait_reached(); // ручной проход остановлен внутри HTTP
+        gate.wait_reached(); // проход остановлен внутри HTTP
         set_test_stop_bound(Some(Duration::from_millis(100)));
         d.stop(); // возвращается; Work снят
         set_test_stop_bound(None);
         gate.allow();
-        let res = manual.join().unwrap();
-        assert!(res.is_ok(), "ручной sync_now вернулся: {:?}", res.as_ref().err());
-        assert!(pulled(&dir), "ХАРАКТЕРИЗАЦИЯ: ручной проход продолжился после stop");
+        let res = manual.join().unwrap().unwrap();
+        assert_eq!(res["status"], json!("stopped"), "ручной обмен вернул фактический исход: {res}");
+        assert!(!pulled(&dir), "остановленный ручной проход не делает записей");
+        assert!(events.lock().unwrap().is_empty(), "нет событий остановленной сессии: {:?}", events.lock().unwrap());
     }
 
     #[test]
@@ -651,7 +695,8 @@ mod tests {
         *d.cur.lock().unwrap() = Some(Work {
             dir: dir.clone(),
             shared: Arc::new(Shared {
-                stop: AtomicBool::new(false), busy: AtomicBool::new(false),
+                dir: dir.clone(),
+                stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
                 dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
             }),
             sync: Arc::new(Mutex::new(sync)),
@@ -684,7 +729,7 @@ mod tests {
         struct Deny;
         impl Http for Deny { fn request(&self, _: crate::http::Req) -> Result<crate::http::Resp, String> { Ok(crate::http::Resp { status: 401, body: vec![], location: None }) } }
         let data = tmpdir("data");
-        let d = DavLink::new(&data, Arc::new(PlainSecret), "Т", Arc::new(|| Box::new(Deny) as Box<dyn Http>), Arc::new(|_| {}));
+        let d = DavLink::new(&data, Arc::new(PlainSecret), "Т", Arc::new(|| Box::new(Deny) as Box<dyn Http>), Arc::new(|_, _| {}));
         assert!(d.login("https://webdav.yandex.ru", OAUTH_USER, &oauth_pass()).unwrap_err().contains("Подключите"));
         let old = Acc { user: "me@yandex.ru".into(), pass: "пароль".into(), ..acc() };
         assert!(d.attach(&tmpdir("old"), &old, "ask").unwrap_err().contains("больше не поддерживается"));
@@ -729,7 +774,7 @@ mod tests {
             let observed = observed.clone();
             DavLink::new(&data, Arc::new(PlainSecret), "Тест",
                 Arc::new(|| Box::new(Offline) as Box<dyn Http>),
-                Arc::new(move |event| {
+                Arc::new(move |_dir, event| {
                     assert!(matches!(event, Event::Error(_)));
                     let d = weak.upgrade().unwrap();
                     assert!(d.config.try_lock().is_err(), "блокировка должна удерживаться до завершения sync_now");
@@ -740,7 +785,8 @@ mod tests {
         *d.cur.lock().unwrap() = Some(Work {
             dir: dir.clone(),
             shared: Arc::new(Shared {
-                stop: AtomicBool::new(false),
+                dir: dir.clone(),
+                stop: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
                 dirty_at: Mutex::new(None),
                 quiet_until: Mutex::new(Instant::now()),

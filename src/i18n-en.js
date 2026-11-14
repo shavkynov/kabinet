@@ -193,6 +193,8 @@ module.exports = {
   "Ещё не обновлялось.": "Not synced yet.",
   "Ошибка: {0}": "Error: {0}",
   "Идёт обмен…": "Syncing…",
+  "Обмен остановлен. Изменения сохранены на этом компьютере.": "Exchange stopped. Your changes are saved on this computer.",
+  "Обмен отложен: сейчас идёт другой обмен.": "Exchange deferred: another exchange is running right now.",
   "Был конфликт: чужая версия текста лежит в папке «Конфликты» проекта.": "There was a conflict: the other version of the text is in the project’s “Конфликты” folder.",
   "Правки уходят в облако сами через несколько секунд после изменения. Чужие подтягиваются раз в полминуты.": "Changes go to the cloud by themselves a few seconds after you make them. Changes from other devices arrive every half minute.",
   "Как это работает": "How it works",
