@@ -52,6 +52,8 @@ pub enum Event {
     Conflict,
     Error(String),
     Changed(Vec<String>),
+    /// Ход обмена: этап («download»/«upload»; пусто — обмен закончен), сделано, всего.
+    Progress(String, usize, usize),
 }
 
 type Rm = Box<dyn Folder>;
@@ -77,6 +79,8 @@ struct Shared {
     dir: PathBuf,
     /// Один флаг для фонового и ручного прохода: копия передаётся в FolderSync как cancel.
     stop: Arc<AtomicBool>,
+    /// Остановить только идущий проход (сессия остаётся рабочей). Сбрасывается в начале каждого прохода.
+    pass: Arc<AtomicBool>,
     busy: AtomicBool,
     /// Один признак «проход идёт» на проект: пока слот занят, второй проход того же проекта
     /// откладывается. Слот освобождается при любом выходе из прохода, включая ошибку и отмену.
@@ -171,6 +175,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
         return PassOutcome::Skipped;
     };
     let started = now_ms();
+    shared.pass.store(false, Ordering::SeqCst);
     // Облачного замка нет: свежая отметка `kabinet.lock` от телефона не блокирует проход
     // и не перезаписывается. Чужие правки защищает write_checked (перечитывание перед записью).
     let result = match sync.lock() {
@@ -182,6 +187,9 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
     // Уже отправленный запрос не отзываем задним числом: результат пришёл в контексте ИСХОДНОЙ сессии.
     // После остановки он не считается успехом и не обновляет интерфейс другого проекта.
     if shared.stop.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
+    on_event(&shared.dir, Event::Progress(String::new(), 0, 0));
+    // Остановка только этого прохода: не ошибка, изменения сохранены локально и уйдут при следующем обмене.
+    if result.is_err() && shared.pass.load(Ordering::SeqCst) { return PassOutcome::Stopped; }
     match result {
         Ok(res) => {
             {
@@ -258,7 +266,23 @@ impl DavLink {
     }
 
     fn folder_sync(&self, dir: &Path, acc: &Acc) -> R<FolderSync<Rm>> {
-        FolderSync::new(dir, dav_of((self.make_http)(), acc, None)?, Some(self.state_file(dir, acc)))
+        let mut fs_ = FolderSync::new(dir, dav_of((self.make_http)(), acc, None)?, Some(self.state_file(dir, acc)))?;
+        fs_.set_progress(Some(self.progress_fn(dir, None)));
+        Ok(fs_)
+    }
+
+    /// Ход обмена уходит окну не чаще раза в 150 мс (последний шаг этапа — всегда). У остановленной сессии
+    /// (`stop`) событий нет, как и у прочих сообщений.
+    fn progress_fn(&self, dir: &Path, stop: Option<Arc<AtomicBool>>) -> crate::foldersync::ProgressFn {
+        let (on_event, dir2) = (self.on_event.clone(), dir.to_path_buf());
+        let last = Mutex::new(Instant::now() - Duration::from_secs(1));
+        Arc::new(move |phase: &str, done: usize, total: usize| {
+            if stop.as_ref().map(|s| s.load(Ordering::SeqCst)).unwrap_or(false) { return; }
+            let mut l = last.lock().unwrap();
+            if done < total && l.elapsed() < Duration::from_millis(150) { return; }
+            *l = Instant::now();
+            on_event(&dir2, Event::Progress(phase.to_string(), done, total));
+        })
     }
 
     // ---------- работа открытого проекта ----------
@@ -270,6 +294,7 @@ impl DavLink {
         let work = self.cur.lock().unwrap().take();
         let Some(mut w) = work else { return true };
         w.shared.stop.store(true, Ordering::SeqCst);
+        w.shared.pass.store(true, Ordering::SeqCst);
         join_bounded(&mut w)
     }
 
@@ -282,12 +307,13 @@ impl DavLink {
         let Ok(mut fs_) = self.folder_sync(dir, &acc) else { return false };
         let shared = Arc::new(Shared {
             dir: dir.to_path_buf(),
-            stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
+            stop: Arc::new(AtomicBool::new(false)), pass: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
             pass_slots: self.pass_slots.clone(),
             dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
         });
         // Один флаг для фонового и ручного прохода: после stop проход не делает новых записей.
-        fs_.set_cancel(Some(shared.stop.clone()));
+        fs_.set_cancel(Some(shared.pass.clone()));
+        fs_.set_progress(Some(self.progress_fn(dir, Some(shared.stop.clone()))));
         let sync = Arc::new(Mutex::new(fs_));
         let watcher = {
             use notify::{RecursiveMode, Watcher};
@@ -333,6 +359,14 @@ impl DavLink {
     /// а блокирующий проход мешает закрытию окна при медленной/недоступной сети.
     /// Возвращает true, если фоновый поток завершился в границе ожидания.
     pub fn stop(&self) -> bool { self.stop_work() }
+
+    /// Останавливает идущий обмен, не закрывая сессию: следующий обмен (ручной или по правке) работает как обычно.
+    pub fn cancel_pass(&self) -> bool {
+        match self.cur.lock().unwrap().as_ref() {
+            Some(w) => { w.shared.pass.store(true, Ordering::SeqCst); true }
+            None => false,
+        }
+    }
 
     pub fn status(&self, dir: Option<&Path>) -> Value {
         let Some(dir) = dir else { return json!({ "linked": false }) };
@@ -470,7 +504,7 @@ mod tests {
     fn link(data: &Path, s: &FakeServer, events: Arc<Mutex<Vec<String>>>) -> DavLink {
         let s = s.clone();
         DavLink::new(data, Arc::new(PlainSecret), "Тест", Arc::new(move || Box::new(s.clone()) as Box<dyn Http>),
-            Arc::new(move |_dir, e| events.lock().unwrap().push(format!("{:?}", e))))
+            Arc::new(move |_dir, e| if !matches!(e, Event::Progress(..)) { events.lock().unwrap().push(format!("{:?}", e)) }))
     }
     fn acc() -> Acc { Acc { url: "https://webdav.yandex.ru".into(), user: OAUTH_USER.into(), pass: oauth_pass(), root: "/Кабинет/Роман".into(), label: "Облако".into() } }
     fn project(dir: &Path) {
@@ -507,7 +541,7 @@ mod tests {
         let (s2, g2, a2) = (s.clone(), gate.clone(), armed.clone());
         DavLink::new(data, Arc::new(PlainSecret), "Тест",
             Arc::new(move || Box::new(SlowHttp { inner: s2.clone(), gate: g2.clone(), armed: a2.clone() }) as Box<dyn Http>),
-            Arc::new(move |_dir, e| events.lock().unwrap().push(format!("{:?}", e))))
+            Arc::new(move |_dir, e| if !matches!(e, Event::Progress(..)) { events.lock().unwrap().push(format!("{:?}", e)) }))
     }
 
     fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
@@ -736,7 +770,7 @@ mod tests {
             dir: dir.clone(),
             shared: Arc::new(Shared {
                 dir: dir.clone(),
-                stop: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
+                stop: Arc::new(AtomicBool::new(false)), pass: Arc::new(AtomicBool::new(false)), busy: AtomicBool::new(false),
                 pass_slots: d.pass_slots.clone(),
                 dirty_at: Mutex::new(None), quiet_until: Mutex::new(Instant::now()), st: Mutex::new(St::default()),
             }),
@@ -816,7 +850,7 @@ mod tests {
             DavLink::new(&data, Arc::new(PlainSecret), "Тест",
                 Arc::new(|| Box::new(Offline) as Box<dyn Http>),
                 Arc::new(move |_dir, event| {
-                    assert!(matches!(event, Event::Error(_)));
+                    assert!(matches!(event, Event::Error(_) | Event::Progress(..)));
                     let d = weak.upgrade().unwrap();
                     assert!(d.config.try_lock().is_err(), "блокировка должна удерживаться до завершения sync_now");
                     observed.store(true, Ordering::SeqCst);
@@ -827,7 +861,7 @@ mod tests {
             dir: dir.clone(),
             shared: Arc::new(Shared {
                 dir: dir.clone(),
-                stop: Arc::new(AtomicBool::new(false)),
+                stop: Arc::new(AtomicBool::new(false)), pass: Arc::new(AtomicBool::new(false)),
                 busy: AtomicBool::new(false),
                 pass_slots: d.pass_slots.clone(),
                 dirty_at: Mutex::new(None),

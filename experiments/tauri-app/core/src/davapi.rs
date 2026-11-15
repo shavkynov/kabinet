@@ -96,6 +96,7 @@ impl DavApi {
             }
             "status" => Ok(self.link.status(cur)),
             "syncNow" => self.link.sync_now(),
+            "stopPass" => Ok(json!(self.link.cancel_pass())),
             "detach" => { self.link.detach(need()?)?; Ok(json!(true)) }
             other => Err(format!("Неизвестная операция синхронизации: {}", other)),
         }

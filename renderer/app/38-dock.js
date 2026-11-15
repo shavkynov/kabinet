@@ -35,7 +35,12 @@ function refreshCloudState() {
   let err = false;
   if (project && c && c.linked) {
     if (c.error) { text = t('Облако: ошибка'); err = true; }
-    else if (c.busy) text = t('Облако: обмен…');
+    else if (c.busy) {
+      const pr = DOCK.progress;
+      text = pr && pr.total > 0
+        ? t(pr.phase === 'upload' ? 'Облако: отправлено {0} из {1}' : 'Облако: получено {0} из {1}', pr.done, pr.total)
+        : t('Облако: обмен…');
+    }
     else if (c.conflict) { text = t('Облако: есть конфликты'); err = true; }
     else if (c.lastSyncStart && c.lastSyncStart > SAVE.lastWriteAt && !saveIsPending()) text = t('Облако обновлено');
   }
@@ -43,6 +48,8 @@ function refreshCloudState() {
   btn.dataset.i = err ? '!' : c && c.busy ? '…' : '☁';
   btn.title = err && c.error ? c.error : t('Открыть окно синхронизации');
   btn.hidden = !text;
+  const stop = $('#cloudStop');
+  stop.hidden = !(project && c && c.linked && c.busy);
   btn.classList.toggle('err', err);
   refreshSaveState();
 }
@@ -53,11 +60,20 @@ async function pollCloudState() {
     const st = project ? await api.dav('status') : null;
     if (project !== activeProject) return;
     DOCK.cloud = st;
+    if (!st || !st.busy) DOCK.progress = null;
   } catch { DOCK.cloud = null; }
   refreshCloudState();
 }
 
 function wireDock() {
+  $('#cloudStop').addEventListener('click', async () => {
+    const b = $('#cloudStop');
+    b.disabled = true;
+    try { await api.dav('stopPass'); setStatus('ok', t('Обмен остановлен.')); } catch { /* нет такого канала (Android) */ }
+    b.disabled = false;
+    DOCK.progress = null;
+    pollCloudState();
+  });
   $('#cloudState').addEventListener('click', () => openSyncDialog());
   DOCK.timer = setInterval(pollCloudState, 4000);
   pollCloudState();

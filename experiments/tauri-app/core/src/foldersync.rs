@@ -136,7 +136,7 @@ fn run_parallel<I: Sync, O: Send>(
     Some(slots.into_iter().map(|m| m.into_inner().unwrap()).collect())
 }
 
-fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>, cancel: Option<&AtomicBool>) -> R<BTreeMap<String, RemoteEntry>> {
+fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>, cancel: Option<&AtomicBool>, progress: Option<&ProgressFn>) -> R<BTreeMap<String, RemoteEntry>> {
     let mut files: Vec<(String, Option<String>)> = Vec::new();
     let mut stack = vec![String::new()];
     // Сначала списки целиком: ошибка списка не запускает чтение неполного снимка.
@@ -156,7 +156,14 @@ fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>, cancel: Option<&A
     // как и при последовательном чтении.
     let need: Vec<String> = files.iter().filter(|(r, s)| hit_of(r, s).is_none()).map(|(r, _)| r.clone()).collect();
     let mut fetched: HashMap<String, Option<Vec<u8>>> = HashMap::new();
-    if let Some(done) = run_parallel(&*remote, &need, cancel, |w, rel| w.read(rel)) {
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    let total = need.len();
+    if let Some(done) = run_parallel(&*remote, &need, cancel, |w, rel| {
+        let r = w.read(rel);
+        let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(p) = progress { p("download", n, total); }
+        r
+    }) {
         for (rel, got) in need.iter().zip(done) {
             match got {
                 Some(Ok(b)) => { fetched.insert(rel.clone(), b); }
@@ -294,6 +301,9 @@ pub(crate) mod sync_hook {
     }
 }
 
+/// Ход обмена: этап («download» — скачивание, «upload» — отправка), сделано, всего.
+pub type ProgressFn = Arc<dyn Fn(&str, usize, usize) + Send + Sync>;
+
 pub struct FolderSync<T: Remote> {
     pub dir: PathBuf,
     pub remote: T,
@@ -303,13 +313,14 @@ pub struct FolderSync<T: Remote> {
     /// Флаг остановки сессии (владелец — davlink). Проверяется перед каждой НОВОЙ записью:
     /// уже отправленный запрос доигрывается, но результат не приводит к новым записям/сохранению.
     cancel: Option<Arc<AtomicBool>>,
+    progress: Option<ProgressFn>,
 }
 
 fn label_of(rel: &str) -> String { if rel.contains('/') { stem(rel) } else { rel.to_string() } }
 
 impl<T: Remote> FolderSync<T> {
     pub fn new(dir: &Path, remote: T, state_file: Option<PathBuf>) -> R<Self> {
-        let mut s = FolderSync { dir: dir.to_path_buf(), remote, state_file, state: BTreeMap::new(), cache: HashMap::new(), cancel: None };
+        let mut s = FolderSync { dir: dir.to_path_buf(), remote, state_file, state: BTreeMap::new(), cache: HashMap::new(), cancel: None, progress: None };
         s.load()?;
         Ok(s)
     }
@@ -317,6 +328,7 @@ impl<T: Remote> FolderSync<T> {
     /// Подключить флаг остановки сессии (davlink::Work). Отмена кооперативная: проверяется
     /// перед каждой новой записью в локальные файлы, облако, «Конфликты» и state.
     pub fn set_cancel(&mut self, cancel: Option<Arc<AtomicBool>>) { self.cancel = cancel; }
+    pub fn set_progress(&mut self, progress: Option<ProgressFn>) { self.progress = progress; }
 
     fn ensure_not_cancelled(&self) -> R<()> {
         if self.cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
@@ -657,7 +669,15 @@ impl<T: Remote> FolderSync<T> {
         for (rel, _, _) in &jobs { if let Some((parent, _)) = rel.rsplit_once('/') { dirs.insert(parent); } }
         for d in dirs { self.remote.mkdir(d)?; }
         self.ensure_not_cancelled()?;
-        let done = run_parallel(&self.remote, &jobs, self.cancel.as_deref(), |w, (rel, data, _)| w.create(rel, data));
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let total = jobs.len();
+        let progress = self.progress.clone();
+        let done = run_parallel(&self.remote, &jobs, self.cancel.as_deref(), |w, (rel, data, _)| {
+            let r = w.create(rel, data);
+            let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(p) = &progress { p("upload", n, total); }
+            r
+        });
         let Some(done) = done else { return Ok(()) };
         for ((rel, _, lh), out) in jobs.iter().zip(done) {
             if let Some(Ok(())) = out {
@@ -673,7 +693,7 @@ impl<T: Remote> FolderSync<T> {
     pub fn sync(&mut self) -> R<SyncResult> {
         self.ensure_not_cancelled()?;
         let cache = std::mem::take(&mut self.cache);
-        let walked = walk_remote(&mut self.remote, Some(&cache), self.cancel.as_deref());
+        let walked = walk_remote(&mut self.remote, Some(&cache), self.cancel.as_deref(), self.progress.as_ref());
         self.cache = cache;
         let mut remote = walked?;
         let mut local = walk_local(&self.dir)?;
@@ -732,7 +752,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Выгрузить локальный проект поверх папки; чего у нас нет, уходит в «Конфликты» папки.
     pub fn replace_all(&mut self) -> R<usize> {
-        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref(), self.progress.as_ref())?;
         let local = walk_local(&self.dir)?;
         let mut hidden = 0;
         for (rel, e) in &remote {
@@ -757,7 +777,7 @@ impl<T: Remote> FolderSync<T> {
     /// из проекта — только после того, как их версии подтверждённо сохранены.
     pub fn take_cloud(&mut self) -> R<usize> {
         self.ensure_not_cancelled()?;
-        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref(), self.progress.as_ref())?;
         let local = walk_local(&self.dir)?;
         // Сначала читаем все вытесняемые версии: ошибка чтения останавливает операцию до любых изменений.
         let mut keep: Vec<(String, Vec<u8>)> = vec![];
@@ -809,7 +829,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Скопировать папку в локальный каталог (первое открытие проекта из папки).
     pub fn import_all(&mut self) -> R<Vec<String>> {
-        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref(), self.progress.as_ref())?;
         self.state.clear();
         self.cache.clear();
         for (rel, e) in &remote {
@@ -826,11 +846,38 @@ impl<T: Remote> FolderSync<T> {
         let local = walk_local(&self.dir)?;
         self.state.clear();
         self.cache.clear();
-        for (rel, hash) in &local {
-            self.remote.mkdir(rel.rsplit_once('/').map(|x| x.0).unwrap_or(""))?;
-            let data = self.read_local(rel)?;
-            self.remote.write(rel, &data)?;
-            self.state.insert(rel.clone(), hash.clone());
+        let mut jobs: Vec<(String, Vec<u8>, String)> = Vec::new();
+        for (rel, hash) in &local { jobs.push((rel.clone(), self.read_local(rel)?, hash.clone())); }
+        // Папки заранее и по одной, сами файлы — несколькими потоками сразу.
+        let dirs: BTreeSet<&str> = jobs.iter().map(|(rel, _, _)| rel.rsplit_once('/').map(|x| x.0).unwrap_or("")).collect();
+        for d in dirs { self.remote.mkdir(d)?; }
+        let total = jobs.len();
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let progress = self.progress.clone();
+        let parallel = run_parallel(&self.remote, &jobs, self.cancel.as_deref(), |w, (rel, data, _)| {
+            let r = w.write(rel, data);
+            let n = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(p) = &progress { p("upload", n, total); }
+            r
+        });
+        match parallel {
+            Some(results) => {
+                for ((rel, _, hash), out) in jobs.iter().zip(results) {
+                    match out {
+                        Some(Ok(())) => { self.state.insert(rel.clone(), hash.clone()); }
+                        Some(Err(e)) => return Err(e),
+                        None => { self.ensure_not_cancelled()?; return Err("Отправка прервана: часть файлов не ушла. Повторите обмен.".into()); }
+                    }
+                }
+            }
+            None => {
+                for (i, (rel, data, hash)) in jobs.iter().enumerate() {
+                    self.ensure_not_cancelled()?;
+                    self.remote.write(rel, data)?;
+                    self.state.insert(rel.clone(), hash.clone());
+                    if let Some(p) = &self.progress { p("upload", i + 1, total); }
+                }
+            }
         }
         self.save()?;
         Ok(local.keys().cloned().collect())
@@ -1449,6 +1496,36 @@ mod tests {
         let again = sa.sync().unwrap();
         assert!(again.pushed.is_empty() && again.pulled.is_empty() && again.removed.is_empty() && again.conflicts.is_empty(), "{:?}", again);
         assert_eq!(r(&a, "Главы/ch0003.md"), "текст ch0003");
+    }
+
+    /// Прогресс: при выгрузке и скачивании приходят события «сделано из всего», последнее — полное.
+    #[test]
+    fn progress_is_reported_for_upload_and_download() {
+        let s = FakeServer::new();
+        let a = tmpdir("prog-a").join("p");
+        let ids: Vec<String> = (0..10).map(|i| format!("ch{:04}", i)).collect();
+        let chapters: Vec<(&str, String)> = ids.iter().map(|id| (id.as_str(), format!("т {}", id))).collect();
+        let refs: Vec<(&str, &str)> = chapters.iter().map(|(i, t)| (*i, t.as_str())).collect();
+        project(&a, &refs);
+        let seen: Arc<std::sync::Mutex<Vec<(String, usize, usize)>>> = Default::default();
+        let sink = seen.clone();
+        let mut sa = sync_of(&a, &s, "a");
+        sa.set_progress(Some(Arc::new(move |ph, d, t| sink.lock().unwrap().push((ph.to_string(), d, t)))));
+        sa.sync().unwrap();
+        let up: Vec<_> = seen.lock().unwrap().iter().filter(|e| e.0 == "upload").cloned().collect();
+        assert!(!up.is_empty(), "события выгрузки есть");
+        assert!(up.iter().all(|e| e.2 >= e.1 && e.2 > 0), "{:?}", up);
+        assert_eq!(up.last().map(|e| e.1 == e.2), Some(true), "последнее событие — всё готово: {:?}", up);
+
+        let b = tmpdir("prog-b").join("p");
+        std::fs::create_dir_all(&b).unwrap();
+        let seen2: Arc<std::sync::Mutex<Vec<(String, usize, usize)>>> = Default::default();
+        let sink2 = seen2.clone();
+        let mut sb = sync_of(&b, &s, "b");
+        sb.set_progress(Some(Arc::new(move |ph, d, t| sink2.lock().unwrap().push((ph.to_string(), d, t)))));
+        sb.sync().unwrap();
+        let down: Vec<_> = seen2.lock().unwrap().iter().filter(|e| e.0 == "download").cloned().collect();
+        assert!(!down.is_empty() && down.last().map(|e| e.1 == e.2) == Some(true), "{:?}", down);
     }
 
     /// Второе устройство скачивает много файлов параллельно и получает тот же проект.

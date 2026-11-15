@@ -768,6 +768,7 @@ fn main() {
                     Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
                     Event::Error(m) => { applog::warn(format!("синхронизация: {}", m)); let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
                     Event::Changed(files) => { let _ = handle.emit("sync:changed", files); }
+                    Event::Progress(phase, done, total) => { let _ = handle.emit("dav:event", json!({ "type": "progress", "phase": phase, "done": done, "total": total })); }
                 }
             });
             let link = DavLink::new(&data, Arc::new(KeyringSecret), &device_name(),

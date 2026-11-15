@@ -315,6 +315,12 @@ function wireDav() {
   $('#syncDialog').addEventListener('click', davBackdropClose);
   api.onDavEvent((e) => {
     if (!e) return;
+    if (e.type === 'progress') {
+      DOCK.progress = e.total > 0 ? { phase: e.phase, done: e.done, total: e.total } : null;
+      if (DOCK.cloud && !DOCK.cloud.busy && e.total > 0) DOCK.cloud = { ...DOCK.cloud, busy: true };
+      refreshCloudState();
+      return;
+    }
     if (e.type === 'conflict') setStatus('error', t('Этот текст изменили на другом устройстве. Чужая версия сохранена в папке «Конфликты».'));
     else if (e.type === 'error' && e.message !== DAV.lastError) {
       DAV.lastError = e.message;
