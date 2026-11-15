@@ -157,7 +157,7 @@ jobs:
         shell: bash
         working-directory: experiments/tauri-app
         run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-      - name: Проверка подписи macOS (без неё скачанная программа считается «повреждённой»)
+      - name: Проверка ad-hoc подписи macOS (для работы kabinet://)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -166,14 +166,8 @@ jobs:
           MNT=$(mktemp -d)
           hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -quiet
           APP=$(ls -d "$MNT"/*.app | head -n1)
-          codesign -dvv "$APP" 2>&1 | grep -E "Identifier|Signature|Authority|TeamIdentifier|flags|Sealed" || true
-          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --deep --strict "$APP"
           lipo -archs "$APP/Contents/MacOS/"* || true
-          # то же, что делает система у скачанного файла: проверка вместе с меткой карантина
-          cp -R "$APP" "$RUNNER_TEMP/test.app"
-          xattr -w com.apple.quarantine "0081;00000000;Safari;" "$RUNNER_TEMP/test.app" || true
-          codesign --verify --deep --strict "$RUNNER_TEMP/test.app"
-          spctl --assess --type execute -vv "$RUNNER_TEMP/test.app" 2>&1 || true
           hdiutil detach "$MNT" -quiet
       - name: Имена файлов
         shell: bash
