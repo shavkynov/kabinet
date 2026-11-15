@@ -115,6 +115,9 @@ const { createCloseCoordinator } = require('./close-coordinator');
     restoreBackupInteractive: () => call('backup:restoreInteractive'),
     openBackupFolder: () => call('backup:openFolder'),
     appVersion: () => call('app:version'),
+    feedbackReport: (kind, text, withLog) => call('log:report', kind, text, withLog),
+    feedbackOpen: (kind, text, withLog) => call('feedback:open', kind, text, withLog),
+    openLogFolder: () => call('log:openFolder'),
     setProjectGoal: (g) => call('project:setProjectGoal', g),
     setAnalysisSkip: (s) => call('project:setAnalysisSkip', s),
     setProjectDeadline: (d) => call('project:setDeadline', d),
@@ -150,7 +153,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     'onSetLang', 'onOpenCheck', 'onToggleSpell', 'onCheckProgress', 'onContextMenu', 'onToggleSidebar', 'onNewProject',
     'onOpenProject', 'onCloseProject', 'onToggleTypewriter', 'onToggleMarks', 'onToggleFocus', 'onOpenSettings',
     'onOpenSearch', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
-    'onOpenBackups', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
+    'onOpenBackups', 'onOpenFeedback', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
   ]) window.kabinet[name] = none;
   // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.
   const listen = tauri && tauri.event && tauri.event.listen;
@@ -168,10 +171,15 @@ const { createCloseCoordinator } = require('./close-coordinator');
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
     onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',
     onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onExport: 'ui:export',
-    onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onRestoreBackup: 'ui:restoreBackup', onOpenBackups: 'ui:openBackups',
+    onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onRestoreBackup: 'ui:restoreBackup', onOpenBackups: 'ui:openBackups', onOpenFeedback: 'ui:feedback',
     onOpenSync: 'ui:openSync', onSyncNow: 'ui:syncNow', onToggleSound: 'ui:toggleSound', onToggleAmbient: 'ui:toggleAmbient',
   };
   for (const [name, event] of Object.entries(MENU)) window.kabinet[name] = subscribeVoid(event);
+  // Ошибки окна уходят в журнал приложения (не больше 30 за сеанс, чтобы цикл ошибок не раздул файл).
+  let sent = 0;
+  const report = (m) => { if (sent < 30) { sent += 1; call('log:write', 'error', String(m).slice(0, 800)).catch(() => {}); } };
+  window.addEventListener('error', (e) => report(`${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`));
+  window.addEventListener('unhandledrejection', (e) => report(`promise: ${(e.reason && e.reason.stack) || e.reason}`));
   window.kabinet.onSetLang = subscribe('ui:setLang');
   window.kabinet.onCheckProgress = subscribe('check:progress');
   window.kabinet.onDavEvent = subscribe('dav:event');

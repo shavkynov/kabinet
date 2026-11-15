@@ -337,6 +337,9 @@ dialog input {
   border: 1px solid var(--line); border-radius: 7px; outline: none;
 }
 dialog input:focus { border-color: var(--accent); }
+dialog textarea { display: block; width: 100%; box-sizing: border-box; margin: 10px 0; padding: 8px 10px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; resize: vertical; }
+dialog textarea:focus { outline: none; border-color: var(--accent); }
+dialog input[type="checkbox"] { display: inline-block; width: auto; margin: 0 6px 0 0; padding: 0; accent-color: var(--accent); }
 dialog .hint { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 

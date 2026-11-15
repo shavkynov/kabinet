@@ -184,13 +184,29 @@ function makeIconGrid(e) {
   for (const icon of e.icons) {
     const b = document.createElement('button');
     b.type = 'button';
+    const mine = !!(e.custom && e.custom.has(icon));
     b.className = 'ctx-icon' + (icon === e.current ? ' current' : '');
     b.textContent = icon;
-    b.addEventListener('click', () => {
+    if (mine) b.title = 'Свой смайл. Shift + клик — убрать из набора';
+    b.addEventListener('click', (ev) => {
       closeMenu();
+      if (mine && ev.shiftKey && e.onRemove) { e.onRemove(icon); return; }
       e.onPick(icon);
     });
     wrap.append(b);
+  }
+
+  if (e.onAdd) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'ctx-icon';
+    add.textContent = '＋';
+    add.title = 'Добавить свой смайл';
+    add.addEventListener('click', () => {
+      closeMenu();
+      e.onAdd();
+    });
+    wrap.append(add);
   }
 
   const none = document.createElement('button');

@@ -385,6 +385,7 @@ function init() {
     const r = $('#btnMenu').getBoundingClientRect();
     api.popupMenu(r.left, r.bottom).catch((err) => showError(err.message));
   });
+  if (api.onOpenFeedback) api.onOpenFeedback(() => { closePanels(); openFeedback(); });
   api.onOpenTemplates(() => { if (project) { closePanels(); openTemplates('character'); } });
   api.onBackupNow(() => { if (project) backupNow(); });
   api.onOpenBackups(() => {

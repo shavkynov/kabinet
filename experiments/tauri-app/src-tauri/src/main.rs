@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::{backup, export, exporttarget, import, mentions, searchreplace, store};
+use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searchreplace, store};
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
@@ -169,7 +169,10 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&it("app:fullscreen", "Полный экран", Some(if mac { "Ctrl+Cmd+F" } else { "F11" }))?)
         .build()?;
 
-    let updates = SubmenuBuilder::new(app, "Обновления")
+    let updates = SubmenuBuilder::new(app, "Справка")
+        .item(&it("ui:feedback", "Сообщить об ошибке или идее…", None)?)
+        .item(&it("log:folder", "Открыть папку журнала", None)?)
+        .separator()
         .item(&it("app:updates", "Где взять новые версии…", None)?)
         .build()?;
     let window = SubmenuBuilder::new(app, "Окно").minimize_with_text("Свернуть").build()?;
@@ -187,9 +190,12 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         "lang:ru" => { let _ = app.emit("ui:setLang", "ru"); }
         "lang:en" => { let _ = app.emit("ui:setLang", "en"); }
         "app:about" => {
-            let text = format!("Кабинет {}\nВерсия на Tauri (Rust).\n\nРедактор для писателей: тексты лежат у вас в папке обычными файлами.", env!("CARGO_PKG_VERSION"));
-            tauri::async_runtime::spawn(async move { rfd::AsyncMessageDialog::new().set_title("О программе «Кабинет»").set_description(text).show().await; });
+            let text = format!("Кабинет {}\n\nРедактор Александра Шавкунова", env!("CARGO_PKG_VERSION"));
+            tauri::async_runtime::spawn(async move {
+                rfd::AsyncMessageDialog::new().set_level(rfd::MessageLevel::Info).set_title("Кабинет").set_description(text).show().await;
+            });
         }
+        "log:folder" => { if let Some(d) = applog::folder() { open_path(&d); } }
         "app:updates" => open_url("https://github.com/shavkynov/kabinet/releases"),
         "app:fullscreen" => {
             if let Some(w) = app.get_webview_window("main").or_else(|| app.webview_windows().into_values().next()) {
@@ -328,10 +334,63 @@ async fn pick_folder(title: &str) -> Option<PathBuf> {
 
 #[tauri::command]
 async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, Arc<DavApi>>, chk: State<'_, Arc<CheckApi>>, channel: String, args: Vec<Value>) -> Result<Value, String> {
+    let name = channel.clone();
+    let result = dispatch(app, state, dav, chk, channel, args).await;
+    // Любая ошибка команды попадает в журнал (кроме самих записей журнала).
+    if let Err(e) = &result { if !name.starts_with("log:") { applog::error(format!("{}: {}", name, e)); } }
+    result
+}
+
+/// Текст обращения: сообщение пользователя, сведения о системе и (по желанию) журнал.
+fn feedback_report(kind: &str, text: &str, with_log: bool) -> String {
+    let mut out = format!(
+        "Тип: {}\nВерсия: {}\nСистема: {} {}\n\nСообщение:\n{}\n",
+        kind, env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH, text.trim()
+    );
+    if with_log {
+        out.push_str("\n--- Журнал приложения (последние события) ---\n");
+        let log = applog::read_tail(90 * 1024);
+        out.push_str(if log.trim().is_empty() { "(журнал пуст)\n" } else { &log });
+    }
+    out
+}
+
+/// Адрес нового обращения на GitHub: заголовок и начало сообщения. Полный отчёт идёт через буфер обмена,
+/// потому что в адресе помещается всего около тысячи русских букв.
+fn feedback_url(kind: &str, text: &str, with_log: bool) -> String {
+    let first: String = text.trim().chars().take(600).collect();
+    let title: String = first.lines().next().unwrap_or("").chars().take(70).collect();
+    let mut body = format!("{}\n\nВерсия: {} ({} {})\n", first, env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
+    body.push_str(if with_log { "\n_Полный отчёт с журналом скопирован в буфер обмена. Нажмите здесь Ctrl+V (⌘V на Mac)._\n" } else { "" });
+    let q = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>().replace('+', "%20");
+    format!("https://github.com/shavkynov/kabinet/issues/new?title={}&body={}", q(&format!("[{}] {}", kind, title)), q(&body))
+}
+
+async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, Arc<DavApi>>, chk: State<'_, Arc<CheckApi>>, channel: String, args: Vec<Value>) -> Result<Value, String> {
     let a = &args;
     let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
+        "log:write" => {
+            let level = a.first().and_then(|v| v.as_str()).unwrap_or("info");
+            let msg = a.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            applog::write(level, &format!("окно: {}", msg));
+            Ok(json!(true))
+        }
+        "log:report" => {
+            let kind = a.first().and_then(|v| v.as_str()).unwrap_or("Ошибка");
+            let text = a.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let with_log = a.get(2).and_then(|v| v.as_bool()).unwrap_or(true);
+            Ok(json!(feedback_report(kind, text, with_log)))
+        }
+        "feedback:open" => {
+            let kind = a.first().and_then(|v| v.as_str()).unwrap_or("Ошибка");
+            let text = a.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let with_log = a.get(2).and_then(|v| v.as_bool()).unwrap_or(true);
+            open_url(&feedback_url(kind, text, with_log));
+            Ok(json!(true))
+        }
+        "log:openFolder" => { if let Some(d) = applog::folder() { open_path(&d); } Ok(json!(true)) }
         "app:close-cancel" => {
             state.quit_requested.store(false, std::sync::atomic::Ordering::SeqCst);
             state.closing.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -666,6 +725,15 @@ fn show_main(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    // Паника в любом потоке (в том числе синхронизации) записывается в журнал, затем работает обычный обработчик.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        let what = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+        applog::error(format!("паника в {}: {}", at, what));
+        default_hook(info);
+    }));
     tauri::Builder::default()
         // Второй запуск (например, возврат из браузера по ссылке kabinet://) не открывает вторую копию:
         // ссылка передаётся уже работающей, а окно выходит вперёд.
@@ -687,6 +755,8 @@ fn main() {
             }).build())
         .setup(|app| {
             let data = app.path().app_data_dir().map_err(|e| format!("Нет папки данных приложения: {}", e))?;
+            applog::init(&data.join("logs"));
+            applog::info(format!("Запуск Кабинета {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH));
             let handle = app.handle().clone();
             let h2 = handle.clone();
             let _ = app.state::<AppState>().on_external.set(Arc::new(move |files: Vec<String>| { let _ = h2.emit("sync:changed", files); }));
@@ -696,7 +766,7 @@ fn main() {
                 if cur.as_deref() != Some(dir) { return; }
                 match e {
                     Event::Conflict => { let _ = handle.emit("dav:event", json!({ "type": "conflict" })); }
-                    Event::Error(m) => { let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
+                    Event::Error(m) => { applog::warn(format!("синхронизация: {}", m)); let _ = handle.emit("dav:event", json!({ "type": "error", "message": m })); }
                     Event::Changed(files) => { let _ = handle.emit("sync:changed", files); }
                 }
             });

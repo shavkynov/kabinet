@@ -945,6 +945,16 @@ handle('ctx:replaceMisspelling', (word) => {
 });
 
 // «Искать в интернете»: слово из контекстного меню уходит в выбранный автором поисковик (настройка searchEngine).
+// Обратная связь (в основной версии на Tauri журнал прикладывается; здесь — только текст и версия).
+handle('log:report', (kind, text) => `Тип: ${String(kind || 'Ошибка')}\nВерсия: ${app.getVersion()}\nСистема: ${process.platform} ${process.arch}\n\nСообщение:\n${String(text || '').trim()}\n`);
+handle('feedback:open', (kind, text) => {
+  const first = String(text || '').trim().slice(0, 600);
+  const title = `[${String(kind || 'Ошибка')}] ${first.split('\n')[0].slice(0, 70)}`;
+  const body = `${first}\n\nВерсия: ${app.getVersion()} (${process.platform} ${process.arch})\n`;
+  shell.openExternal(`https://github.com/shavkynov/kabinet/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`);
+  return true;
+});
+
 handle('ctx:webSearch', (text, engine) => {
   const url = searchEngines.searchUrl(engine, text, i18n.getLang());
   if (!url) return false;

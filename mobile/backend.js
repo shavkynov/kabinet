@@ -952,6 +952,14 @@ function createBackend(host, { session } = {}) {
     return true;
   });
   handle('ctx:replaceMisspelling', () => true);
+  // Обратная связь: на телефоне отчёт без журнала (журнал ведёт версия для компьютера).
+  handle('log:report', (kind, text) => t('Тип: {0}\nВерсия: {1}\nСистема: {2} {3}\n\nСообщение:\n{4}', String(kind || 'Ошибка'), String(host.version || ''), 'android', '', String(text || '').trim()));
+  handle('feedback:open', (kind, text) => {
+    const first = String(text || '').trim().slice(0, 600);
+    const title = `[${String(kind || 'Ошибка')}] ${first.split('\n')[0].slice(0, 70)}`;
+    host.openUrl(`https://github.com/shavkynov/kabinet/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(first)}`);
+    return true;
+  });
   handle('ctx:webSearch', (text, engine) => {
     const url = searchEngines.searchUrl(engine, text, i18n.getLang());
     if (!url) return false;
@@ -1010,6 +1018,8 @@ function createBackend(host, { session } = {}) {
     onContextMenu: on('ui:contextMenu'),
     onSyncNow: on('ui:syncNow'),
     editCommand: (cmd) => call('ctx:edit', cmd),
+    feedbackReport: (kind, text, withLog) => call('log:report', kind, text, withLog),
+    feedbackOpen: (kind, text, withLog) => call('feedback:open', kind, text, withLog),
     replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
     webSearch: (text, engine) => call('ctx:webSearch', text, engine),
     listRecents: () => call('recents:list'),
@@ -1081,6 +1091,7 @@ function createBackend(host, { session } = {}) {
     onExternalChange: on('sync:changed'),
     reloadProject: () => call('project:reload'),
     onOpenTemplates: on('ui:openTemplates'),
+    onOpenFeedback: on('ui:feedback'),
     onBackupNow: on('ui:backupNow'),
     onOpenBackups: on('ui:openBackups'),
     onOpenSync: on('ui:openSync'),

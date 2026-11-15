@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   typo: true,
   marks: false,       // показ скрытых символов (¶, неразрывные пробелы, табуляции)
   marksSpaces: false, // ...и обычных пробелов
+  customIcons: [], // свои смайлы для карточек (дополняют набор из menu.js)
   searchEngine: LANG === 'en' ? 'google' : 'yandex', // «Искать в интернете» в меню правой кнопки
   typeAnim: true,   // плавное появление набираемых букв
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
@@ -92,6 +93,7 @@ function loadSettings() {
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
     if (isEngine(raw.searchEngine)) s.searchEngine = raw.searchEngine;
+    if (Array.isArray(raw.customIcons)) s.customIcons = cleanIconList(raw.customIcons);
     if (typeof raw.marks === 'boolean') s.marks = raw.marks;
     if (typeof raw.marksSpaces === 'boolean') s.marksSpaces = raw.marksSpaces;
     if (typeof raw.typoNbsp === 'boolean') s.typoNbsp = raw.typoNbsp;

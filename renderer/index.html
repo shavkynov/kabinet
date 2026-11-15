@@ -778,6 +778,26 @@
     </form>
   </dialog>
 
+  <dialog id="feedbackDialog">
+    <form method="dialog" id="feedbackForm">
+      <h2>Сообщить об ошибке или идее</h2>
+      <div class="tpl-kind">
+        <label class="radio"><input type="radio" name="fbKind" value="Ошибка" checked>Ошибка</label>
+        <label class="radio"><input type="radio" name="fbKind" value="Идея">Идея</label>
+        <label class="radio"><input type="radio" name="fbKind" value="Вопрос">Вопрос</label>
+      </div>
+      <textarea id="fbText" rows="6" maxlength="4000" placeholder="Что случилось или что хотелось бы улучшить?"></textarea>
+      <label class="radio"><input type="checkbox" id="fbLog" checked>Приложить журнал приложения</label>
+      <p class="hint">Журнал помогает найти причину сбоя: в нём события и ошибки, но не тексты ваших глав и не пароли.</p>
+      <p class="hint" id="fbHint"></p>
+      <div class="dialog-actions">
+        <button type="button" id="fbCancel" class="secondary">Отмена</button>
+        <button type="button" id="fbCopy" class="secondary">Скопировать отчёт</button>
+        <button type="button" id="fbSend">Отправить на GitHub</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="tplDialog">
     <form method="dialog" id="tplForm">
       <h2>Шаблоны карточек</h2>
