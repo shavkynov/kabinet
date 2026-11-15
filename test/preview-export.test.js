@@ -18,7 +18,7 @@ test('numbering checkbox, binding and renderer export option are connected', () 
   const parts = fs.readdirSync(path.join(__dirname, '../renderer/app')).filter((p) => p.endsWith('.js')).map((p) => read('renderer/app/' + p)).join('\n');
   assert.match(parts, /api\.exportProject\(\{ indent: settings\.para === 'indent', chapterNumbers: settings\.exportNumbers === true \}\)/);
 });
-for (const backend of ['main.js', 'mobile/backend.js']) {
+for (const backend of ['mobile/backend.js']) {
   test(`${backend}: every export format receives the explicit numbering option`, async () => {
     const text = read(backend);
     const start = text.indexOf("handle('project:export',");
@@ -26,7 +26,7 @@ for (const backend of ['main.js', 'mobile/backend.js']) {
     assert.ok(start >= 0 && end > start);
     const block = text.slice(start, end);
     for (const enabled of [false, true]) {
-      for (const format of (backend === 'main.js' ? ['pdf', 'docx', 'rtf', 'md', 'txt', 'html'] : ['docx', 'rtf', 'md', 'txt', 'html'])) {
+      for (const format of ['docx', 'rtf', 'md', 'txt', 'html']) {
         let run;
         const calls = [];
         const context = {

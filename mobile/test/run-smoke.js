@@ -12,7 +12,7 @@ const out = path.join(require('os').tmpdir(), 'kabinet-smoke.cjs');
 esbuild.buildSync({
   entryPoints: [path.join(__dirname, 'smoke.entry.js')],
   bundle: true, platform: 'node', format: 'cjs', outfile: out, logLevel: 'warning',
-  define: { PRELOAD_SRC: JSON.stringify(require('fs').readFileSync(path.join(__dirname, '..', '..', 'preload.js'), 'utf8')) },
+  define: { BACKEND_SRC: JSON.stringify(require('fs').readFileSync(path.join(__dirname, '..', 'backend.js'), 'utf8')), RENDERER_SRC: JSON.stringify(require('fs').readdirSync(path.join(__dirname, '..', '..', 'renderer', 'app')).filter((f) => f.endsWith('.js')).map((f) => require('fs').readFileSync(path.join(__dirname, '..', '..', 'renderer', 'app', f), 'utf8')).join('\n')) },
   alias: { fs: path.join(shim, 'fs.js'), path: path.join(shim, 'path.js') },
 });
 execFileSync(process.execPath, [out], { stdio: 'inherit' });

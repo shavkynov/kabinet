@@ -44,40 +44,6 @@ test('corrupt settings and write failures are not silently ignored; project file
   assert.throws(() => target.remember(blocked, project, path.join(out, 'Book.txt')));
   assert.throws(() => target.remember(data, project, 'relative.txt'));
 }));
-function handler({ canceled = false, failWrite = false, failRemember = false } = {}) {
-  let run;
-  const events = [];
-  const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  const start = source.indexOf("handle('project:export',");
-  const end = source.indexOf('// Импорт глав', start);
-  assert.ok(start >= 0 && end > start);
-  vm.runInNewContext(source.slice(start, end), {
-    handle: (_name, fn) => { run = fn; },
-    requireDir: () => '/project/Book', path, t: (s) => s,
-    app: { getPath: () => '/local' },
-    exportTarget: { defaultPath: () => '/out/Book.txt', filters: () => [], remember: () => { events.push('remember'); if (failRemember) throw new Error('settings'); } },
-    dialog: { showSaveDialog: async (win, opts) => { events.push(opts.defaultPath); return { canceled, filePath: '/out/Book.txt' }; }, showErrorBox: () => events.push('warning') },
-    win: null, console: { error: () => {} },
-    fs: { writeFileSync: () => { events.push('write'); if (failWrite) throw new Error('disk'); } },
-    exporter: { buildExport: () => 'text' }, i18n: { getLang: () => 'ru' },
-    shell: { showItemInFolder: () => events.push('show') },
-  });
-  return { run, events };
-}
-test('cancel does not remember; failed export does not remember; success remembers after write', async () => {
-  const canceled = handler({ canceled: true });
-  assert.equal(await canceled.run(), null);
-  assert.deepEqual(canceled.events, ['/out/Book.txt']);
-  const failed = handler({ failWrite: true });
-  await assert.rejects(failed.run(), /disk/);
-  assert.deepEqual(failed.events, ['/out/Book.txt', 'write']);
-  const good = handler();
-  assert.equal(await good.run(), '/out/Book.txt');
-  assert.deepEqual(good.events, ['/out/Book.txt', 'write', 'remember', 'show']);
-  const settings = handler({ failRemember: true });
-  assert.equal(await settings.run(), '/out/Book.txt');
-  assert.deepEqual(settings.events, ['/out/Book.txt', 'write', 'remember', 'warning', 'show']);
-});
 test('в окне «Сохранить» первым идёт формат из предложенного имени файла', () => {
   for (const ext of ['pdf', 'docx', 'rtf', 'md', 'txt', 'html']) {
     const f = target.filters(`/x/Book.${ext}`, 'Обычный текст');

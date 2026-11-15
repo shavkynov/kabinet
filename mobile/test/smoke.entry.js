@@ -216,12 +216,11 @@ const host = {
   host.confirm = async () => 0;
   await be2.api.closeProject();
 
-  // каждый вызов из preload.js должен иметь обработчик
-  const pre = PRELOAD_SRC;
-  const channels = [...pre.matchAll(/call\('([a-zA-Z:]+)'/g)].map((m) => m[1]);
+  // каждый вызов call('канал') в api телефона имеет обработчик, а каждый api.метод(), который зовёт окно, в api есть
+  const channels = [...BACKEND_SRC.matchAll(/call\('([a-zA-Z:]+)'/g)].map((m) => m[1]);
   const missing = channels.filter((c) => !be2.handlers[c]);
   assert.deepEqual(missing, [], `нет обработчиков: ${missing}`);
-  const apiNames = [...pre.matchAll(/^\s{2}([a-zA-Z]+):/gm)].map((m) => m[1]);
+  const apiNames = [...new Set([...RENDERER_SRC.matchAll(/\bapi\.([A-Za-z]+)\(/g)].map((m) => m[1]))];
   const lack = apiNames.filter((n) => !(n in be2.api));
   assert.deepEqual(lack, [], `нет в api: ${lack}`);
   console.log('OK: каналов', channels.length, ', методов', apiNames.length, ', файлов в ФС', before.length);

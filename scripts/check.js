@@ -38,6 +38,15 @@ for (const f of modules) {
   for (const id of used) if (!ids.has(id)) fail(`${f}: в index.html нет #${id}`);
 }
 
+// каждый api.метод(), который зовёт окно, есть в мосте Tauri (experiments/tauri-app/bridge.src.js)
+const bridge = fs.readFileSync(path.join(root, 'experiments', 'tauri-app', 'bridge.src.js'), 'utf8');
+for (const f of modules) {
+  const code = fs.readFileSync(path.join(rdir, f), 'utf8');
+  for (const m of code.matchAll(/\bapi\.([A-Za-z]+)\(/g)) if (!new RegExp(`\\b${m[1]}\\b`).test(bridge)) fail(`${f}: в bridge.src.js нет api.${m[1]}`);
+}
+const appCode = fs.readdirSync(path.join(rdir, 'app')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(rdir, 'app', f), 'utf8')).join('\n');
+for (const m of appCode.matchAll(/\bapi\.([A-Za-z]+)\(/g)) if (!new RegExp(`\\b${m[1]}\\b`).test(bridge)) fail(`renderer/app: в bridge.src.js нет api.${m[1]}`);
+
 // одинаковые функции верхнего уровня в app.js: вторая молча затирает первую
 const app = fs.readFileSync(path.join(rdir, 'app.gen.js'), 'utf8');
 const seen = new Map();
