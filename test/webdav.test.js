@@ -135,53 +135,6 @@ test('проект уходит на сервер и приходит обрат
   }
 });
 
-test('компьютер: связь проекта с сетевой папкой, вход, подключение, повторное открытие', async () => {
-  const { createDavLink } = require('../src/davlink');
-  const srv = fakeServer();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kab-davlink-'));
-  const events = [];
-  const link = createDavLink({ dataDir: path.join(tmp, 'data'), request: srv.request, secret: { seal: (s) => `s:${s}`, open: (s) => s.slice(2) }, onEvent: (e) => events.push(e) });
-  fs.mkdirSync(path.join(tmp, 'data'));
-  try {
-    await assert.rejects(() => link.login({ url: 'dav.example.com', user: 'u', pass: 'плохой' }), /логин или пароль/);
-    const acc0 = await link.login({ url: 'dav.example.com', user: 'u', pass: 'p' });
-    assert.deepEqual(await link.browse(acc0, ''), []);
-    const root = await link.makeFolder(acc0, '', 'Кабинет');
-    const root2 = await link.makeFolder(acc0, root, 'Роман');
-    assert.equal(root2, '/Кабинет/Роман');
-    const acc = { ...acc0, root: root2, label: 'Тест' };
-
-    const d1 = path.join(tmp, 'one');
-    project.createProject(d1, 'Роман', {});
-    assert.equal(link.status(d1).linked, false);
-    const res = await link.attach(d1, acc, 'ask');
-    assert.equal(res.exists, false);
-    assert.equal(link.status(d1).linked, true);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'data', 'dav-links.json'), 'utf8'))[d1].pass, 's:p', 'пароль хранится в запечатанном виде');
-    assert.ok([...srv.files.keys()].some((k) => k.startsWith('/Кабинет/Роман/Главы/')));
-
-    // второй компьютер: открыть проект из папки
-    const d2 = path.join(tmp, 'two');
-    await link.openRemote(acc, d2);
-    assert.ok(project.openProject(d2).chapters.length >= 1);
-    assert.equal((await link.attach(path.join(tmp, 'three'), acc, 'ask').catch(() => ({ exists: true }))).exists, true);
-
-    link.start(d2);
-    const id = project.openProject(d2).chapters[0].id;
-    project.writeChapter(d2, id, 'Правка на втором компьютере');
-    const st = await link.syncNow();
-    assert.equal(st.linked, true);
-    assert.equal(st.error, '');
-    assert.match(Buffer.from([...srv.files.entries()].find(([k]) => k.includes('/Главы/') && k.endsWith('.md'))[1]).toString(), /Правка на втором/);
-    await link.detach(d2);
-    assert.equal(link.status(d2).linked, false);
-    assert.equal(srv.files.has('/Кабинет/Роман/kabinet.lock'), false, 'замок снят при отключении');
-  } finally {
-    link.stopWork();
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
 test('http:// допустим только в домашней сети, через интернет пароль не отправляется', () => {
   for (const ok of ['http://localhost', 'http://127.0.0.1:8080', 'http://192.168.1.5/dav', 'http://10.0.0.2', 'http://172.20.1.1', 'http://nas.local', 'http://nas', 'https://dav.example.com']) {
     assert.doesNotThrow(() => dav.createWebDav({ url: ok, user: 'u', pass: 'p', request: async () => ({ status: 200, headers: {}, body: new Uint8Array() }) }), ok);

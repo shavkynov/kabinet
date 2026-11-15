@@ -132,7 +132,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
@@ -214,7 +213,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Зависимости (Electron для Android не нужен)
+      - name: Зависимости
         run: |
           npm ci --ignore-scripts
           cd mobile && npm install

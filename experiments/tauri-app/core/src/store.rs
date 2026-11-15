@@ -1,5 +1,5 @@
 // Хранение проекта на диске. Порт src/project.js (главы, корзина, список недавних) с тем же форматом файлов:
-// проект, созданный здесь, открывается в Electron-версии и наоборот. Неизвестные поля project.json сохраняются.
+// проект, созданный здесь, открывается в JS-версии и наоборот. Неизвестные поля project.json сохраняются.
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 use std::fs;
@@ -424,7 +424,7 @@ pub fn load_meta(dir: &Path) -> R<Map<String, Value>> {
     meta.insert("templates".into(), json!({ "character": character, "place": place }));
 
     match clean_goal(meta.get("projectGoal")) { Some(g) => { meta.insert("projectGoal".into(), json!(g)); } None => { meta.remove("projectGoal"); } }
-    // analysisSkip: объект остаётся как есть (в Electron его дополнительно чистит editing.cleanSkip), иначе убирается
+    // analysisSkip: объект остаётся как есть (в JS-версии его дополнительно чистит editing.cleanSkip), иначе убирается
     let skip_ok = meta.get("analysisSkip").and_then(|s| s.as_object()).map(|o| !o.is_empty()).unwrap_or(false);
     if !skip_ok { meta.remove("analysisSkip"); }
     if let Some(Value::Array(w)) = meta.get("words").cloned() { meta.insert("words".into(), Value::Array(clean_words(&w))); } else { meta.remove("words"); }
@@ -872,7 +872,7 @@ pub fn safe_folder_name(name: &str) -> R<String> {
 
 fn is_word_char(c: char) -> bool { c.is_alphabetic() || c.is_numeric() }
 
-/// Слова: буквы и цифры, внутри слова допустимы дефис, короткое тире и апострофы (как WORD_RE в Electron-версии).
+/// Слова: буквы и цифры, внутри слова допустимы дефис, короткое тире и апострофы (как WORD_RE в JS-версии).
 pub fn count_words(text: &str) -> usize {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
@@ -918,7 +918,7 @@ fn strip_line_prefix(line: &str) -> String {
     line.to_string()
 }
 
-/// Знаки с пробелами: Markdown без разметки и без переводов строк (как charCount в Electron-версии).
+/// Знаки с пробелами: Markdown без разметки и без переводов строк (как charCount в JS-версии).
 pub fn count_chars(md: &str) -> usize {
     let normalized = md.replace("\r\n", "\n").replace('\r', "\n");
     let joined: String = normalized
@@ -980,16 +980,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn words_like_electron() {
+    fn words_like_js() {
         assert_eq!(count_words("Привет, мир! Что-то 12 и don't"), 6);
         assert_eq!(count_words(""), 0);
         assert_eq!(count_words("a - b"), 2);
     }
 
     #[test]
-    fn chars_like_electron() {
+    fn chars_like_js() {
         assert_eq!(count_chars("# Заголовок\n\nТекст *курсив*\n---\n> цитата"), 27);
-        assert_eq!(count_chars("a\\*b"), 2); // как в Electron: экранирование снимается, затем убираются знаки разметки
+        assert_eq!(count_chars("a\\*b"), 2); // как в JS: экранирование снимается, затем убираются знаки разметки
     }
 
     #[test]

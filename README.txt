@@ -60,16 +60,16 @@ Linux) и для Android. Работает без интернета, текст
 
   npm ci
   npm run check      проверка и тесты
-  npm start          запуск
-  npm run dist:dmg   установщик для macOS
-  npm run dist:win   установщик для Windows
+
+Установщики для компьютеров (Tauri, Rust) собирает GitHub Actions при выпуске версии: см. .github/workflows/build.yml.
+Локально: cd experiments/tauri-app && npx @tauri-apps/cli@2 build. Нужны Rust и системные библиотеки Tauri.
 
 
 СТРУКТУРА
 
-  main.js, preload.js   главное окно, меню, обмен с интерфейсом
+  experiments/tauri-app/  приложение для компьютеров: Rust-ядро (core), окно (src-tauri), мост к интерфейсу
   src/                  логика проекта, импорт и экспорт, анализ текста
   renderer/             интерфейс
   mobile/               оболочка для Android
   test/                 автотесты
-  scripts/              сборка, проверка, выпуск
+  scripts/              сборка интерфейса, проверка

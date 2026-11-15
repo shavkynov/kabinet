@@ -1,6 +1,6 @@
 'use strict';
 const { createCloseCoordinator } = require('./close-coordinator');
-// Мост окна к Rust: тот же набор функций window.kabinet, что давал preload.js в Electron.
+// Мост окна к Rust: набор функций window.kabinet, который нужен окну.
 // Каждый вызов уходит в одну команду Rust `call(channel, args)`. Что ещё не перенесено, отвечает понятной ошибкой.
 (function () {
   const tauri = window.__TAURI__;
@@ -52,9 +52,9 @@ const { createCloseCoordinator } = require('./close-coordinator');
       return result;
     });
   }
-  // Двоичные данные приходят из Rust строкой base64; окну нужен Uint8Array, как Buffer из Electron.
+  // Двоичные данные приходят из Rust строкой base64; окну нужен Uint8Array.
   const fromB64 = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0));
-  const none = () => {}; // события из меню Electron: меню на Tauri пока нет
+  const none = () => {}; // события из меню: пока без подписки
   const plat = /Mac/i.test(navigator.platform) ? 'darwin' : /Win/i.test(navigator.platform) ? 'win32' : 'linux';
 
   window.kabinet = {
@@ -166,7 +166,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     else cb(e.payload);
   }).catch(() => {}); };
   const subscribeVoid = (event) => (cb) => { if (listen) listen(event, () => { if (!closeGuard.isClosing()) cb(); }).catch(() => {}); };
-  // Пункты главного меню (в Electron — send('ui:…')).
+  // Пункты главного меню .
   const MENU = {
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
     onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',

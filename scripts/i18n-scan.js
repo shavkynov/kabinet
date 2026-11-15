@@ -116,12 +116,11 @@ function collect() {
     found.get(k).add(path.basename(file));
   };
   const files = [];
-  for (const dir of ['renderer', 'src', '.']) {
+  for (const dir of ['renderer', 'src']) {
     const full = path.join(root, dir);
     for (const f of fs.readdirSync(full)) {
       const p = path.join(full, f);
       if (!fs.statSync(p).isFile()) continue;
-      if (dir === '.' && !['main.js', 'preload.js'].includes(f)) continue;
       if (dir === 'src' && (f === 'i18n-en.js' || f === 'typo.js' || f === 'morph.js' || f === 'rhythm.js' || f === 'adverbs-ru.js' || f === 'editing.js' || f === 'tense.js' || f === 'import.js' || f === 'terms.js' || f === 'stem.js' || f === 'declension.js')) continue; // словарь и список коротких слов
       if (/\.(js|html)$/.test(f)) files.push(p);
     }

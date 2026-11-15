@@ -602,7 +602,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn matches_electron_import_on_every_sample() {
+    fn matches_js_import_on_every_sample() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/import");
         let golden: Value = serde_json::from_str(&std::fs::read_to_string(base.join("golden.json")).unwrap()).unwrap();
         let mut checked = 0;

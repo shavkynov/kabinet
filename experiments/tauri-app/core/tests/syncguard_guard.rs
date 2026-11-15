@@ -1,5 +1,5 @@
 //! Защита от затирания чужих правок при записи (порт src/syncguard.js и «известных» хэшей).
-//! Сценарии повторяют test/sync.test.js Electron-версии.
+//! Сценарии повторяют test/sync.test.js JS-версии.
 use kabinet_core::{export, mentions, searchreplace, store, syncguard};
 use serde_json::{json, Value};
 use std::fs;

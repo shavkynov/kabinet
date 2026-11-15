@@ -7,7 +7,6 @@ const os = require('os');
 const path = require('path');
 
 const project = require('../src/project');
-const { createWatcher, isRelevant } = require('../src/watcher');
 
 function mk() {
   const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kabinet-sync-')), 'Роман');
@@ -98,33 +97,3 @@ test('обычное чтение для открытия по-прежнему 
   assert.equal(project.writeChapter(dir, id, 'версия C').conflict, null);
 });
 
-test('следилка: какие файлы интересны', () => {
-  assert.equal(isRelevant('project.json'), true);
-  assert.equal(isRelevant('Главы/abc123.md'), true);
-  assert.equal(isRelevant('Персонажи/abc123.json'), true);
-  assert.equal(isRelevant('Предметы/abc123.json'), true);
-  assert.equal(isRelevant('Главы/abc123.md.123.tmp'), false);
-  assert.equal(isRelevant('Главы/.abc123.md.icloud'), false);
-  assert.equal(isRelevant('Резервные копии/2026/project.json'), false);
-  assert.equal(isRelevant('Корзина/x.md'), false);
-  assert.equal(isRelevant('kabinet.lock'), false);
-  assert.equal(isRelevant('stats.json'), false);
-});
-
-test('следилка: свои записи молчат, чужая правка сообщается', async () => {
-  const { dir, id } = mk();
-  const seen = [];
-  const w = createWatcher(dir, (files) => seen.push(...files), { delay: 60, pollMs: 120 });
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  try {
-    await wait(100);
-    project.writeChapter(dir, id, 'своя запись');
-    await wait(400);
-    assert.deepEqual(seen, [], 'своя запись не должна считаться чужой');
-    fs.writeFileSync(path.join(dir, 'Главы', `${id}.md`), 'пришло из облака');
-    await wait(700);
-    assert.deepEqual([...new Set(seen)], [`Главы/${id}.md`]);
-  } finally {
-    w.close();
-  }
-});

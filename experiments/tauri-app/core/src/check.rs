@@ -315,7 +315,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn matches_electron_chunking_and_mapping() {
+    fn matches_js_chunking_and_mapping() {
         let g: Value = serde_json::from_str(include_str!("../tests/langcheck-golden.json")).unwrap();
         let paras: Vec<String> = g["paras"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
         let chunks = build_chunks(&paras, g["max"].as_u64().unwrap() as usize);

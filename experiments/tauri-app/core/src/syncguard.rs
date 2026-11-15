@@ -46,7 +46,7 @@ fn pad(n: u32) -> String {
     format!("{:02}", n)
 }
 
-/// Местное время в виде «2026-11-12 12-19-00», как в имени файла из «Конфликтов» у Electron-версии.
+/// Местное время в виде «2026-11-12 12-19-00», как в имени файла из «Конфликтов» у JS-версии.
 pub fn stamp_at(now: &chrono::DateTime<chrono::Local>) -> String {
     use chrono::{Datelike, Timelike};
     format!(

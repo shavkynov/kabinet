@@ -1,6 +1,6 @@
 // ---------- маленькие диалоги: название поля, шаблоны ----------
 
-// prompt() в Electron не работает, поэтому свой диалог.
+// prompt() в окне приложения не работает, поэтому свой диалог.
 function askText(title, initial = '') {
   return new Promise((resolve) => {
     const dlg = $('#textDialog');

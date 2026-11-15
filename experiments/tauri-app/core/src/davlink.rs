@@ -1,6 +1,6 @@
 //! Проект на компьютере, связанный с папкой на Яндекс Диске. Порт src/davlink.js.
 //! Фоновый поток: полный проход раз в 30 с, выгрузка через 4 с после правки (наблюдение за папкой).
-//! Служебного замка в облаке Rust-версия не пишет: `kabinet.lock` — отметка Electron/Android
+//! Служебного замка в облаке Rust-версия не пишет: `kabinet.lock` — отметка телефона
 //! «проект открыт на этом устройстве», она только читается человеком и не блокирует обмен.
 //! Проходы одного устройства идут строго по одному.
 use crate::foldersync::{is_syncable, FolderSync};
@@ -171,7 +171,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
         return PassOutcome::Skipped;
     };
     let started = now_ms();
-    // Облачного замка нет: свежая отметка `kabinet.lock` от Electron/Android не блокирует проход
+    // Облачного замка нет: свежая отметка `kabinet.lock` от телефона не блокирует проход
     // и не перезаписывается. Чужие правки защищает write_checked (перечитывание перед записью).
     let result = match sync.lock() {
         Ok(mut s) => s.sync(),
@@ -208,7 +208,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
 
 impl DavLink {
     /// `device` сохранён в сигнатуре для совместимости: Rust не пишет отметку `kabinet.lock`
-    /// (это делает Electron/Android), поэтому имя устройства пока не хранится.
+    /// (это делает телефон), поэтому имя устройства пока не хранится.
     pub fn new(data_dir: &Path, secret: Arc<dyn Secret>, _device: &str, make_http: HttpFactory, on_event: OnEvent) -> Self {
         DavLink { data_dir: data_dir.to_path_buf(), secret, make_http, on_event, cur: Mutex::new(None), pass_slots: Arc::new(Mutex::new(HashSet::new())), config: Mutex::new(()) }
     }
@@ -711,7 +711,7 @@ mod tests {
         project(&dir);
         d.attach(&dir, &acc(), "ask").unwrap();
         d.stop();
-        // Свежая отметка «проект открыт на телефоне» в формате Electron/Android:
+        // Свежая отметка «проект открыт на телефоне» в формате телефона:
         // это не замок прохода, а информационная отметка, и Rust не должен её блокироваться/затирать.
         let stamp = format!("{{\"device\":\"Телефон\",\"time\":{}}}", now_ms());
         s.put("Кабинет/Роман/kabinet.lock", stamp.as_bytes());

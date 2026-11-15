@@ -1,5 +1,5 @@
 'use strict';
-// Собирает интерфейс Кабинета для Tauri: тот же renderer, что в Electron, плюс мост window.kabinet (bridge.js).
+// Собирает интерфейс Кабинета для Tauri: общий renderer плюс мост window.kabinet (bridge.js).
 //   node experiments/tauri-app/build.cjs   (нужны зависимости корня: npm ci)
 const fs = require('node:fs');
 const path = require('node:path');

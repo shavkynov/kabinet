@@ -1,5 +1,5 @@
 //! Экспорт глав проекта одним файлом: Markdown, текст, HTML, RTF, DOCX. Порт src/export.js, docx.js, rtf.js,
-//! export-spacing.js и align.js. Результат совпадает с Electron-версией (проверяется эталонными файлами).
+//! export-spacing.js и align.js. Результат совпадает с JS-версией (проверяется эталонными файлами).
 use crate::store::{self, R};
 use fancy_regex::{Captures, Regex};
 use std::io::Write;
@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_electron_output_byte_for_byte() {
+    fn matches_js_output_byte_for_byte() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
         for name in ["novel", "stories"] {
             let dir = tmpdir(name).join("p");

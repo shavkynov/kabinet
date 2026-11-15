@@ -34,7 +34,7 @@ for (const [label, result, expected] of [
   const h = setup(result); await h.run();
   assert.equal(h.messages.at(-1).text, expected);
 });
-// Старый JS-backend (Electron/Android) не возвращает `status` — успех по-прежнему виден по lastSync.
+// JS-backend телефона не возвращает `status` — успех по-прежнему виден по lastSync.
 test('F5 works with a backend that has no status field', async () => {
   const h = setup({ linked: true, lastSync: 1 });
   await h.run();

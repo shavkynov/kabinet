@@ -10,7 +10,6 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const filter = process.argv[2];
 const files = [
-  'main.js', 'preload.js',
   ...fs.readdirSync(path.join(root, 'src')).map((f) => `src/${f}`),
   ...fs.readdirSync(path.join(root, 'renderer')).filter((f) => f.endsWith('.js') && f !== 'app.gen.js').map((f) => `renderer/${f}`),
   ...fs.readdirSync(path.join(root, 'renderer', 'app')).filter((f) => f.endsWith('.js')).map((f) => `renderer/app/${f}`),

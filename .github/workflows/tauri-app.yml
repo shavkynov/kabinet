@@ -33,7 +33,6 @@ jobs:
           - os: macos-15
             binary: experiments/tauri-app/out/Kabinet-Tauri-macos.zip
     env:
-      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4

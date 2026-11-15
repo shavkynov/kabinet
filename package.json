@@ -3,111 +3,22 @@
   "productName": "Кабинет",
   "version": "0.40.0",
   "description": "Редактор Александра Шавкунова для писателей",
-  "main": "src/electron-entry.js",
   "private": true,
   "scripts": {
     "build": "node scripts/build.js",
-    "start": "npm run build && electron .",
-    "test": "node --test test/project.test.js test/langcheck.test.js test/i18n.test.js test/typo.test.js test/clip.test.js test/import.test.js test/marks.test.js test/updates.test.js test/themes.test.js test/searchengines.test.js test/folder.test.js test/webdav.test.js test/morph.test.js test/editing.test.js test/tense.test.js test/docx.test.js test/replace.test.js test/mentions.test.js test/stats.test.js test/sync.test.js test/rhythm.test.js test/terms.test.js test/mode.test.js test/sentences.test.js test/stem.test.js test/fillers.test.js test/pos.test.js test/backup.test.js test/passive.test.js test/declension.test.js test/namematch.test.js test/names-forms.test.js test/analysis-ui.test.js test/audit-eval.test.js test/comments.test.js test/en.test.js test/nbsp.test.js test/paste.test.js test/typeanim.test.js test/yandex-oauth.test.js test/yandex-disk.test.js test/yandex-desktop.test.js test/yandex-ui.test.js test/export-escapes.test.js test/dict.test.js test/export-target.test.js test/dict-folder.test.js test/preview-export.test.js",
-    "dist": "npm run build && electron-builder --mac dir --arm64 --publish never",
-    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
-    "dist:win-nosign": "npm run build && electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false",
-    "dist:win-from-mac": "npm run build && electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false",
-    "dist:win-portable": "npm run build && electron-builder --win portable --x64 --publish never",
-    "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
-    "dist:dmg": "npm run build && electron-builder --mac dmg --arm64 --publish never",
-    "install-app": "bash scripts/install-app.sh",
+    "test": "node --test test/project.test.js test/langcheck.test.js test/i18n.test.js test/typo.test.js test/clip.test.js test/import.test.js test/marks.test.js test/themes.test.js test/searchengines.test.js test/folder.test.js test/webdav.test.js test/morph.test.js test/editing.test.js test/tense.test.js test/docx.test.js test/replace.test.js test/mentions.test.js test/stats.test.js test/sync.test.js test/rhythm.test.js test/terms.test.js test/mode.test.js test/sentences.test.js test/stem.test.js test/fillers.test.js test/pos.test.js test/backup.test.js test/passive.test.js test/declension.test.js test/namematch.test.js test/names-forms.test.js test/analysis-ui.test.js test/audit-eval.test.js test/comments.test.js test/en.test.js test/nbsp.test.js test/paste.test.js test/typeanim.test.js test/yandex-oauth.test.js test/yandex-disk.test.js test/yandex-ui.test.js test/export-escapes.test.js test/dict.test.js test/dict-folder.test.js test/preview-export.test.js",
     "check": "node scripts/check.js",
     "map": "node scripts/map.js",
-    "release": "bash scripts/release.sh",
-    "i18n": "node scripts/i18n-scan.js",
-    "installer": "bash scripts/make-installer.sh"
+    "i18n": "node scripts/i18n-scan.js"
   },
   "devDependencies": {
     "@tiptap/core": "^2.10.0",
     "@tiptap/pm": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
-    "electron": "^45.2.1",
-    "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
-    "rcedit": "^3.1.0",
     "tiptap-markdown": "^0.8.10"
   },
   "author": {
     "name": "Александр Шавкунов"
-  },
-  "build": {
-    "appId": "ru.kabinet.writer",
-    "productName": "Кабинет",
-    "protocols": [
-      {
-        "name": "Kabinet OAuth",
-        "schemes": [
-          "kabinet"
-        ]
-      }
-    ],
-    "afterPack": "scripts/after-pack.js",
-    "artifactName": "Kabinet-${version}.${ext}",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "src/**/*",
-      "renderer/index.html",
-      "renderer/style.css",
-      "renderer/dist/app.js",
-      "sounds/**/*",
-      "build/icon.png",
-      "build/icon.ico",
-      "package.json"
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "icon": "build/icon.icns",
-      "identity": null,
-      "hardenedRuntime": false
-    },
-    "win": {
-      "icon": "build/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "linux": {
-      "icon": "build/icon-512.png",
-      "category": "Office",
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "Kabinet-${version}-linux-x64.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "language": "1049",
-      "shortcutName": "Кабинет",
-      "artifactName": "Kabinet-Setup-${version}.${ext}"
-    },
-    "portable": {
-      "artifactName": "Kabinet-Portable-${version}.${ext}"
-    },
-    "dmg": {
-      "title": "Кабинет ${version}"
-    },
-    "copyright": "Редактор Александра Шавкунова"
   }
 }

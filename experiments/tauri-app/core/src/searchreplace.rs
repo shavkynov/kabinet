@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_electron_search_and_replace() {
+    fn matches_js_search_and_replace() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sr");
         let golden: Value = serde_json::from_str(&fs::read_to_string(base.join("golden.json")).unwrap()).unwrap();
         let dir = tmpdir("sr").join("p");

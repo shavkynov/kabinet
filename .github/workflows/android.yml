@@ -30,7 +30,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Зависимости (Electron для Android не нужен, его не качаем)
+      - name: Зависимости
         run: |
           npm install --ignore-scripts
           cd mobile && npm install

@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// Кабинет на Tauri: этап 1 — ядро (проекты, главы, корзина, недавние). Интерфейс тот же, что в Electron-версии;
+// Кабинет на Tauri: этап 1 — ядро (проекты, главы, корзина, недавние). Интерфейс тот же, что у JS-версии;
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
@@ -107,7 +107,7 @@ fn menu_item(app: &tauri::AppHandle, id: &str, label: &str, accel: Option<&str>)
     MenuItemBuilder::with_id(id, label).build(app)
 }
 
-/// Главное меню, как в Electron-версии. Пункты «ui:…» передаются окну событием с тем же именем.
+/// Главное меню. Пункты «ui:…» передаются окну событием с тем же именем.
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
     let mac = cfg!(target_os = "macos");

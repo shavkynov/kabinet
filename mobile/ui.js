@@ -1,5 +1,5 @@
 import { activateModal } from './modal-focus.js';
-// Окна выбора, подтверждения и меню для Android (на компьютере их рисовал Electron).
+// Окна выбора, подтверждения и меню для Android.
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);

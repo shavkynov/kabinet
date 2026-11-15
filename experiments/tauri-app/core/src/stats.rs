@@ -114,7 +114,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn matches_rules_of_electron_version() {
+    fn matches_rules_of_js_version() {
         let d = tmpdir("stats");
         assert!(set_day_words(&d, "2026-02-30", &json!(5)).is_err() && set_day_words(&d, "2026-11-01", &json!(-1)).is_err());
         set_day_words(&d, "2026-11-10", &json!(300)).unwrap();
