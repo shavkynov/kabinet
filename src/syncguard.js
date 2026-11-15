@@ -1,13 +1,10 @@
 'use strict';
 
-// Защита данных при работе через облако (iCloud Drive, Dropbox и т.п.): облако может подменить файл,
-// пока он открыт у нас. Перед записью сверяем, не изменился ли файл с тех пор, как мы его читали.
+// Защита данных при синхронизации: другое устройство может подменить файл, пока он открыт у нас. Перед записью сверяем, не изменился ли файл с тех пор, как мы его читали.
 // Если изменился, чужую версию сохраняем в папку «Конфликты», а потом пишем свою: ничего не теряется.
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
-const { execFile } = require('child_process');
 const { writeFileAtomic, hashText, knownHash } = require('./fsutil');
 
 const CONFLICT_DIR = 'Конфликты';
@@ -62,23 +59,4 @@ function guardWrite(dir, file, newText, label, now = new Date()) {
   throw new Error('Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.');
 }
 
-/** Просим macOS скачать файл или папку из iCloud (если это не iCloud, ничего не произойдёт). */
-function requestDownload(target) {
-  if (process.platform !== 'darwin') return;
-  try {
-    execFile('brctl', ['download', target], () => {});
-  } catch { /* не критично */ }
-}
-
-const PLACEHOLDER_MSG = 'Файл ещё не скачан из iCloud. Подождите немного и откройте его снова.';
-
-/** Если вместо файла лежит заглушка iCloud (.имя.icloud), запускаем скачивание и сообщаем понятной ошибкой. */
-function assertNotPlaceholder(file) {
-  const holder = path.join(path.dirname(file), `.${path.basename(file)}.icloud`);
-  if (fs.existsSync(holder)) {
-    requestDownload(file);
-    throw new Error(PLACEHOLDER_MSG);
-  }
-}
-
-module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName };
+module.exports = { CONFLICT_DIR, guardWrite, stamp, safeName };

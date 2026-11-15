@@ -67,14 +67,8 @@ let currentDir = null; // открытый проект; рендерер пут
 
 const recentsFile = () => path.join(app.getPath('userData'), 'recent-projects.json');
 
-// Куда класть копии. Проект в облачной папке: копии храним на этом компьютере, вне облака,
-// чтобы до 30 копий не гонялись между устройствами и не пропадали вместе с проектом при ошибке синхронизации.
-function backupRoot(dir) {
-  if (!cloud.detectCloud(dir)) return path.join(dir, backup.BACKUP_DIR);
-  const key = crypto.createHash('sha1').update(dir).digest('hex').slice(0, 8);
-  const name = path.basename(dir).replace(/[\\/:*?"<>|]/g, '-') || 'project';
-  return path.join(app.getPath('userData'), 'Копии', `${name}-${key}`);
-}
+// Копии (до 30) лежат внутри папки проекта, в «Резервные копии», и в облако не уходят.
+const backupRoot = (dir) => path.join(dir, backup.BACKUP_DIR);
 
 // Копия при открытии проекта, закрытии и раз в 20 минут. Ошибка копирования не мешает писать.
 function autoBackup() {
@@ -88,101 +82,30 @@ function autoBackup() {
 }
 setInterval(autoBackup, 20 * 60 * 1000).unref();
 
-// ---------- синхронизация через облачную папку ----------
-// Своего сервера нет: проект лежит в iCloud Drive, Dropbox и т.п., а программа следит за файлами,
-// не даёт затереть чужие правки (чужая версия уходит в «Конфликты») и предупреждает о втором устройстве.
+// ---------- синхронизация ----------
+// Проект лежит в обычной папке на этом компьютере; «Файл → Синхронизация…» ведёт копию в Яндекс Диск (WebDAV).
+// Чужая версия при расхождении уходит в «Конфликты», а не затирается.
 
 let watcher = null;
-let lockTimer = null;
-let lockedDir = null;
-let askingCopies = false;
-const declinedCopies = new Set();
 
 function syncStop() {
   try { dav().stopWork(); } catch { /* связь с сетевой папкой не создана */ }
   if (watcher) { watcher.close(); watcher = null; }
-  clearInterval(lockTimer);
-  lockTimer = null;
-  if (lockedDir) { cloud.releaseLock(lockedDir); lockedDir = null; }
 }
 
 function syncStart(dir) {
   syncStop();
-  watcher = createWatcher(dir, (files) => {
-    send('sync:changed', files);
-    checkConflictCopies();
-  });
-  const where = cloud.detectCloud(dir);
-  if (where) {
-    cloud.writeLock(dir);
-    lockedDir = dir;
-    lockTimer = setInterval(() => cloud.writeLock(dir), 60 * 1000);
-    lockTimer.unref();
-    if (where === 'iCloud Drive') syncguard.requestDownload(dir);
-  }
+  watcher = createWatcher(dir, (files) => send('sync:changed', files));
   try { dav().start(dir); } catch (err) { console.error('dav start:', err); }
-  setTimeout(checkConflictCopies, 2000);
-}
-
-async function confirmLock(dir) {
-  const l = cloud.detectCloud(dir) ? cloud.foreignLock(dir) : null;
-  if (!l) return true;
-  const mins = Math.max(1, Math.round((Date.now() - l.time) / 60000));
-  const res = await dialog.showMessageBox(win, {
-    type: 'warning',
-    message: t('Проект, похоже, открыт на другом устройстве: {0}', l.device),
-    detail: t('Последний сигнал оттуда был {0} мин. назад. Если работать в обоих местах сразу, правки одной главы могут столкнуться: ничего не пропадёт, но чужая версия уйдёт в папку «Конфликты». Лучше закрыть проект на другом устройстве.', mins),
-    buttons: [t('Всё равно открыть'), t('Отмена')],
-    defaultId: 1,
-    cancelId: 1,
-  });
-  return res.response === 0;
-}
-
-// Облако при конфликте создаёт копии файлов («имя 2.md» и т.п.). Предлагаем убрать их в «Конфликты», ничего не удаляя.
-async function checkConflictCopies() {
-  if (!currentDir || askingCopies) return;
-  const dir = currentDir;
-  let list;
-  try {
-    list = cloud.findConflictCopies(dir).filter((x) => !declinedCopies.has(x));
-  } catch {
-    return;
-  }
-  if (!list.length) return;
-  askingCopies = true;
-  try {
-    const res = await dialog.showMessageBox(win, {
-      type: 'info',
-      message: t('Облако создало копии файлов: {0}', list.length),
-      detail: t('Так бывает, когда один файл изменили на двух устройствах. Предлагаю перенести эти копии в папку «Конфликты» внутри проекта: ничего не удаляется, и вы сможете забрать нужный текст.'),
-      buttons: [t('Перенести в «Конфликты»'), t('Не сейчас')],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (dir !== currentDir) return;
-    if (res.response === 0) {
-      cloud.moveConflictCopies(dir, list);
-      send('sync:changed', ['project.json']);
-    } else {
-      for (const x of list) declinedCopies.add(x);
-    }
-  } finally {
-    askingCopies = false;
-  }
 }
 
 async function showSyncInfo() {
   const dir = currentDir;
-  const where = dir ? cloud.detectCloud(dir) : null;
-  const lines = [];
-  if (dir) lines.push(where ? t('Сейчас проект лежит в: {0}.', where) : t('Сейчас проект лежит в обычной папке, не в облаке.'));
-  lines.push(
-    t('Как включить: переместите папку проекта в iCloud Drive (есть на каждом Маке, 5 ГБ бесплатно), Dropbox, Яндекс Диск или Google Drive и откройте её оттуда. На втором устройстве откройте ту же папку.'),
-    t('Что делает программа: сама подхватывает правки с другого устройства, не даёт затереть чужие правки (чужая версия сохраняется в папке «Конфликты») и предупреждает, если проект открыт в другом месте.'),
+  const lines = [
     t('Облако без установки программ: «Файл → Синхронизация…» подключает Яндекс Диск, Mail.ru, Nextcloud и другие серверы WebDAV по логину и паролю приложения. Проект остаётся на этом компьютере, а его копия синхронизируется с облаком; на телефоне в Кабинете для Android подключается тот же сервер.'),
-    t('Совет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать. Резервные копии облачного проекта хранятся на этом компьютере, вне облака.'),
-  );
+    t('Что делает программа: сама подхватывает правки с другого устройства и не даёт затереть чужие (чужая версия сохраняется в папке «Конфликты»).'),
+    t('Совет: работайте на одном устройстве за раз и закрывайте проект перед переходом на другое, чтобы облако успело всё передать. Резервные копии лежат внутри папки проекта, в «Резервные копии».'),
+  ];
   const res = await dialog.showMessageBox(win, {
     type: 'info',
     message: t('Синхронизация'),
@@ -265,7 +188,6 @@ function applyProjectDictionary() {
 
 async function openAt(dir) {
   const proj = project.openProject(dir);
-  if (!(await confirmLock(dir))) return null; // автор передумал: проект открыт на другом устройстве
   currentDir = dir;
   applyProjectDictionary();
   projectMode = proj.mode;

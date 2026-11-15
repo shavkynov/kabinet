@@ -7,7 +7,6 @@ const os = require('os');
 const path = require('path');
 
 const project = require('../src/project');
-const cloud = require('../src/cloud');
 const { createWatcher, isRelevant } = require('../src/watcher');
 
 function mk() {
@@ -97,71 +96,6 @@ test('обычное чтение для открытия по-прежнему 
   fs.writeFileSync(file, 'версия B');
   project.readChapter(dir, id);
   assert.equal(project.writeChapter(dir, id, 'версия C').conflict, null);
-});
-
-test('заглушка iCloud: выгруженный файл не принимается за пустую главу', () => {
-  const { dir, id } = mk();
-  const file = path.join(dir, 'Главы', `${id}.md`);
-  fs.unlinkSync(file);
-  fs.writeFileSync(path.join(dir, 'Главы', `.${id}.md.icloud`), '');
-  assert.throws(() => project.readChapter(dir, id), /не скачан из iCloud/);
-});
-
-test('detectCloud определяет облачные папки', () => {
-  assert.equal(cloud.detectCloud('/Users/a/Library/Mobile Documents/com~apple~CloudDocs/Роман'), 'iCloud Drive');
-  assert.equal(cloud.detectCloud('/Users/a/Dropbox/Книги/Роман'), 'Dropbox');
-  assert.equal(cloud.detectCloud('/Users/a/Library/CloudStorage/GoogleDrive-a@b/Роман'), 'Google Drive');
-  assert.equal(cloud.detectCloud('C:\\Users\\a\\OneDrive\\Роман'), 'OneDrive');
-  assert.equal(cloud.detectCloud('/Users/a/Documents/Writer/kabinet'), null);
-});
-
-test('копии-конфликты облака находятся и переносятся в «Конфликты» без потерь', () => {
-  const { dir, id } = mk();
-  fs.writeFileSync(path.join(dir, 'Главы', `${id} 2.md`), 'копия iCloud');
-  fs.writeFileSync(path.join(dir, 'Главы', `${id} (conflicted copy 2026-10-19).md`), 'копия Dropbox');
-  fs.writeFileSync(path.join(dir, 'Главы', 'чужой файл.md'), 'не наш');
-  fs.writeFileSync(path.join(dir, 'project 2.json'), '{}');
-  const list = cloud.findConflictCopies(dir).sort();
-  assert.deepEqual(list, [`Главы/${id} (conflicted copy 2026-10-19).md`, `Главы/${id} 2.md`, 'project 2.json'].sort());
-  assert.equal(cloud.moveConflictCopies(dir, list), 3);
-  assert.deepEqual(cloud.findConflictCopies(dir), []);
-  assert.ok(fs.existsSync(path.join(dir, 'Главы', `${id}.md`)));
-  assert.ok(fs.existsSync(path.join(dir, 'Главы', 'чужой файл.md')));
-  const moved = fs.readdirSync(path.join(dir, 'Конфликты'));
-  assert.equal(moved.length, 1);
-});
-
-test('предметы: конфликтная копия из облака находится, свои правки не теряются', () => {
-  const { dir } = mk();
-  const { id } = project.addItem(dir, 'item', null);
-  project.writeItem(dir, 'item', id, JSON.stringify({ short: 'моя версия', aliases: [], fields: [] }));
-  // облако принесло копию файла предмета
-  fs.writeFileSync(path.join(dir, 'Предметы', `${id} (conflicted copy 2026-10-20).json`), '{"short":"чужая"}');
-  const list = cloud.findConflictCopies(dir);
-  assert.deepEqual(list, [`Предметы/${id} (conflicted copy 2026-10-20).json`]);
-  assert.equal(cloud.moveConflictCopies(dir, list), 1);
-  assert.equal(JSON.parse(project.readItem(dir, 'item', id)).short, 'моя версия');
-  // копия уехала в «Конфликты/облако …/Предметы/…», из папки предметов исчезла
-  assert.ok(!fs.existsSync(path.join(dir, 'Предметы', `${id} (conflicted copy 2026-10-20).json`)));
-  const saved = fs.readdirSync(path.join(dir, 'Конфликты')).map((d) => {
-    const sub = path.join(dir, 'Конфликты', d, 'Предметы');
-    return fs.existsSync(sub) ? fs.readdirSync(sub) : [];
-  }).flat();
-  assert.deepEqual(saved, [`${id} (conflicted copy 2026-10-20).json`]);
-});
-
-test('замок: чужое устройство видно, своё и старое нет', () => {
-  const { dir } = mk();
-  const now = Date.now();
-  assert.equal(cloud.foreignLock(dir, 'A', now), null);
-  cloud.writeLock(dir, 'B', now - 60 * 1000);
-  assert.equal(cloud.foreignLock(dir, 'A', now).device, 'B');
-  assert.equal(cloud.foreignLock(dir, 'B', now), null);
-  assert.equal(cloud.foreignLock(dir, 'A', now + 10 * 60 * 1000), null); // замок протух
-  cloud.releaseLock(dir, 'A'); // чужой замок не снимаем
-  assert.ok(cloud.readLock(dir));
-  cloud.releaseLock(dir, 'B');
-  assert.equal(cloud.readLock(dir), null);
 });
 
 test('следилка: какие файлы интересны', () => {

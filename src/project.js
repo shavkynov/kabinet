@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const { writeFileAtomic, noteRead } = require('./fsutil');
 const declension = require('./declension');
 const { cleanSkip } = require('./editing');
-const { guardWrite, assertNotPlaceholder } = require('./syncguard');
+const { guardWrite } = require('./syncguard');
 
 const META = 'project.json';
 const CHAPTERS_DIR = 'Главы';
@@ -131,7 +131,6 @@ function loadMeta(dir) {
     noteRead(metaPath(dir), raw);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      assertNotPlaceholder(metaPath(dir)); // файл мог быть выгружен из iCloud
       throw new Error('В этой папке нет проекта Кабинета (нет файла project.json).');
     }
     throw err;
@@ -656,7 +655,6 @@ function readItem(dir, kind, id, { track = true } = {}) {
     return text;
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
-    assertNotPlaceholder(file);
     return k.ext === 'json' ? JSON.stringify(sanitizeCard({}), null, 2) : '';
   }
 }
@@ -804,7 +802,6 @@ function readChapter(dir, id, { track = true } = {}) {
     return text;
   } catch (err) {
     if (err.code === 'ENOENT') {
-      assertNotPlaceholder(file); // выгруженный из iCloud файл нельзя принимать за пустую главу
       return '';
     }
     throw err;
