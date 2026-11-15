@@ -53,12 +53,13 @@ async function flushPane2() {
   p2.dirty = false;
   try {
     const res = await api.writeChapter(id, text);
-    setStatus('ok', 'Сохранено');
+    noteSaved('pane2');
     noteSyncConflict(res);
     refreshTotals();
     return true;
   } catch (err) {
     p2.dirty = true;
+    noteSaveFailed('pane2');
     setStatus('error', 'Не удалось сохранить вторую панель! Повтор через 3 с…');
     clearTimeout(p2.timer);
     p2.timer = setTimeout(flushPane2, 3000);

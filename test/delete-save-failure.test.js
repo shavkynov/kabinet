@@ -22,7 +22,7 @@ function setup(kind = 'chapter', options = {}) {
     },
     document: { body: { classList: { toggle() {} } } },
     getMarkdown: () => ctx.text,
-    refreshCommentAnchors() {}, noteSyncConflict() {}, refreshIndex() {},
+    refreshCommentAnchors() {}, noteSyncConflict() {}, noteSaved() {}, noteSaveFailed() {}, refreshSaveState() {}, refreshIndex() {},
     fillP2Select() {}, updateNoteTitle() {}, refreshGoalUI() {},
     clearChapMeta() {}, resetPane2() {},
     setEditorContent(text) { ctx.text = text; },

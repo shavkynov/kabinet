@@ -67,6 +67,8 @@ pub enum PassOutcome { Done, Skipped, Stopped, Error }
 #[derive(Default)]
 struct St {
     last_sync: i64,
+    /// Когда начался последний успешный проход: всё, записанное до этого момента, уже было в папке.
+    last_sync_start: i64,
     last_error: String,
     conflict: bool,
 }
@@ -168,6 +170,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
         shared.busy.store(false, Ordering::SeqCst);
         return PassOutcome::Skipped;
     };
+    let started = now_ms();
     // Облачного замка нет: свежая отметка `kabinet.lock` от Electron/Android не блокирует проход
     // и не перезаписывается. Чужие правки защищает write_checked (перечитывание перед записью).
     let result = match sync.lock() {
@@ -184,6 +187,7 @@ fn run_pass(shared: &Arc<Shared>, sync: &Mutex<FolderSync<Rm>>, on_event: &OnEve
             {
                 let mut st = shared.st.lock().unwrap();
                 st.last_sync = now_ms();
+                st.last_sync_start = started;
                 st.last_error.clear();
                 if !res.conflicts.is_empty() { st.conflict = true; }
             }
@@ -335,12 +339,12 @@ impl DavLink {
         let Some(acc) = self.link_of(dir) else { return json!({ "linked": false }) };
         let cur = self.cur.lock().unwrap();
         let w = cur.as_ref().filter(|w| w.dir == dir);
-        let (last, busy, err, conflict) = match w {
-            Some(w) => { let st = w.shared.st.lock().unwrap(); (st.last_sync, w.shared.busy.load(Ordering::SeqCst), st.last_error.clone(), st.conflict) }
-            None => (0, false, String::new(), false),
+        let (last, started, busy, err, conflict) = match w {
+            Some(w) => { let st = w.shared.st.lock().unwrap(); (st.last_sync, st.last_sync_start, w.shared.busy.load(Ordering::SeqCst), st.last_error.clone(), st.conflict) }
+            None => (0, 0, false, String::new(), false),
         };
         json!({ "linked": true, "label": if acc.label.is_empty() { acc.url.clone() } else { acc.label.clone() }, "root": acc.root,
-                "lastSync": last, "busy": busy, "error": err, "conflict": conflict })
+                "lastSync": last, "lastSyncStart": started, "busy": busy, "error": err, "conflict": conflict })
     }
 
     pub fn sync_now(&self) -> R<Value> {
@@ -671,6 +675,8 @@ mod tests {
         s.put("Кабинет/Роман/Главы/aaaaaa.md", "правка с телефона".as_bytes());
         let st = d.sync_now().unwrap();
         assert_eq!(st["error"], json!(""));
+        let (start, end) = (st["lastSyncStart"].as_i64().unwrap(), st["lastSync"].as_i64().unwrap());
+        assert!(start > 0 && start <= end, "начало прохода отмечено и не позже его конца");
         assert_eq!(std::fs::read_to_string(dir.join("Главы/aaaaaa.md")).unwrap(), "правка с телефона");
         assert!(events.lock().unwrap().iter().any(|e| e.contains("Changed")));
         d.stop();

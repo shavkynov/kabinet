@@ -14,11 +14,12 @@ async function flushNote() {
   noteDirty = false;
   try {
     const res = await api.writeItem('note', id, text);
-    setStatus('ok', 'Сохранено');
+    noteSaved('note');
     noteSyncConflict(res);
     return true;
   } catch (err) {
     noteDirty = true;
+    noteSaveFailed('note');
     setStatus('error', 'Не удалось сохранить заметку! Повтор через 3 с…');
     clearTimeout(noteTimer);
     noteTimer = setTimeout(flushNote, 3000);

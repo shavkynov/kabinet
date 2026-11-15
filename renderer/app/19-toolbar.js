@@ -24,23 +24,22 @@ function wireToolbar() {
     if (def) def.run(editor.chain().focus()).run();
   });
 
-  // Нижняя панель сведений и полоса справа («Режим письма») делят один набор действий.
-  for (const bar of [$('#toolbar'), $('#notesDock')]) {
-    bar.addEventListener('mousedown', (e) => e.preventDefault());
-    bar.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-act]');
-      if (!btn || !project) return;
-      switch (btn.dataset.act) {
-        case 'typewriter': toggleTypewriter(); break;
-        case 'sound': toggleSound(); break;
-        case 'ambient': toggleAmbient(); break;
-        case 'notes': applyNotesHidden(notesShown()); break;
-        case 'focus': toggleFocusMode(); break;
-        case 'split': toggleSplit(); break;
-        default:
-      }
-    });
-  }
+  // Нижняя панель редактора: сведения и переключатели (режимы письма, вторая глава, правая панель, «Только лист»).
+  const bar = $('#toolbar');
+  bar.addEventListener('mousedown', (e) => e.preventDefault());
+  bar.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn || !project) return;
+    switch (btn.dataset.act) {
+      case 'typewriter': toggleTypewriter(); break;
+      case 'sound': toggleSound(); break;
+      case 'ambient': toggleAmbient(); break;
+      case 'notes': applyNotesHidden(notesShown()); break;
+      case 'focus': toggleFocusMode(); break;
+      case 'split': toggleSplit(); break;
+      default:
+    }
+  });
 }
 
 function updateToolbar() {

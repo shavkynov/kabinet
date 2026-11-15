@@ -396,8 +396,8 @@ body.focus-mode #chromeRight { display: none; }
   border-radius: 6px;
   font-size: 13px;
 }
-#toolbar button:hover, #notesDock button:hover { background: var(--sel); color: var(--text); }
-#toolbar button.active, #notesDock button.active { background: var(--sel); color: var(--accent); }
+#toolbar button:hover { background: var(--sel); color: var(--text); }
+#toolbar button.active { background: var(--sel); color: var(--accent); }
 #toolbar .sep { width: 1px; height: 16px; background: var(--line); margin: 0 6px; }
 #toolbar.disabled { opacity: .35; pointer-events: none; }
 
@@ -699,7 +699,7 @@ body.focus-mode #notesResizer { display: none; }
 #barSel { color: var(--accent); }
 .bar-btns { display: flex; gap: 2px; flex: none; }
 #toolbar .bar-btns button { font-size: 12px; min-width: 0; padding: 3px 8px; }
-#toolbar button[data-act].active, #notesDock button[data-act].active { background: var(--sel); color: var(--accent); }
+#toolbar button[data-act].active { background: var(--sel); color: var(--accent); }
 
 #fmtGroup { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0 4px; }
 #fmtGroup button {
@@ -1221,20 +1221,29 @@ body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
 /* Высота задана жёстко (а не min-height): эмодзи или шрифт другого движка не растянут полосу, и линии сверху совпадают. */
 #sideDock .sec-head { box-sizing: border-box; height: calc(var(--foot-h) - 1px); padding-top: 0; padding-bottom: 0; overflow: hidden; line-height: 1.2; }
 
-/* Полоса справа: тот же рост и верхняя линия, режимы письма вынесены из нижней панели. */
-#notesDock {
-  flex: none; position: sticky; bottom: 0; margin-top: auto; z-index: 2;
-  box-sizing: border-box; height: var(--foot-h); padding: 0 12px;
-  display: flex; align-items: center; gap: 2px; overflow: hidden;
-  border-top: 1px solid var(--line); background: var(--side);
+/* Состояние внизу справа: локальная запись и обмен с облаком. Закреплено у нижнего края окна, поэтому видно и при скрытой правой панели.
+   Режимы письма («Машинка», «Звук», «Эмбиент») живут в нижней панели редактора; здесь они не дублируются. */
+:root { --dock-w: 240px; }
+#statusDock {
+  position: fixed; right: 0; bottom: 0; z-index: 4;
+  box-sizing: border-box; height: var(--foot-h); width: max(var(--dock-w), min(var(--notes-w, 280px), 30vw));
+  padding: 0 12px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; overflow: hidden;
+  border-top: 1px solid var(--line); background: var(--side); font-size: 12px; color: var(--muted);
 }
-#notesDock button {
-  background: none; border: none; color: var(--muted); border-radius: 6px;
-  font-size: 12px; min-width: 0; padding: 3px 8px; cursor: pointer; white-space: nowrap;
-}
-/* Пока панель справа открыта, режимы письма живут в ней; в нижней панели они остаются, если справа панели нет (и на телефоне). */
-body:not(.mob):not(.notes-hidden) #toolbar .env { display: none; }
-body.mob #notesDock { display: none; }
+body.notes-hidden #statusDock { width: var(--dock-w); }
+#statusDock[hidden], .ds[hidden] { display: none; }
+.ds { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; background: none; border: none; padding: 3px 6px; color: inherit; font: inherit; border-radius: 6px; }
+.ds svg { flex: none; }
+.ds .ds-t { overflow: hidden; text-overflow: ellipsis; }
+button.ds { cursor: pointer; }
+button.ds:hover { background: var(--sel); color: var(--text); }
+button.ds:focus-visible { outline: 1.5px solid var(--accent); }
+.ds::before { content: attr(data-i); opacity: .7; }
+.ds.err { color: var(--danger); font-weight: 600; }
+/* Правая панель не заезжает под полосу состояния; без панели нижняя панель редактора уступает ей место справа. */
+#notesbar { padding-bottom: var(--foot-h); box-sizing: border-box; }
+body.notes-hidden #toolbar { padding-right: calc(12px + var(--dock-w)); }
+body.focus-mode #statusDock:not(.has-err), body.mob #statusDock { display: none; }
 
 /* Плашка цели в нижней панели: по высоте строго внутри полосы, отступы сверху и снизу равны. */
 :root { --goal-dock-h: 25px; }

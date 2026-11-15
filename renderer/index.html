@@ -245,13 +245,13 @@
         </div>
         <div class="sec-body"><textarea id="noteText" class="rtext" disabled placeholder="Выберите заметку слева или создайте новую"></textarea></div>
       </section>
-      <!-- нижняя полоса справа: той же высоты, что панель сведений и «Корзина»; здесь режимы письма -->
-      <div id="notesDock" role="toolbar" aria-label="Режим письма">
-        <button type="button" data-act="typewriter" title="Печатная машинка (⌘⇧T)">Машинка</button>
-        <button type="button" data-act="sound" title="Звуки клавиш (⌘⇧M)">Звук</button>
-        <button type="button" data-act="ambient" title="Фоновый эмбиент (⌘⇧A)">Эмбиент</button>
-      </div>
     </aside>
+
+    <!-- состояние внизу справа: локальная запись и обмен с облаком; видно и при скрытой правой панели -->
+    <div id="statusDock" role="group" aria-label="Состояние сохранения" hidden>
+      <span id="saveState" class="ds" role="status" hidden></span>
+      <button id="cloudState" type="button" class="ds" hidden title="Открыть окно синхронизации"></button>
+    </div>
 
     <!-- комментарии: кнопка у выделения и маленькое поле ввода -->
     <button id="cmtBtn" type="button" title="Комментарий к выделенному" aria-label="Комментарий к выделенному" hidden>

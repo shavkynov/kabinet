@@ -18,10 +18,11 @@ async function flushChapMeta() {
   cmDirty = false;
   try {
     await api.writeChapterMeta(id, data);
-    setStatus('ok', 'Сохранено');
+    noteSaved('meta');
     return true;
   } catch (err) {
     cmDirty = true;
+    noteSaveFailed('meta');
     setStatus('error', 'Не удалось сохранить синопсис! Повтор через 3 с…');
     clearTimeout(cmTimer);
     cmTimer = setTimeout(flushChapMeta, 3000);

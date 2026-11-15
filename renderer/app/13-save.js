@@ -1,5 +1,19 @@
 // ---------- сохранение ----------
 
+// Состояние сохранения для строки внизу справа: что не записалось и когда записали в последний раз.
+// Ключи: doc, note, meta, pane2, cmt. Записывает сначала устройство, облако догоняет позже (см. 38-dock.js).
+const SAVE = { failed: new Set(), lastWriteAt: 0 };
+const DOCK = { cloud: null, timer: null, project: null }; // облачная часть — в 38-dock.js
+function noteSaved(key) {
+  SAVE.failed.delete(key);
+  SAVE.lastWriteAt = Date.now();
+  refreshSaveState();
+}
+function noteSaveFailed(key) {
+  SAVE.failed.add(key);
+  refreshSaveState();
+}
+
 function setStatus(kind, text) {
   const el = $('#status');
   clearTimeout(statusTimer);
@@ -19,6 +33,7 @@ function markDirty() {
   dirty = true;
   dirtyId = currentId;
   dirtyKind = currentKind;
+  refreshSaveState();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, SAVE_DELAY_MS);
 }
@@ -44,13 +59,14 @@ async function writeDocJob(job) {
   try {
     const res = job.kind === 'chapter' ? await api.writeChapter(job.id, job.text) : await api.writeItem(job.kind, job.id, job.text);
     if (failedWrite === job) failedWrite = null;
-    setStatus('ok', 'Сохранено');
+    noteSaved('doc');
     noteSyncConflict(res);
     if (job.kind !== 'chapter') refreshIndex(); // имена и краткая справка могли измениться
     return true;
   } catch (err) {
     failedWrite = job;
     if (job.id === currentId && job.kind === currentKind) dirty = true; // на экране тот же документ: повторим уже с новым текстом
+    noteSaveFailed('doc');
     setStatus('error', 'Не удалось сохранить! Повтор через 3 с…');
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flush, 3000);

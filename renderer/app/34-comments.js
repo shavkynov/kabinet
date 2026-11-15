@@ -103,9 +103,11 @@ async function flushComments() {
   cmtDirty = false;
   try {
     await api.writeChapterMeta(id, { comments: list });
+    noteSaved('cmt');
     return true;
   } catch (err) {
     if (cmtChapter === id) cmtDirty = true;
+    noteSaveFailed('cmt');
     setStatus('error', 'Не удалось сохранить комментарии! Повтор через 3 с…');
     clearTimeout(cmtTimer);
     cmtTimer = setTimeout(flushComments, 3000);

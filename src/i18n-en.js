@@ -3,6 +3,14 @@
 // Английский перевод интерфейса. Ключ: русская строка из кода или разметки, значение: перевод.
 // {0}, {1}: подставляемые значения. Недостающее показывает: npm run i18n
 module.exports = {
+  "Не удалось сохранить": "Could not save",
+  "Состояние сохранения": "Save status",
+  "Открыть окно синхронизации": "Open sync window",
+  "Сохранение…": "Saving…",
+  "Облако: ошибка": "Cloud: error",
+  "Облако: обмен…": "Cloud: syncing…",
+  "Облако: есть конфликты": "Cloud: conflicts",
+  "Облако обновлено": "Cloud up to date",
   "Выберите папку проекта (в ней должен лежать файл project.json)": "Choose the project folder (it must contain a project.json file)",
   "Шаблон карточки…": "Card template…",
   "Рукопись": "Manuscript",

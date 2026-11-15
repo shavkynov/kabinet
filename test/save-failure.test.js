@@ -22,7 +22,7 @@ function setup() {
     console: { error() {} },
     setTimeout: () => 0, clearTimeout() {},
     isTextKind: () => true, getMarkdown: () => ctx.editor, cardView: { toJSON: () => '{}' },
-    noteSyncConflict() {}, refreshIndex() {}, refreshCommentAnchors() {},
+    noteSyncConflict() {}, noteSaved() {}, noteSaveFailed() {}, refreshSaveState() {}, refreshIndex() {}, refreshCommentAnchors() {},
     // Успешное сохранение, в том числе без изменений, подтверждается явным true.
     flushNote: async () => true, flushComments: async () => true, flushChapMeta: async () => true, flushPane2: async () => true,
     SAVE_DELAY_MS: 1500,
