@@ -525,6 +525,8 @@ module.exports = {
   "Монотонных мест не найдено.": "No monotonous passages found.",
   "Короткие": "Short",
   "Ровный ритм": "Even rhythm",
+  "Гусеница": "Caterpillar",
+  "Предложение-гусеница: слов {0}, сказуемых и деепричастий {1}, союзов {2}": "Caterpillar sentence: {0} words, {1} predicates and participles, {2} conjunctions",
   "Начало": "Opening",
   "Ритм": "Rhythm",
   "Ищет монотонность в повествовании: цепочки коротких предложений, ровный ритм (предложения почти одной длины подряд) и одинаковые начала. Реплики диалогов не считаются. Это подсказка: иногда ровный ритм задуман (скороговорка действия, повтор для эффекта).": "Looks for monotony in the narration: chains of short sentences, even rhythm (sentences of almost the same length in a row) and identical openings. Dialogue lines are ignored. It is a hint: sometimes even rhythm is intended (a rush of action, repetition for effect).",

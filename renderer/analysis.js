@@ -13,7 +13,8 @@ import { t, LANG } from './i18n.js';
 // Язык текста = язык интерфейса: для английского свои части речи, пассив, времена, основы слов и анафора.
 const analyzeBlock = LANG === 'en' ? EN.analyzeBlock : analyzeBlockRu;
 const analyzeTenseBlock = LANG === 'en' ? EN.analyzeTenseBlock : analyzeTenseBlockRu;
-import { analyzeRhythm, isDialogueText, dialogueFlags } from '../src/rhythm.js';
+import { analyzeRhythm, isDialogueText, dialogueFlags, sentenceTraits } from '../src/rhythm.js';
+const CONJ = LANG === 'en' ? new Set(['and', 'but', 'or']) : undefined;
 
 export const analysisKey = new PluginKey('textAnalysis');
 
@@ -125,8 +126,9 @@ export function scanRhythm(doc) {
       const heading = node.type.name === 'heading';
       list = r.sentences.map((s, k) => {
         const w = r.words.find((x) => x.start >= s.start && x.start < s.end);
+        const traits = sentenceTraits(r.words.filter((x) => x.start >= s.start && x.start < s.end), CONJ);
         return {
-          start: s.start, end: s.end, words: s.words, dialogue: heading || flags[k],
+          start: s.start, end: s.end, words: s.words, dialogue: heading || flags[k], ...traits,
           first: w ? w.text.toLowerCase().replace(/ё/g, '\u0435') : '',
           fStart: w ? w.start : s.start, fEnd: w ? w.end : s.start,
         };
@@ -137,6 +139,7 @@ export function scanRhythm(doc) {
     for (const s of list) {
       sentences.push({
         from: base + s.start, to: base + s.end, words: s.words, dialogue: s.dialogue,
+        pred: s.pred, conj: s.conj, same: s.same,
         first: s.first, fromFirst: base + s.fStart, toFirst: base + s.fEnd,
       });
     }

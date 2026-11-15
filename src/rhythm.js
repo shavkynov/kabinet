@@ -13,6 +13,35 @@ const MIN_START_RUN = 3; // сколько предложений подряд �
 // Начало на «И», «А», «Но»: анафора («И… И… И…») классический намеренный приём, поэтому порог выше.
 const { ANAPHORA_STARTS } = require('./morph');
 const MIN_ANAPHORA_RUN = 4;
+// «Гусеница»: длинное предложение, которое тянется на однородных сказуемых, деепричастиях или одних и тех же союзах.
+const CAT_MIN_WORDS = 16; // короче такое предложение гусеницей не считаем
+const CAT_PREDICATES = 4; // сказуемых и деепричастий в предложении
+const CAT_SAME_CONJ = 3; // один и тот же союз столько раз («и… и… и…»)
+const CAT_CONJ = 4; // всех сочинительных союзов
+const RU_CONJ = new Set(['и', 'а', 'но', 'да', 'или', 'либо']);
+const norm = (w) => w.toLowerCase().replace(/ё/g, 'е');
+
+/**
+ * Черты предложения для «гусеницы»: words — слова предложения [{ text, pos }] из morph.js.
+ * pred: личные глаголы (без инфинитивов) и деепричастия; conj: сочинительные союзы; same: самый частый из них.
+ */
+function sentenceTraits(words, conjSet = RU_CONJ) {
+  let pred = 0;
+  let conj = 0;
+  const seen = new Map();
+  for (const w of words) {
+    const low = norm(w.text);
+    if (conjSet.has(low)) {
+      conj += 1;
+      seen.set(low, (seen.get(low) || 0) + 1);
+    } else if (w.pos === 'verb' && !/(?:ть|ти|чь)(?:ся)?$/.test(low)) {
+      pred += 1;
+    } else if (w.pos === 'part' && /(?:[аяуюеи]я|[ая]|в|вши|вшись|ясь|аясь)$/.test(low) && !/(?:щая|щяя|вшая|нная|тая|ная)$/.test(low)) {
+      pred += 1; // деепричастие: «прижимая», «указывая», «встав»
+    }
+  }
+  return { pred, conj, same: Math.max(0, ...seen.values()) };
+}
 
 /** Начало реплики или прямой речи: такие абзацы пропускаем. */
 function isDialogueText(text) {
@@ -98,6 +127,15 @@ function analyzeRhythm(sentences, anaphora = ANAPHORA_STARTS) {
     i = j + 1;
   }
 
+  // 4. «Гусеницы»: длинные предложения с цепочкой сказуемых или повторяющимися союзами.
+  for (let i = 0; i < n; i += 1) {
+    const x = sentences[i];
+    if (!narr(i) || x.words < CAT_MIN_WORDS || x.pred === undefined) continue;
+    if (x.pred >= CAT_PREDICATES || x.same >= CAT_SAME_CONJ || x.conj >= CAT_CONJ) {
+      items.push({ type: 'caterpillar', from: i, to: i, words: x.words, pred: x.pred, conj: x.conj });
+    }
+  }
+
   items.sort((a, b) => a.from - b.from || a.to - b.to);
 
   // Сводка по повествованию.
@@ -119,4 +157,4 @@ function analyzeRhythm(sentences, anaphora = ANAPHORA_STARTS) {
   return { items, stats };
 }
 
-module.exports = { analyzeRhythm, isDialogueText, dialogueFlags, SHORT_MAX, LONG_MIN };
+module.exports = { analyzeRhythm, sentenceTraits, isDialogueText, dialogueFlags, SHORT_MAX, LONG_MIN };

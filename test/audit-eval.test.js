@@ -29,7 +29,7 @@ const floor = (m, p, r, name) => {
 
 test('аудит: наречия, набор A (разработочный) и набор B (свежий)', () => {
   floor(H.evalAdverbs(morph, adv[0]), 0.95, 0.95, 'наречия A');
-  floor(H.evalAdverbs(morph, adv[1]), 0.9, 0.45, 'наречия B');
+  floor(H.evalAdverbs(morph, adv[1]), 0.9, 0.85, 'наречия B');
 });
 
 test('аудит: страдательный залог, набор A (разработочный) и набор B (свежий)', () => {

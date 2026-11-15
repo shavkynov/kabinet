@@ -79,7 +79,7 @@ function evalRhythm(mod, makeDoc, cases) {
     const paras = c.paras.map((x) => (typeof x === 'string' ? x : { text: x.h, type: 'heading' }));
     const res = mod.scanRhythm(makeDoc(paras));
     if (res.sentences.length !== c.n) countMismatch.push(`${c.id}: ждали ${c.n} предложений, получили ${res.sentences.length}`);
-    const got = res.items.map((x) => [x.type, x.from, x.to]);
+    const got = res.items.filter((x) => x.type !== 'caterpillar').map((x) => [x.type, x.from, x.to]); // «гусеницы» проверяются отдельно
     const key = (x) => x.join(':');
     if (c.label === 'amb') { amb.push(`${c.id}: ждали ${JSON.stringify(c.expect)}, нашли ${JSON.stringify(got)}`); continue; }
     const want = c.expect;

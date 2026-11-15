@@ -92,3 +92,17 @@ test('ритм: повествовательный абзац и заголов�
   assert.deepEqual(flagsOf('Он встал. Она ушла. Дверь хлопнула.'), [false, false, false]);
   assert.deepEqual(flagsOf('Тихо.'), [false]);
 });
+
+test('гусеница: длинное предложение с цепочкой сказуемых или повторяющимися союзами', () => {
+  const R = require('../src/rhythm');
+  const { tokenize } = require('../src/morph');
+  const traits = (t) => R.sentenceTraits(tokenize(t));
+  const mk = (t, dialogue = false) => ({ words: tokenize(t).length, first: 'а', dialogue, ...traits(t) });
+  const cat = (arr) => R.analyzeRhythm(arr).items.filter((i) => i.type === 'caterpillar');
+  const heavy = 'Я с трудом поднялся, одной рукой прижимая дочь, а другой указывая на разлетевшиеся по комнате бумаги и вздохнул.';
+  assert.equal(cat([mk(heavy)]).length, 1);
+  assert.equal(cat([mk(heavy, true)]).length, 0, 'реплики не считаются');
+  assert.equal(cat([mk('Он встал и ушёл.')]).length, 0, 'короткое предложение не гусеница');
+  assert.equal(cat([mk('Лес и поле и река и дорога тянулись вдаль, к самому горизонту, к далёким холмам, к синим горам.')]).length, 1, 'повтор союза «и»');
+  assert.equal(cat([mk('Утро было холодным, туманным и тихим, а день выдался ясным и безветренным, как это бывает осенью.')]).length, 0);
+});

@@ -13,6 +13,7 @@ function scheduleRhythm() {
 
 function rhythmMessage(it) {
   if (it.type === 'short') return t('Короткие предложения подряд (до {1} слов), всего: {0}', it.to - it.from + 1, it.max);
+  if (it.type === 'caterpillar') return t('Предложение-гусеница: слов {0}, сказуемых и деепричастий {1}, союзов {2}', it.words, it.pred, it.conj);
   if (it.type === 'even') return t('Ровный ритм: предложений {0}, длина {1}–{2} слов', it.to - it.from + 1, it.min, it.max);
   return t('Одинаковое начало «{1}», предложений подряд: {0}', it.to - it.from + 1, it.word);
 }
@@ -72,7 +73,7 @@ function renderRhythm() {
     return;
   }
   const doc = editor.state.doc;
-  const TAGS = { short: t('Короткие'), even: t('Ровный ритм'), start: t('Начало') };
+  const TAGS = { short: t('Короткие'), even: t('Ровный ритм'), start: t('Начало'), caterpillar: t('Гусеница') };
   res.items.slice(0, 200).forEach((it, idx) => {
     const row = document.createElement('div');
     row.className = 'chk-item rhythm-item';
