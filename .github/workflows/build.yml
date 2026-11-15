@@ -76,50 +76,104 @@ jobs:
           })().catch((error) => { console.error(error.message); process.exitCode = 1; });
           NODE
 
-  build:
-    # установщики собираются только при выпуске версии (метка v0.0.0) или вручную
+  # Основная версия — Кабинет на Tauri (Rust). Установщики собираются при выпуске версии (метка v0.0.0) или вручную.
+  tauri-test:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Метка совпадает с версией
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          V=$(node -p "require('./package.json').version")
+          T=$(node -p "require('./experiments/tauri-app/src-tauri/tauri.conf.json').version")
+          C=$(grep -m1 '^version' experiments/tauri-app/src-tauri/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          echo "метка=$TAG package=$V tauri=$T cargo=$C"
+          if [ "${TAG#v}" != "$V" ] || [ "$V" != "$T" ] || [ "$V" != "$C" ]; then
+            echo "::error::Метка и версии в package.json, tauri.conf.json и Cargo.toml не совпадают."
+            exit 1
+          fi
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Тесты Rust (ядро — проекты, Яндекс Диск, синхронизация)
+        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
+
+  build:
+    needs: tauri-test
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            name: mac-arm64
-            cmd: npx electron-builder --mac dmg --arm64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-arm64.${ext}'
-          - os: macos-latest
-            name: mac-intel
-            cmd: npx electron-builder --mac dmg --x64 --publish never -c.mac.identity=- -c.mac.sign=./scripts/sign-mac-test.js -c.artifactName='Kabinet-${version}-mac-intel.${ext}'
-          - os: ubuntu-latest
-            name: linux
-            cmd: npx electron-builder --linux AppImage --x64 --publish never
           - os: windows-latest
             name: windows
-            cmd: npx electron-builder --win nsis --x64 --publish never -c.win.signAndEditExecutable=false
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - os: macos-latest
+            name: mac-arm64
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - os: macos-latest
+            name: mac-intel
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - os: ubuntu-22.04
+            name: linux
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
-      # macOS: ad-hoc подпись (без аккаунта разработчика). Без неё скачанная из интернета программа считается «повреждённой».
-      - run: ${{ matrix.cmd }}
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+      - name: Библиотеки Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xdg-utils
+      - name: Установщик (${{ matrix.name }})
         shell: bash
-        env:
-          KABINET_ADHOC: '1'
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        working-directory: experiments/tauri-app
+        run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Имена файлов
+        shell: bash
+        run: |
+          set -e
+          V=$(node -p "require('./package.json').version")
+          B="experiments/tauri-app/src-tauri/target/${{ matrix.target }}/release/bundle"
+          mkdir -p out
+          case "${{ matrix.name }}" in
+            windows)   cp "$B"/nsis/*.exe "out/Kabinet-$V-windows-x64.exe" ;;
+            mac-arm64) cp "$B"/dmg/*.dmg "out/Kabinet-$V-mac-arm64.dmg" ;;
+            mac-intel) cp "$B"/dmg/*.dmg "out/Kabinet-$V-mac-intel.dmg" ;;
+            linux)     cp "$B"/appimage/*.AppImage "out/Kabinet-$V-linux-x64.AppImage"
+                       cp "$B"/deb/*.deb "out/Kabinet-$V-linux-x64.deb" ;;
+          esac
+          ls -l out
       - uses: actions/upload-artifact@v4
         with:
           name: kabinet-${{ matrix.name }}
-          path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
+          path: out/*
           if-no-files-found: error
 
   android:
@@ -224,7 +278,20 @@ jobs:
         with:
           path: files
           merge-multiple: true
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          path: src
+      - name: Патчноут из CHANGELOG.txt
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          V="${TAG#v}"
+          awk -v v="$V" '$0==v{on=1;next} on&&/^[0-9]+\.[0-9]+\.[0-9]+$/{exit} on{print}' src/CHANGELOG.txt > notes.md
+          if [ ! -s notes.md ]; then echo "::error::В CHANGELOG.txt нет раздела $V."; exit 1; fi
+          cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
+          body_path: notes.md
           files: files/*

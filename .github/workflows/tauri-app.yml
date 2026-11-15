@@ -83,8 +83,8 @@ jobs:
           <dict>
             <key>CFBundleExecutable</key><string>kabinet-tauri</string>
             <key>CFBundleIdentifier</key><string>ru.kabinet.writer.tauri</string>
-            <key>CFBundleName</key><string>Кабинет (Tauri, тест)</string>
-            <key>CFBundleDisplayName</key><string>Кабинет (Tauri, тест)</string>
+            <key>CFBundleName</key><string>Кабинет</string>
+            <key>CFBundleDisplayName</key><string>Кабинет</string>
             <key>CFBundleIconFile</key><string>icon</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>0.39.0</string>
