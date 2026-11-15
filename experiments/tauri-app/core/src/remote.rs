@@ -29,6 +29,9 @@ pub trait Remote: Send {
     }
     fn remove(&mut self, rel: &str) -> R<()>;
     fn mkdir(&mut self, rel: &str) -> R<()>;
+    /// Независимый дескриптор того же хранилища для параллельной работы (загрузка и скачивание нескольких файлов
+    /// сразу). None — хранилище работает только последовательно.
+    fn fork(&self) -> Option<Box<dyn Remote>> { None }
 }
 
 /// Папка, которой можно подключиться и в которой можно создать корень: сейчас её реализует только Яндекс Диск.
@@ -45,4 +48,5 @@ impl Remote for Box<dyn Folder> {
     fn create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> R<bool> { (**self).create_if_absent(rel, bytes) }
     fn remove(&mut self, rel: &str) -> R<()> { (**self).remove(rel) }
     fn mkdir(&mut self, rel: &str) -> R<()> { (**self).mkdir(rel) }
+    fn fork(&self) -> Option<Box<dyn Remote>> { (**self).fork() }
 }

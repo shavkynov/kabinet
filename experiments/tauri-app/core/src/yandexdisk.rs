@@ -5,6 +5,7 @@ use crate::store::R;
 use crate::http::{Http, Req, Resp};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const API: &str = "https://cloud-api.yandex.net/v1/disk";
@@ -45,7 +46,7 @@ fn is_existing_resource_conflict(body: &[u8]) -> bool {
 struct Sent { status: u16, data: Value }
 
 pub struct YandexDisk<H: Http> {
-    http: H,
+    http: Arc<H>,
     token: String,
     expires_at: i64,
     base: Vec<String>,
@@ -75,7 +76,7 @@ impl<H: Http> YandexDisk<H> {
         let token = v["accessToken"].as_str().unwrap_or("");
         let exp = v["expiresAt"].as_f64();
         if v["kind"] != "kabinet-yandex-oauth" || token.is_empty() || exp.is_none() { return Err("Некорректные данные подключения Яндекса.".into()); }
-        Ok(YandexDisk { http, token: token.into(), expires_at: exp.unwrap() as i64, base: parts(root)?, known: HashSet::new(), pause: Duration::from_millis(250) })
+        Ok(YandexDisk { http: Arc::new(http), token: token.into(), expires_at: exp.unwrap() as i64, base: parts(root)?, known: HashSet::new(), pause: Duration::from_millis(250) })
     }
 
     #[cfg(test)]
@@ -278,7 +279,7 @@ impl<H: Http> YandexDisk<H> {
     }
 }
 
-impl<H: Http> Remote for YandexDisk<H> {
+impl<H: Http + 'static> Remote for YandexDisk<H> {
     fn list(&mut self, rel: &str) -> R<Vec<Item>> { Ok(self.do_list(rel)?) }
     fn read(&mut self, rel: &str) -> R<Option<Vec<u8>>> { Ok(self.do_read(rel)?) }
     fn write(&mut self, rel: &str, bytes: &[u8]) -> R<()> { Ok(self.do_write(rel, bytes)?) }
@@ -286,9 +287,15 @@ impl<H: Http> Remote for YandexDisk<H> {
     fn create_if_absent(&mut self, rel: &str, bytes: &[u8]) -> R<bool> { Ok(self.do_create_if_absent(rel, bytes)?) }
     fn remove(&mut self, rel: &str) -> R<()> { Ok(self.do_remove(rel)?) }
     fn mkdir(&mut self, rel: &str) -> R<()> { Ok(self.ensure(rel)?) }
+    fn fork(&self) -> Option<Box<dyn Remote>> {
+        Some(Box::new(YandexDisk {
+            http: self.http.clone(), token: self.token.clone(), expires_at: self.expires_at,
+            base: self.base.clone(), known: self.known.clone(), pause: self.pause,
+        }))
+    }
 }
 
-impl<H: Http> Folder for YandexDisk<H> {
+impl<H: Http + 'static> Folder for YandexDisk<H> {
     fn check(&mut self) -> R<bool> {
         let r = self.meta(&self.disk_path("")?, false)?;
         Ok(r.map(|m| m.data["type"] == "dir").unwrap_or(false))
@@ -297,7 +304,7 @@ impl<H: Http> Folder for YandexDisk<H> {
 }
 
 /// Папки Диска для выбора: (имя, путь от корня Диска) внутри `at`.
-pub fn browse_folders<H: Http>(http: H, pass: &str, at: &str) -> R<Vec<(String, String)>> {
+pub fn browse_folders<H: Http + 'static>(http: H, pass: &str, at: &str) -> R<Vec<(String, String)>> {
     let mut disk = YandexDisk::new(http, pass, at)?;
     let base: Vec<String> = at.split('/').filter(|x| !x.is_empty()).map(String::from).collect();
     let mut out: Vec<(String, String)> = disk.list("")?.into_iter().filter(|x| x.dir && !x.name.starts_with('.'))

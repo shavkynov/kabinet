@@ -105,7 +105,38 @@ pub struct RemoteEntry {
 
 type Cache = HashMap<String, (String, String)>; // rel → (sig, hash)
 
-fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>) -> R<BTreeMap<String, RemoteEntry>> {
+/// Сколько файлов качаем и грузим одновременно. Больше — Яндекс чаще отвечает 429.
+const PARALLEL: usize = 4;
+
+/// Выполнить `job` для каждого элемента на нескольких независимых дескрипторах хранилища.
+/// Результаты — в порядке элементов; None — элемент не начат (отмена или сбой раньше). Без `fork` — None целиком:
+/// вызывающий работает по-старому, последовательно.
+fn run_parallel<I: Sync, O: Send>(
+    remote: &dyn Remote, items: &[I], cancel: Option<&AtomicBool>,
+    job: impl Fn(&mut dyn Remote, &I) -> O + Sync,
+) -> Option<Vec<Option<O>>> {
+    if items.len() < 2 { return None; }
+    let n = PARALLEL.min(items.len());
+    let mut workers: Vec<Box<dyn Remote>> = Vec::new();
+    for _ in 0..n { workers.push(remote.fork()?); }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<Option<O>>> = items.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    std::thread::scope(|sc| {
+        for w in workers.iter_mut() {
+            let (next, slots, job) = (&next, &slots, &job);
+            sc.spawn(move || loop {
+                if cancel.map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) { break; }
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                if i >= items.len() { break; }
+                let out = job(w.as_mut(), &items[i]);
+                *slots[i].lock().unwrap() = Some(out);
+            });
+        }
+    });
+    Some(slots.into_iter().map(|m| m.into_inner().unwrap()).collect())
+}
+
+fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>, cancel: Option<&AtomicBool>) -> R<BTreeMap<String, RemoteEntry>> {
     let mut files: Vec<(String, Option<String>)> = Vec::new();
     let mut stack = vec![String::new()];
     // Сначала списки целиком: ошибка списка не запускает чтение неполного снимка.
@@ -118,12 +149,33 @@ fn walk_remote(remote: &mut dyn Remote, cache: Option<&Cache>) -> R<BTreeMap<Str
             files.push((r, sig));
         }
     }
+    let hit_of = |rel: &String, sig: &Option<String>| -> Option<String> {
+        match (sig, cache) { (Some(s), Some(c)) => c.get(rel).filter(|x| &x.0 == s).map(|x| x.1.clone()), _ => None }
+    };
+    // Что не взято из кэша, скачиваем несколькими потоками сразу; ошибка любого файла останавливает проход,
+    // как и при последовательном чтении.
+    let need: Vec<String> = files.iter().filter(|(r, s)| hit_of(r, s).is_none()).map(|(r, _)| r.clone()).collect();
+    let mut fetched: HashMap<String, Option<Vec<u8>>> = HashMap::new();
+    if let Some(done) = run_parallel(&*remote, &need, cancel, |w, rel| w.read(rel)) {
+        for (rel, got) in need.iter().zip(done) {
+            match got {
+                Some(Ok(b)) => { fetched.insert(rel.clone(), b); }
+                Some(Err(e)) => return Err(e),
+                None => {} // не начато: дочитаем ниже последовательно (или остановит отмена)
+            }
+        }
+    }
     let mut out = BTreeMap::new();
     for (rel, sig) in files {
-        let hit = match (&sig, cache) { (Some(s), Some(c)) => c.get(&rel).filter(|x| &x.0 == s), _ => None };
-        if let Some(h) = hit {
-            out.insert(rel, RemoteEntry { hash: h.1.clone(), bytes: None, sig });
-        } else if let Some(bytes) = remote.read(&rel)? {
+        if let Some(h) = hit_of(&rel, &sig) {
+            out.insert(rel, RemoteEntry { hash: h, bytes: None, sig });
+            continue;
+        }
+        if cancel.map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+            return Err("Синхронизация остановлена. Изменения сохранены локально и уйдут при следующем обмене.".into());
+        }
+        let got = match fetched.remove(&rel) { Some(b) => b, None => remote.read(&rel)? };
+        if let Some(bytes) = got {
             out.insert(rel, RemoteEntry { hash: hash_bytes(&bytes), bytes: Some(bytes), sig });
         }
     }
@@ -586,11 +638,42 @@ impl<T: Remote> FolderSync<T> {
 
     }
 
+    /// Новые файлы (в облаке нет, в прошлых проходах не было) грузим несколькими потоками сразу: на Яндекс Диске
+    /// каждый файл — несколько запросов, и по одному первый обмен тянется минутами. Грузим только `create`
+    /// (без перезаписи); всё, что не вышло, остаётся обычному решению `settle`, которое разберёт причину.
+    fn upload_new(&mut self, rels: &BTreeSet<String>, remote: &mut BTreeMap<String, RemoteEntry>, local: &BTreeMap<String, String>, res: &mut SyncResult) -> R<()> {
+        self.ensure_not_cancelled()?;
+        let mut jobs: Vec<(String, Vec<u8>, String)> = Vec::new();
+        for rel in rels {
+            if remote.contains_key(rel) || self.state.contains_key(rel) { continue; }
+            let Some(lh) = local.get(rel) else { continue };
+            let Ok(data) = self.read_local(rel) else { continue };
+            if &hash_bytes(&data) != lh { continue; } // файл успели сохранить: решит settle
+            jobs.push((rel.clone(), data, lh.clone()));
+        }
+        if jobs.len() < 2 { return Ok(()); }
+        // Папки создаём заранее и по одному: потоки не спорят за создание одной папки.
+        let mut dirs: BTreeSet<&str> = BTreeSet::new();
+        for (rel, _, _) in &jobs { if let Some((parent, _)) = rel.rsplit_once('/') { dirs.insert(parent); } }
+        for d in dirs { self.remote.mkdir(d)?; }
+        self.ensure_not_cancelled()?;
+        let done = run_parallel(&self.remote, &jobs, self.cancel.as_deref(), |w, (rel, data, _)| w.create(rel, data));
+        let Some(done) = done else { return Ok(()) };
+        for ((rel, _, lh), out) in jobs.iter().zip(done) {
+            if let Some(Ok(())) = out {
+                self.state.insert(rel.clone(), lh.clone());
+                remote.insert(rel.clone(), RemoteEntry { hash: lh.clone(), bytes: None, sig: None });
+                res.pushed.push(rel.clone());
+            }
+        }
+        self.ensure_not_cancelled()
+    }
+
     /// Один проход: что снаружи — к нам, что у нас — наружу.
     pub fn sync(&mut self) -> R<SyncResult> {
         self.ensure_not_cancelled()?;
         let cache = std::mem::take(&mut self.cache);
-        let walked = walk_remote(&mut self.remote, Some(&cache));
+        let walked = walk_remote(&mut self.remote, Some(&cache), self.cancel.as_deref());
         self.cache = cache;
         let mut remote = walked?;
         let mut local = walk_local(&self.dir)?;
@@ -615,6 +698,7 @@ impl<T: Remote> FolderSync<T> {
             return Err("Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.".into());
         }
 
+        self.upload_new(&rels, &mut remote, &local, &mut res)?;
         for rel in &rels { self.settle(rel, &mut remote, &mut local, &mut res)?; }
 
         self.cache.clear();
@@ -648,7 +732,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Выгрузить локальный проект поверх папки; чего у нас нет, уходит в «Конфликты» папки.
     pub fn replace_all(&mut self) -> R<usize> {
-        let remote = walk_remote(&mut self.remote, None)?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
         let local = walk_local(&self.dir)?;
         let mut hidden = 0;
         for (rel, e) in &remote {
@@ -673,7 +757,7 @@ impl<T: Remote> FolderSync<T> {
     /// из проекта — только после того, как их версии подтверждённо сохранены.
     pub fn take_cloud(&mut self) -> R<usize> {
         self.ensure_not_cancelled()?;
-        let remote = walk_remote(&mut self.remote, None)?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
         let local = walk_local(&self.dir)?;
         // Сначала читаем все вытесняемые версии: ошибка чтения останавливает операцию до любых изменений.
         let mut keep: Vec<(String, Vec<u8>)> = vec![];
@@ -725,7 +809,7 @@ impl<T: Remote> FolderSync<T> {
 
     /// Скопировать папку в локальный каталог (первое открытие проекта из папки).
     pub fn import_all(&mut self) -> R<Vec<String>> {
-        let remote = walk_remote(&mut self.remote, None)?;
+        let remote = walk_remote(&mut self.remote, None, self.cancel.as_deref())?;
         self.state.clear();
         self.cache.clear();
         for (rel, e) in &remote {
@@ -1343,6 +1427,60 @@ mod tests {
         assert!(remote.iter().any(|t| t.contains("локально")) && remote.iter().any(|t| t.contains("местная глава")),
             "копии видны и в папке: {remote:?}");
         assert_eq!(sb.state.get("Главы/aaaaaa.md"), Some(&hash_bytes("облако".as_bytes())), "снимок указывает на облако");
+    }
+
+    /// Первая выгрузка многих файлов идёт параллельно, но результат тот же: всё в облаке, всё записано в состояние.
+    #[test]
+    fn first_upload_of_many_files_goes_parallel_and_is_complete() {
+        let s = FakeServer::new();
+        let a = tmpdir("par-up-a").join("p");
+        let ids: Vec<String> = (0..14).map(|i| format!("ch{:04}", i)).collect();
+        let chapters: Vec<(&str, String)> = ids.iter().map(|id| (id.as_str(), format!("текст {}", id))).collect();
+        let refs: Vec<(&str, &str)> = chapters.iter().map(|(i, t)| (*i, t.as_str())).collect();
+        project(&a, &refs);
+        let mut sa = sync_of(&a, &s, "a");
+        assert!(sa.remote.fork().is_some(), "Яндекс-адаптер умеет работать параллельно");
+        let res = sa.sync().unwrap();
+        assert_eq!(res.pushed.len(), 15, "14 глав и project.json: {:?}", res.pushed);
+        for id in &ids {
+            assert_eq!(s.0.lock().unwrap().files.get(&format!("/Кабинет/Роман/Главы/{}.md", id)).map(|f| f.0.clone()), Some(format!("текст {}", id).into_bytes()));
+        }
+        // повторный проход ничего не меняет и ничего не удаляет
+        let again = sa.sync().unwrap();
+        assert!(again.pushed.is_empty() && again.pulled.is_empty() && again.removed.is_empty() && again.conflicts.is_empty(), "{:?}", again);
+        assert_eq!(r(&a, "Главы/ch0003.md"), "текст ch0003");
+    }
+
+    /// Второе устройство скачивает много файлов параллельно и получает тот же проект.
+    #[test]
+    fn first_download_of_many_files_goes_parallel_and_matches() {
+        let s = FakeServer::new();
+        let a = tmpdir("par-down-a").join("p");
+        let ids: Vec<String> = (0..14).map(|i| format!("ch{:04}", i)).collect();
+        let chapters: Vec<(&str, String)> = ids.iter().map(|id| (id.as_str(), format!("текст {}", id))).collect();
+        let refs: Vec<(&str, &str)> = chapters.iter().map(|(i, t)| (*i, t.as_str())).collect();
+        project(&a, &refs);
+        sync_of(&a, &s, "a").sync().unwrap();
+
+        let b = tmpdir("par-down-b").join("p");
+        std::fs::create_dir_all(&b).unwrap();
+        let res = sync_of(&b, &s, "b").sync().unwrap();
+        assert_eq!(res.pulled.len(), 15, "{:?}", res.pulled);
+        for id in &ids { assert_eq!(r(&b, &format!("Главы/{}.md", id)), format!("текст {}", id)); }
+        assert!(res.conflicts.is_empty());
+    }
+
+    /// Остановка сессии до параллельной выгрузки: в облаке ничего нового не появляется.
+    #[test]
+    fn cancelled_pass_uploads_nothing_in_parallel() {
+        let s = FakeServer::new();
+        let a = tmpdir("par-cancel").join("p");
+        project(&a, &[("aaaaaa", "1"), ("bbbbbb", "2"), ("cccccc", "3")]);
+        let mut sa = sync_of(&a, &s, "a");
+        let flag = Arc::new(AtomicBool::new(true));
+        sa.set_cancel(Some(flag));
+        assert!(sa.sync().is_err());
+        assert!(s.0.lock().unwrap().files.keys().all(|k| !k.contains("Главы")), "ничего не выгружено");
     }
 
     /// «Взять облако» при совпадающих файлах не создаёт лишних копий.
