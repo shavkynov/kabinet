@@ -15,7 +15,7 @@ pub struct Resp {
     pub location: Option<String>,
 }
 
-pub trait Http: Send {
+pub trait Http: Send + Sync {
     fn request(&self, req: Req) -> Result<Resp, String>;
 }
 
@@ -47,7 +47,7 @@ const MAX_BODY: u64 = 256 * 1024 * 1024;
 pub fn read_capped(reader: impl std::io::Read, limit: u64) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let mut body = Vec::new();
-    reader.take(limit + 1).read_to_end(&mut body).map_err(|e| e.to_string())?;
+    reader.take(limit + 1).read_to_end(&mut body).map_err(|e| e.to_string())? ;
     if body.len() as u64 > limit {
         return Err(format!("ответ сервера больше {} МБ, файл не прочитан целиком", limit / (1024 * 1024)));
     }
@@ -73,7 +73,7 @@ impl Http for UreqHttp {
         };
         let status = resp.status();
         let location = resp.header("location").map(String::from);
-        let body = read_capped(resp.into_reader(), MAX_BODY)?;
+        let body = read_capped(resp.into_reader(), MAX_BODY)? ;
         Ok(Resp { status, body, location })
     }
 }
