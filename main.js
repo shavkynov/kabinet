@@ -68,7 +68,7 @@ let currentDir = null; // открытый проект; рендерер пут
 const recentsFile = () => path.join(app.getPath('userData'), 'recent-projects.json');
 
 // Куда класть копии. Проект в облачной папке: копии храним на этом компьютере, вне облака,
-// чтобы 60 копий не гонялись между устройствами и не пропадали вместе с проектом при ошибке синхронизации.
+// чтобы до 30 копий не гонялись между устройствами и не пропадали вместе с проектом при ошибке синхронизации.
 function backupRoot(dir) {
   if (!cloud.detectCloud(dir)) return path.join(dir, backup.BACKUP_DIR);
   const key = crypto.createHash('sha1').update(dir).digest('hex').slice(0, 8);
