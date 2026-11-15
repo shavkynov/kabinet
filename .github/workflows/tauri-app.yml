@@ -87,8 +87,8 @@ jobs:
             <key>CFBundleDisplayName</key><string>Кабинет (Tauri, тест)</string>
             <key>CFBundleIconFile</key><string>icon</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.38.0</string>
-            <key>CFBundleVersion</key><string>0.38.0</string>
+            <key>CFBundleShortVersionString</key><string>0.39.0</string>
+            <key>CFBundleVersion</key><string>0.39.0</string>
             <key>LSMinimumSystemVersion</key><string>10.15</string>
             <key>NSHighResolutionCapable</key><true/>
             <key>CFBundleURLTypes</key>
