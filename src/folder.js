@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { writeFileAtomic } = require('./fsutil');
-const { CONFLICT_DIR, conflictNames } = require('./syncguard');
+const { CONFLICT_DIR, stamp, safeName } = require('./syncguard');
 const { mergeMeta } = require('./meta-merge');
 
 // Что переносим в папку и обратно. «Копии» (резервные) и временные файлы не нужны:
@@ -212,58 +212,43 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     try { return hashBytes(readLocal(rel)); } catch { return undefined; }
   };
 
+  const labelOf = (rel) => (rel.includes('/') ? path.basename(rel, path.extname(rel)) : rel);
+
   /**
-   * Имя копии в «Конфликты», которое не затрёт другую версию: обычное, а если оно занято другим содержимым —
-   * с SHA-256. Та же версия под этим именем переиспользуется. withLocal: проверять и локальную папку.
-   * Ошибка чтения папки имя не блокирует: запись в неё всё равно не удастся и будет обработана вызывающим.
+   * Складывает версию в «Конфликты»: у нас обязательно (это то, что нельзя потерять), в папке по возможности.
+   * Имя: время + название + пометка; если оно занято другой версией, добавляется номер. Та же версия переиспользуется.
    */
-  async function freeConflictName(rel, label, suffix, bytes, withLocal) {
+  async function keepCopy(rel, bytes, label, suffix) {
     const want = Buffer.from(bytes);
-    for (const name of conflictNames(label, suffix, path.extname(rel), want, now())) {
-      const relConflict = `${CONFLICT_DIR}/${name}`;
+    const base = `${stamp(now())} ${safeName(label)} (${suffix})`;
+    const ext = path.extname(rel);
+    let name = null;
+    for (let n = 1; n <= 99 && !name; n += 1) {
+      const candidate = `${base}${n > 1 ? ` ${n}` : ''}${ext}`;
+      const relConflict = `${CONFLICT_DIR}/${candidate}`;
       let busy = false;
-      if (withLocal) {
-        try { busy = !fs.readFileSync(path.join(dir, relConflict)).equals(want); } catch (err) { if (err.code !== 'ENOENT') throw err; }
-      }
+      try { busy = !fs.readFileSync(path.join(dir, relConflict)).equals(want); } catch (err) { if (err.code !== 'ENOENT') throw err; }
       if (!busy) {
         let there = null;
-        try { there = await adapter.read(relConflict); } catch { /* папка недоступна */ }
-        if (there && !Buffer.from(there).equals(want)) busy = true;
+        try { there = await adapter.read(relConflict); } catch { /* папка недоступна: у нас копия всё равно будет */ }
+        busy = !!there && !Buffer.from(there).equals(want);
       }
-      if (!busy) return name;
+      if (!busy) name = candidate;
     }
-    throw new Error('Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.');
-  }
-
-  /** Чужую версию наружу не выбрасываем: складываем её в «Конфликты» и локально, и в папке. */
-  async function keepForeign(rel, bytes, label) {
-    const name = await freeConflictName(rel, label, 'с другого устройства', bytes, true);
+    if (!name) throw new Error('Копия в «Конфликты» уже существует и была изменена. Сохранение остановлено, чтобы не затереть её.');
     const relConflict = `${CONFLICT_DIR}/${name}`;
     const target = path.join(dir, relConflict);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    writeFileAtomic(target, Buffer.from(bytes));
+    writeFileAtomic(target, want);
     try {
       await adapter.mkdir(CONFLICT_DIR);
-      await adapter.write(relConflict, new Uint8Array(bytes));
-      state[relConflict] = hashBytes(bytes);
+      await adapter.write(relConflict, new Uint8Array(want));
+      state[relConflict] = hashBytes(want);
     } catch (err) { console.error('conflict to folder:', err); }
     return name;
   }
-
-  const labelOf = (rel) => (rel.includes('/') ? path.basename(rel, path.extname(rel)) : rel);
-
-  /** Сохранить вытесняемую локальную версию в «Конфликты» и в папке. Ошибка папки не подавляется. */
-  async function keepLocalCopy(rel, bytes, label) {
-    const name = await freeConflictName(rel, label, 'было на этом устройстве', bytes, true);
-    const relConflict = `${CONFLICT_DIR}/${name}`;
-    const target = path.join(dir, relConflict);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    writeFileAtomic(target, Buffer.from(bytes));
-    await adapter.mkdir(CONFLICT_DIR);
-    await adapter.write(relConflict, new Uint8Array(bytes));
-    state[relConflict] = hashBytes(bytes);
-    return name;
-  }
+  const keepForeign = (rel, bytes, label) => keepCopy(rel, bytes, label, 'с другого устройства');
+  const keepLocalCopy = (rel, bytes, label) => keepCopy(rel, bytes, label, 'было на этом устройстве');
 
   /**
    * Взять облако за основу при первом подключении к непустой папке: локальные версии, которые облако
@@ -305,6 +290,83 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     return keep.length;
   }
 
+  /**
+   * Решение по одному файлу: r — хэш в облаке, l — у нас, b — последний согласованный (undefined, если нет).
+   * Решение принимаем заново, если перечитывание локального файла показало, что снимок l устарел
+   * (сохранение во время прохода). Обычная ветка выходит через return.
+   */
+  async function settle(rel, remote, local, res) {
+    for (;;) {
+      const r = remote.has(rel) ? remote.get(rel).hash : undefined;
+      const l = local.get(rel);
+      const b = state[rel];
+      if (r === undefined && l === undefined) { delete state[rel]; return; }
+      if (r !== undefined && r === l) { state[rel] = r; return; }
+
+      if (r !== undefined && l !== undefined) {
+        if (b === r) { await adapter.write(rel, readLocal(rel)); state[rel] = l; res.pushed.push(rel); return; }
+        if (b === l) {
+          // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
+          // перечитаем его: сохранение во время этого прохода уже изменило файл (без await между проверкой и записью).
+          const foreign = await remoteBytes(remote.get(rel), rel);
+          const fresh = localHash(rel);
+          if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
+          writeFileAtomic(path.join(dir, rel), Buffer.from(foreign));
+          state[rel] = r;
+          res.pulled.push(rel);
+          return;
+        }
+        const foreign = await remoteBytes(remote.get(rel), rel);
+        await keepForeign(rel, foreign, labelOf(rel));
+        const withWords = rel === 'project.json' ? mergeMeta(readLocal(rel), foreign) : null; // главы, карточки и слова с другого устройства не теряем
+        if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
+        await adapter.write(rel, readLocal(rel));
+        state[rel] = withWords ? hashBytes(withWords) : l;
+        res.pushed.push(rel);
+        res.conflicts.push(rel);
+        return;
+      }
+
+      if (r !== undefined) { // снаружи есть, у нас нет
+        if (b === undefined) {
+          const target = path.join(dir, rel);
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          writeFileAtomic(target, Buffer.from(await remoteBytes(remote.get(rel), rel)));
+          state[rel] = r;
+          res.pulled.push(rel);
+        } else if (r === b) { // мы удалили файл, а в облаке его не меняли: убираем и там
+          await adapter.remove(rel);
+          delete state[rel];
+          res.removed.push(rel);
+        } else { // мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается
+          writeFileAtomic(path.join(dir, rel), Buffer.from(await remoteBytes(remote.get(rel), rel)));
+          state[rel] = r;
+          res.pulled.push(rel);
+        }
+        return;
+      }
+
+      // у нас есть, снаружи нет
+      if (b === undefined) { // создали у нас: отправляем
+        const parent = path.dirname(rel);
+        if (parent !== '.') await adapter.mkdir(parent);
+        await adapter.write(rel, readLocal(rel));
+        state[rel] = l;
+        res.pushed.push(rel);
+      } else if (l === b) { // удалили на другом устройстве и мы не правили: убираем у себя
+        // Перед удалением перечитаем файл: сохранение во время прохода могло изменить его.
+        const fresh = localHash(rel);
+        if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
+        try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
+        delete state[rel];
+        res.pulled.push(rel);
+      } else { // снаружи удалили, а мы правили: свой текст остаётся и уйдёт наружу при выгрузке
+        res.conflicts.push(rel);
+      }
+      return;
+    }
+  }
+
   /** Один проход: что снаружи — к нам, что у нас — наружу. Возвращает списки изменений. */
   async function syncOnce() {
     const remote = await walkRemote(adapter, sigCache);
@@ -337,79 +399,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
       throw new Error('Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.');
     }
 
-    for (const rel of rels) {
-      // Решение по файлу принимаем заново, если перечитывание локального файла показало, что снимок l
-      // устарел (сохранение во время прохода). Внутренний цикл завершается на каждой обычной ветке.
-      for (;;) {
-        const r = remote.has(rel) ? remote.get(rel).hash : undefined;
-        const l = local.get(rel);
-        const b = state[rel];
-        if (r === undefined && l === undefined) { delete state[rel]; break; }
-        if (r !== undefined && r === l) { state[rel] = r; break; }
-
-        if (r !== undefined && l !== undefined) {
-          if (b === r) { await adapter.write(rel, readLocal(rel)); state[rel] = l; res.pushed.push(rel); break; }
-          if (b === l) {
-            // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
-            // перечитаем его: сохранение во время этого прохода уже изменило файл (без await между проверкой и записью).
-            const foreign = await remoteBytes(remote.get(rel), rel);
-            const fresh = localHash(rel);
-            if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
-            writeFileAtomic(path.join(dir, rel), Buffer.from(foreign));
-            state[rel] = r;
-            res.pulled.push(rel);
-            break;
-          }
-          const foreign = await remoteBytes(remote.get(rel), rel);
-          await keepForeign(rel, foreign, labelOf(rel));
-          const withWords = rel === 'project.json' ? mergeMeta(readLocal(rel), foreign) : null; // главы, карточки и слова с другого устройства не теряем
-          if (withWords) writeFileAtomic(path.join(dir, rel), withWords);
-          await adapter.write(rel, readLocal(rel));
-          state[rel] = withWords ? hashBytes(withWords) : l;
-          res.pushed.push(rel);
-          res.conflicts.push(rel);
-          break;
-        }
-
-        if (r !== undefined) { // снаружи есть, у нас нет
-          if (b === undefined) {
-            const target = path.join(dir, rel);
-            fs.mkdirSync(path.dirname(target), { recursive: true });
-            writeFileAtomic(target, Buffer.from(await remoteBytes(remote.get(rel), rel)));
-            state[rel] = r;
-            res.pulled.push(rel);
-          } else if (r === b) { // мы удалили файл, а в облаке его не меняли: убираем и там
-            await adapter.remove(rel);
-            delete state[rel];
-            res.removed.push(rel);
-          } else { // мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается
-            writeFileAtomic(path.join(dir, rel), Buffer.from(await remoteBytes(remote.get(rel), rel)));
-            state[rel] = r;
-            res.pulled.push(rel);
-          }
-          break;
-        }
-
-        // у нас есть, снаружи нет
-        if (b === undefined) { // создали у нас: отправляем
-          const parent = path.dirname(rel);
-          if (parent !== '.') await adapter.mkdir(parent);
-          await adapter.write(rel, readLocal(rel));
-          state[rel] = l;
-          res.pushed.push(rel);
-        } else if (l === b) { // удалили на другом устройстве и мы не правили: убираем у себя
-          // Перед удалением перечитаем файл: сохранение во время прохода могло изменить его.
-          const fresh = localHash(rel);
-          if (fresh !== undefined && fresh !== l) { local.set(rel, fresh); continue; }
-          try { fs.rmSync(path.join(dir, rel), { force: true }); } catch { /* уже нет */ }
-          delete state[rel];
-          res.pulled.push(rel);
-        } else { // снаружи удалили, а мы правили: свой текст остаётся и уйдёт наружу при выгрузке
-          res.conflicts.push(rel);
-        }
-        break;
-      }
-    }
+    for (const rel of rels) await settle(rel, remote, local, res);
 
     sigCache.clear();
     for (const [rel, e] of remote) if (e.sig && !res.pushed.includes(rel) && !res.conflicts.includes(rel) && !res.removed.includes(rel)) sigCache.set(rel, { sig: e.sig, hash: e.hash });
@@ -418,51 +408,26 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
   }
 
   /**
-   * Быстрая выгрузка только указанных файлов (их трогали с нашей стороны):
-   * читает наружу лишь эти файлы, а не всю папку.
+   * Быстрая выгрузка только указанных файлов (их трогали с нашей стороны): снимок облака берём только по ним,
+   * а решение то же, что в обычном проходе.
    */
   async function pushOnce(rels) {
-    const res = { pushed: [], conflicts: [], removed: [] };
+    const res = { pulled: [], pushed: [], removed: [], conflicts: [] };
     for (const rel of new Set(rels)) {
       if (!isSyncable(rel)) continue;
       sigCache.delete(rel);
-      const here = fs.existsSync(path.join(dir, rel));
-      if (!here) { // удалили у нас: сравниваем с тем, что снаружи, и убираем там
-        if (state[rel] === undefined) continue;
-        await afterLocalDelete(rel, res);
-        continue;
-      }
-      const l = hashBytes(readLocal(rel));
-      if (l === state[rel]) continue;
-      let bytes = null;
-      try { bytes = await adapter.read(rel); } catch (err) { console.error('folder read:', err); continue; }
-      const r = bytes ? hashBytes(bytes) : undefined;
-      if (r === l) { state[rel] = l; continue; }
-      if (r !== undefined && r !== state[rel]) { // снаружи своя правка того же файла
-        await keepForeign(rel, bytes, labelOf(rel));
-        res.conflicts.push(rel);
-      }
-      const parent = path.dirname(rel);
-      if (parent !== '.') await adapter.mkdir(parent);
-      await adapter.write(rel, readLocal(rel));
-      state[rel] = l;
-      res.pushed.push(rel);
+      const remote = new Map();
+      const local = new Map();
+      try {
+        const bytes = await adapter.read(rel);
+        if (bytes) remote.set(rel, { hash: hashBytes(bytes), bytes });
+      } catch (err) { console.error('folder read:', err); continue; }
+      const l = localHash(rel);
+      if (l !== undefined) local.set(rel, l);
+      await settle(rel, remote, local, res);
     }
     save();
     return res;
-  }
-
-  /** Файла у нас нет: если снаружи он не менялся — удаляем и там, иначе сначала бережём чужую версию. */
-  async function afterLocalDelete(rel, res) {
-    let bytes = null;
-    try { bytes = await adapter.read(rel); } catch { /* папка недоступна */ }
-    if (bytes && hashBytes(bytes) !== state[rel]) {
-      await keepForeign(rel, bytes, labelOf(rel));
-      res.conflicts.push(rel);
-    }
-    try { await adapter.remove(rel); } catch (err) { console.error('folder remove:', err); }
-    delete state[rel];
-    res.removed.push(rel);
   }
 
   /**
@@ -476,10 +441,7 @@ function createFolderSync(dir, adapter, { stateFile, now = () => new Date() } = 
     for (const rel of remote.keys()) {
       if (local.has(rel) || rel.startsWith(`${CONFLICT_DIR}/`)) continue;
       const bytes = remote.get(rel).bytes;
-      const name = await freeConflictName(rel, labelOf(rel), 'было в папке', bytes, false);
-      const relConflict = `${CONFLICT_DIR}/${name}`;
-      await adapter.mkdir(CONFLICT_DIR);
-      await adapter.write(relConflict, bytes);
+      await keepCopy(rel, bytes, labelOf(rel), 'было в папке'); // копия у нас обязательна, дальше она уйдёт и в папку
       await adapter.remove(rel);
       hidden += 1;
     }

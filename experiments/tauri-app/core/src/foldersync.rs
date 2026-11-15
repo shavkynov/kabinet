@@ -466,6 +466,125 @@ impl<T: Remote> FolderSync<T> {
 
     fn keep_foreign(&mut self, rel: &str, bytes: &[u8], label: &str) -> R<String> { self.keep(rel, bytes, label, "с другого устройства") }
 
+    /// Решение по одному файлу: r — хеш в облаке, l — у нас, b — последний согласованный (None, если нет).
+    /// Решение принимаем заново, если перечитывание локального файла показало, что снимок l устарел
+    /// (сохранение во время прохода). Обычная ветка выходит через return.
+    fn settle(&mut self, rel: &String, remote: &mut BTreeMap<String, RemoteEntry>, local: &mut BTreeMap<String, String>, res: &mut SyncResult) -> R<()> {
+    loop {
+        let r = remote.get(rel).map(|e| e.hash.clone());
+        let l = local.get(rel).cloned();
+        let b = self.state.get(rel).cloned();
+        if r.is_none() && l.is_none() { self.state.remove(rel); return Ok(()); }
+        if r.is_some() && r == l { self.state.insert(rel.clone(), r.unwrap()); return Ok(()); }
+
+        if let (Some(rh), Some(lh)) = (&r, &l) {
+            if b.as_ref() == Some(rh) {
+                let data = self.read_local(rel)?;
+                self.write_checked(rel, &data, Some(rh), res)?;
+                self.state.insert(rel.clone(), lh.clone());
+                res.pushed.push(rel.clone());
+                return Ok(());
+            }
+            if b.as_ref() == Some(lh) {
+                // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
+                // перечитаем его: сохранение во время этого прохода уже изменило файл. Замок не даёт штатному
+                // сохранению вклиниться между проверкой и записью; сетевых вызовов под замком нет.
+                let mut e = remote.remove(rel).unwrap();
+                let bytes = self.remote_bytes(&mut e, rel);
+                remote.insert(rel.clone(), e);
+                let bytes = bytes?;
+                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                if let Some(fresh) = self.local_hash(rel)? {
+                    if &fresh != lh {
+                        local.insert(rel.clone(), fresh);
+                        continue;
+                    }
+                }
+                self.write_local(rel, &bytes)?;
+                self.state.insert(rel.clone(), rh.clone());
+                res.pulled.push(rel.clone());
+                return Ok(());
+            }
+            let mut e = remote.remove(rel).unwrap();
+            let foreign = self.remote_bytes(&mut e, rel);
+            remote.insert(rel.clone(), e);
+            let foreign = foreign?;
+            self.keep_foreign(rel, &foreign, &label_of(rel))?;
+            // Чтение, слияние и запись под общим замком: сохранение не вклинится между чтением и записью
+            // и не будет затёрто результатом, посчитанным по старой версии. Сети под замком нет.
+            let with_words = {
+                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                let mine = self.read_local(rel)?;
+                #[cfg(test)]
+                if rel == "project.json" { sync_hook::fire(); } // ТЕСТОВАЯ ТОЧКА: после чтения, до записи результата
+                let merged = if rel == "project.json" { merge_meta(&mine, &foreign) } else { None };
+                if let Some(w) = &merged { self.write_local(rel, w)?; }
+                merged
+            };
+            let now_local = self.read_local(rel)?;
+            let foreign_hash = hash_bytes(&foreign);
+            self.write_checked(rel, &now_local, Some(&foreign_hash), res)?;
+            self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
+            res.pushed.push(rel.clone());
+            res.conflicts.push(rel.clone());
+            return Ok(());
+        }
+
+        if let Some(rh) = &r { // снаружи есть, у нас нет
+            let mut e = remote.remove(rel).unwrap();
+            let bytes = self.remote_bytes(&mut e, rel);
+            remote.insert(rel.clone(), e);
+            if b.is_none() {
+                self.write_local(rel, &bytes?)?;
+                self.state.insert(rel.clone(), rh.clone());
+                res.pulled.push(rel.clone());
+            } else if b.as_ref() == Some(rh) {
+                // Мы удалили файл, а в облаке его не меняли: убираем и там. Ошибку удаления не выдаём за успех:
+                // состояние не меняем, повторим при следующем проходе.
+                self.ensure_not_cancelled()?;
+                self.remote.remove(rel)?;
+                self.state.remove(rel);
+                res.removed.push(rel.clone());
+            } else {
+                // Мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается.
+                self.write_local(rel, &bytes?)?;
+                self.state.insert(rel.clone(), rh.clone());
+                res.pulled.push(rel.clone());
+            }
+            return Ok(());
+        }
+
+        // у нас есть, снаружи нет
+        let lh = l.unwrap();
+        if b.is_none() {
+            let data = self.read_local(rel)?;
+            self.write_checked(rel, &data, None, res)?;
+            self.state.insert(rel.clone(), lh);
+            res.pushed.push(rel.clone());
+        } else if Some(&lh) == b.as_ref() {
+            // Перед удалением перечитаем локальный файл: сохранение во время прохода могло изменить его.
+            {
+                let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
+                if let Some(fresh) = self.local_hash(rel)? {
+                    if fresh != lh {
+                        local.insert(rel.clone(), fresh);
+                        continue;
+                    }
+                }
+            }
+            // Прямое чтение подтверждает исчезновение: неполный список облака не должен приводить к удалению.
+            if self.remote.read(rel)?.is_some() { return Ok(()); }
+            self.remove_local(rel)?;
+            self.state.remove(rel);
+            res.pulled.push(rel.clone());
+        } else {
+            res.conflicts.push(rel.clone());
+        }
+        return Ok(());
+    }
+
+    }
+
     /// Один проход: что снаружи — к нам, что у нас — наружу.
     pub fn sync(&mut self) -> R<SyncResult> {
         self.ensure_not_cancelled()?;
@@ -495,122 +614,7 @@ impl<T: Remote> FolderSync<T> {
             return Err("Снаружи пропала большая часть файлов проекта. Похоже на неполный ответ облака, поэтому синхронизация остановлена и у вас ничего не удалено.".into());
         }
 
-        for rel in &rels {
-            // Решение по файлу принимаем заново, если перечитывание локального файла показало, что снимок l
-            // устарел (сохранение во время прохода). Обычная ветка выходит через break.
-            loop {
-                let r = remote.get(rel).map(|e| e.hash.clone());
-                let l = local.get(rel).cloned();
-                let b = self.state.get(rel).cloned();
-                if r.is_none() && l.is_none() { self.state.remove(rel); break; }
-                if r.is_some() && r == l { self.state.insert(rel.clone(), r.unwrap()); break; }
-
-                if let (Some(rh), Some(lh)) = (&r, &l) {
-                    if b.as_ref() == Some(rh) {
-                        let data = self.read_local(rel)?;
-                        self.write_checked(rel, &data, Some(rh), &mut res)?;
-                        self.state.insert(rel.clone(), lh.clone());
-                        res.pushed.push(rel.clone());
-                        break;
-                    }
-                    if b.as_ref() == Some(lh) {
-                        // Облако обновило файл, а снимок говорит, что мы его не меняли. Перед тем как затереть свой файл,
-                        // перечитаем его: сохранение во время этого прохода уже изменило файл. Замок не даёт штатному
-                        // сохранению вклиниться между проверкой и записью; сетевых вызовов под замком нет.
-                        let mut e = remote.remove(rel).unwrap();
-                        let bytes = self.remote_bytes(&mut e, rel);
-                        remote.insert(rel.clone(), e);
-                        let bytes = bytes?;
-                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                        if let Some(fresh) = self.local_hash(rel)? {
-                            if &fresh != lh {
-                                local.insert(rel.clone(), fresh);
-                                continue;
-                            }
-                        }
-                        self.write_local(rel, &bytes)?;
-                        self.state.insert(rel.clone(), rh.clone());
-                        res.pulled.push(rel.clone());
-                        break;
-                    }
-                    let mut e = remote.remove(rel).unwrap();
-                    let foreign = self.remote_bytes(&mut e, rel);
-                    remote.insert(rel.clone(), e);
-                    let foreign = foreign?;
-                    self.keep_foreign(rel, &foreign, &label_of(rel))?;
-                    // Чтение, слияние и запись под общим замком: сохранение не вклинится между чтением и записью
-                    // и не будет затёрто результатом, посчитанным по старой версии. Сети под замком нет.
-                    let with_words = {
-                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                        let mine = self.read_local(rel)?;
-                        #[cfg(test)]
-                        if rel == "project.json" { sync_hook::fire(); } // ТЕСТОВАЯ ТОЧКА: после чтения, до записи результата
-                        let merged = if rel == "project.json" { merge_meta(&mine, &foreign) } else { None };
-                        if let Some(w) = &merged { self.write_local(rel, w)?; }
-                        merged
-                    };
-                    let now_local = self.read_local(rel)?;
-                    let foreign_hash = hash_bytes(&foreign);
-                    self.write_checked(rel, &now_local, Some(&foreign_hash), &mut res)?;
-                    self.state.insert(rel.clone(), match &with_words { Some(w) => hash_bytes(w), None => lh.clone() });
-                    res.pushed.push(rel.clone());
-                    res.conflicts.push(rel.clone());
-                    break;
-                }
-
-                if let Some(rh) = &r { // снаружи есть, у нас нет
-                    let mut e = remote.remove(rel).unwrap();
-                    let bytes = self.remote_bytes(&mut e, rel);
-                    remote.insert(rel.clone(), e);
-                    if b.is_none() {
-                        self.write_local(rel, &bytes?)?;
-                        self.state.insert(rel.clone(), rh.clone());
-                        res.pulled.push(rel.clone());
-                    } else if b.as_ref() == Some(rh) {
-                        // Мы удалили файл, а в облаке его не меняли: убираем и там. Ошибку удаления не выдаём за успех:
-                        // состояние не меняем, повторим при следующем проходе.
-                        self.ensure_not_cancelled()?;
-                        self.remote.remove(rel)?;
-                        self.state.remove(rel);
-                        res.removed.push(rel.clone());
-                    } else {
-                        // Мы удалили, а на другом устройстве файл успели изменить: правка важнее удаления, файл возвращается.
-                        self.write_local(rel, &bytes?)?;
-                        self.state.insert(rel.clone(), rh.clone());
-                        res.pulled.push(rel.clone());
-                    }
-                    break;
-                }
-
-                // у нас есть, снаружи нет
-                let lh = l.unwrap();
-                if b.is_none() {
-                    let data = self.read_local(rel)?;
-                    self.write_checked(rel, &data, None, &mut res)?;
-                    self.state.insert(rel.clone(), lh);
-                    res.pushed.push(rel.clone());
-                } else if Some(&lh) == b.as_ref() {
-                    // Перед удалением перечитаем локальный файл: сохранение во время прохода могло изменить его.
-                    {
-                        let _guard = crate::store::sync_save_lock().lock().map_err(|_| "Внутренний замок сохранения недоступен.".to_string())?;
-                        if let Some(fresh) = self.local_hash(rel)? {
-                            if fresh != lh {
-                                local.insert(rel.clone(), fresh);
-                                continue;
-                            }
-                        }
-                    }
-                    // Прямое чтение подтверждает исчезновение: неполный список облака не должен приводить к удалению.
-                    if self.remote.read(rel)?.is_some() { break; }
-                    self.remove_local(rel)?;
-                    self.state.remove(rel);
-                    res.pulled.push(rel.clone());
-                } else {
-                    res.conflicts.push(rel.clone());
-                }
-                break;
-            }
-        }
+        for rel in &rels { self.settle(rel, &mut remote, &mut local, &mut res)?; }
 
         self.cache.clear();
         for (rel, e) in &remote {
@@ -629,40 +633,16 @@ impl<T: Remote> FolderSync<T> {
         for rel in uniq {
             if !is_syncable(rel) { continue; }
             self.cache.remove(rel);
-            if !self.dir.join(rel).exists() {
-                if !self.state.contains_key(rel) { continue; }
-                self.after_local_delete(rel, &mut res)?;
-                continue;
-            }
-            let data = self.read_local(rel)?;
-            let l = hash_bytes(&data);
-            if self.state.get(rel) == Some(&l) { continue; }
-            let bytes = match self.remote.read(rel) { Ok(b) => b, Err(_) => continue };
-            let r = bytes.as_ref().map(|b| hash_bytes(b));
-            if r.as_ref() == Some(&l) { self.state.insert(rel.clone(), l); continue; }
-            // Та же проверка версии и безопасная запись, что и в основном проходе: чужое не затирается
-            // молча, а новый файл создаётся без перезаписи (create-only).
-            self.write_checked(rel, &data, self.state.get(rel).cloned().as_deref(), &mut res)?;
-            self.state.insert(rel.clone(), l);
-            res.pushed.push(rel.clone());
+            // Снимок облака берём только по этому файлу, а решение то же, что в обычном проходе.
+            let bytes = self.remote.read(rel)?;
+            let mut remote = BTreeMap::new();
+            if let Some(b) = bytes { remote.insert(rel.clone(), RemoteEntry { hash: hash_bytes(&b), bytes: Some(b), sig: None }); }
+            let mut local = BTreeMap::new();
+            if let Some(h) = self.local_hash(rel)? { local.insert(rel.clone(), h); }
+            self.settle(rel, &mut remote, &mut local, &mut res)?;
         }
         self.save()?;
         Ok(res)
-    }
-
-    fn after_local_delete(&mut self, rel: &str, res: &mut SyncResult) -> R<()> {
-        // Ошибку чтения нельзя принять за «чужой версии нет»: иначе чужой текст удалится без копии.
-        let bytes = self.remote.read(rel)?;
-        if let Some(b) = bytes {
-            if Some(&hash_bytes(&b)) != self.state.get(rel) { self.keep_foreign(rel, &b, &label_of(rel))?; res.conflicts.push(rel.to_string()); }
-        }
-        // Прямое удаление в облаке не должно обходить механизм отмены (чтение и keep могли ждать сеть).
-        self.ensure_not_cancelled()?;
-        // Ошибку удаления не выдаём за успешно выполненное удаление: состояние не меняем, повторим при следующем проходе.
-        self.remote.remove(rel)?;
-        self.state.remove(rel);
-        res.removed.push(rel.to_string());
-        Ok(())
     }
 
     /// Выгрузить локальный проект поверх папки; чего у нас нет, уходит в «Конфликты» папки.
@@ -1154,9 +1134,9 @@ mod tests {
         crate::syncguard::set_test_now(None);
     }
 
-    /// C1.4b: отказ копии перед УДАЛЕНИЕМ останавливает удаление облачной версии.
+    /// Мы удалили главу, а в облаке её успели изменить: правка важнее удаления, файл возвращается, облако не трогаем.
     #[test]
-    fn keep_error_blocks_cloud_delete_of_foreign_version() {
+    fn local_delete_of_cloud_edited_file_brings_it_back() {
         let s = FakeServer::new();
         let a = tmpdir("a").join("p");
         project(&a, &[("aaaaaa", "моё")]);
@@ -1164,11 +1144,10 @@ mod tests {
         sa.export_all().unwrap();
         s.put("Кабинет/Роман/Главы/aaaaaa.md", "чужая".as_bytes());
         fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap();
-        s.0.lock().unwrap().fail_put_prefixes.insert("/Кабинет/Роман/Конфликты/".to_string());
-        let res = sa.push(&["Главы/aaaaaa.md".to_string()]);
-        assert!(res.is_err(), "отказ копии должен останавливать удаление");
+        let res = sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert!(res.pulled.contains(&"Главы/aaaaaa.md".to_string()) && res.removed.is_empty());
         assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "чужая".as_bytes(), "облачная версия не удалена");
-        assert_eq!(local_conflicts(&a), vec!["чужая".to_string()], "вытесненная версия сохранена локально");
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "чужая", "файл вернулся");
     }
 
     #[test]
@@ -1581,7 +1560,7 @@ mod tests {
         assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_some(), "файл в облаке ещё не удалён");
     }
 
-    /// Чужая правка перед локальным удалением сохраняется в «Конфликты», а не теряется.
+    /// Чужая правка перед локальным удалением не теряется: файл возвращается из облака.
     #[test]
     fn local_delete_preserves_changed_cloud_version_before_removing() {
         let s = FakeServer::new();
@@ -1589,13 +1568,11 @@ mod tests {
         project(&a, &[("aaaaaa", "текст")]);
         let mut sa = sync_of(&a, &s, "a");
         sa.export_all().unwrap();
-        // локально удалили, а в облаке — другая версия (правка с другого устройства)
         fs::remove_file(a.join("Главы/aaaaaa.md")).unwrap();
         s.put("Кабинет/Роман/Главы/aaaaaa.md", "правка с телефона".as_bytes());
-        let res = sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
-        assert!(res.conflicts.contains(&"Главы/aaaaaa.md".to_string()), "чужая правка должна попасть в конфликты");
-        assert!(s.names().iter().any(|n| n.contains("Конфликты") && s.get(n).as_deref() == Some("правка с телефона".as_bytes())), "чужая версия сохранена: {:?}", s.names());
-        assert!(s.get("Кабинет/Роман/Главы/aaaaaa.md").is_none(), "облачный файл удалён после сохранения копии");
+        sa.push(&["Главы/aaaaaa.md".to_string()]).unwrap();
+        assert_eq!(fs::read_to_string(a.join("Главы/aaaaaa.md")).unwrap(), "правка с телефона");
+        assert_eq!(s.get("Кабинет/Роман/Главы/aaaaaa.md").unwrap(), "правка с телефона".as_bytes());
     }
 
     /// Неполный список облака (файл пропал из списка, но не удалён) не должен удалять локальную главу.

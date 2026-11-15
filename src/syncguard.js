@@ -34,17 +34,6 @@ function conflictName(label, ext, data, now = new Date(), suffix = 'с друг�
 }
 
 /**
- * Кандидаты имени конфликтной копии: обычное (время + название) и с SHA-256 содержимого.
- * Второе нужно, если под обычным именем уже лежит другая версия (та же секунда, то же название).
- */
-function conflictNames(label, suffix, ext, data, now = new Date()) {
-  return [
-    `${stamp(now)} ${safeName(label)} (${suffix})${ext}`,
-    conflictName(label, ext, data, now, suffix),
-  ];
-}
-
-/**
  * Вызывать перед записью файла. Возвращает имя сохранённой чужой версии или null, если конфликта нет.
  * label: название главы или карточки для имени файла.
  */
@@ -93,4 +82,4 @@ function assertNotPlaceholder(file) {
   }
 }
 
-module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName, conflictName, conflictNames };
+module.exports = { CONFLICT_DIR, guardWrite, requestDownload, assertNotPlaceholder, stamp, safeName, conflictName };
