@@ -680,6 +680,7 @@ dialog label.radio { display: flex; align-items: center; color: var(--text); fon
   width: min(var(--notes-w, 280px), 30vw); flex: none; background: var(--side);
   display: flex; flex-direction: column; padding-top: 44px; min-width: 0; overflow-y: auto;
 }
+#paneChapter:not(.has-chapter) .rsec { display: none; } /* пока глава не открыта, пустые секции не нужны */
 #chapHint { margin: 4px 16px 8px; font-size: 12px; line-height: 1.45; }
 #paneChapter.has-chapter #chapHint { display: none; }
 #notesResizer { width: 5px; margin-right: -2px; flex: none; cursor: col-resize; z-index: 3; }
@@ -1056,7 +1057,7 @@ body.focus-mode #status { bottom: 12px; }
   transform: rotate(45deg); transition: transform .12s;
 }
 .sec.collapsed .chev::before { transform: rotate(-45deg); left: 0; top: 2px; }
-.sec-ic { flex: none; font-size: 12px; letter-spacing: 0; }
+.sec-ic { flex: none; display: inline-flex; align-items: center; opacity: .75; }
 .sec-name { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sec-head .side-plus { margin-left: auto; }
 .sec-sub { margin-left: 4px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; font-weight: 400; }
@@ -1251,3 +1252,6 @@ body.focus-mode #statusDock:not(.has-err), body.mob #statusDock { display: none;
 #goal.dock #goalBtn { box-sizing: border-box; height: var(--goal-dock-h); padding: 0 10px; gap: 3px; justify-content: center; border-radius: 8px; }
 #goal.dock #goalBar { height: 4px; }
 #goal.dock + #goalPop { bottom: calc(var(--foot-h) + 6px); }
+
+.bar-sep { align-self: center; width: 1px; height: 14px; margin: 0 6px; background: var(--line); flex: none; }
+body.mob .bar-sep { display: none; }
