@@ -418,7 +418,8 @@ impl<T: Remote> FolderSync<T> {
         #[cfg(test)]
         sync_hook::fire_remote();
         if let Some((parent, _)) = rel.rsplit_once('/') { self.remote.mkdir(parent)?; }
-        let fresh = self.remote.read(rel)?;
+        // Нового файла в облаке, по нашим сведениям, нет: лишнее чтение не делаем, это защищает create без перезаписи.
+        let fresh = if expect.is_some() { self.remote.read(rel)? } else { None };
         if let Some(b) = &fresh {
             let h = hash_bytes(b);
             if Some(h.as_str()) != expect && h != hash_bytes(data) {

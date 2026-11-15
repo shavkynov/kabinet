@@ -75,7 +75,7 @@ impl<H: Http> YandexDisk<H> {
         let token = v["accessToken"].as_str().unwrap_or("");
         let exp = v["expiresAt"].as_f64();
         if v["kind"] != "kabinet-yandex-oauth" || token.is_empty() || exp.is_none() { return Err("Некорректные данные подключения Яндекса.".into()); }
-        Ok(YandexDisk { http, token: token.into(), expires_at: exp.unwrap() as i64, base: parts(root)?, known: HashSet::new(), pause: Duration::from_millis(500) })
+        Ok(YandexDisk { http, token: token.into(), expires_at: exp.unwrap() as i64, base: parts(root)?, known: HashSet::new(), pause: Duration::from_millis(250) })
     }
 
     #[cfg(test)]
@@ -180,7 +180,7 @@ impl<H: Http> YandexDisk<H> {
         let href = res.data["href"].as_str().ok_or_else(|| plain("Яндекс не выдал ссылку для загрузки."))?.to_string();
         self.transfer("PUT", &href, Some(bytes))?;
         let want = format!("{:x}", md5::compute(bytes));
-        for _ in 0..20 {
+        for _ in 0..40 {
             if let Some(c) = self.meta(&path, true)? {
                 if c.data["type"] == "file" && c.data["md5"] == want.as_str() { return Ok(()); }
             }
@@ -200,7 +200,7 @@ impl<H: Http> YandexDisk<H> {
         let href = res.data["href"].as_str().ok_or_else(|| plain("Яндекс не выдал ссылку для загрузки."))?.to_string();
         self.transfer("PUT", &href, Some(bytes))?;
         let want = format!("{:x}", md5::compute(bytes));
-        for _ in 0..20 {
+        for _ in 0..40 {
             if let Some(c) = self.meta(&path, true)? {
                 if c.data["type"] == "file" && c.data["md5"] == want.as_str() { return Ok(()); }
             }
@@ -234,7 +234,7 @@ impl<H: Http> YandexDisk<H> {
         }
         if !(200..300).contains(&res.status) { return Err(fail(res.status)); }
         let want = format!("{:x}", md5::compute(bytes));
-        for _ in 0..20 {
+        for _ in 0..40 {
             if let Some(c) = self.meta(&path, true)? {
                 if c.data["type"] == "file" && c.data["md5"] == want.as_str() { return Ok(true); }
             }
@@ -266,7 +266,7 @@ impl<H: Http> YandexDisk<H> {
         if u.origin().ascii_serialization() != "https://cloud-api.yandex.net" || !u.path().starts_with("/v1/disk/operations/") || u.query().is_some() || u.fragment().is_some() {
             return Err(plain("Некорректный адрес операции Яндекса."));
         }
-        for _ in 0..30 {
+        for _ in 0..60 {
             let op = self.send("GET", &u.path()["/v1/disk".len()..], &[], false)?.ok_or_else(bad)?;
             match op.data["status"].as_str() {
                 Some("success") => return Ok(()),

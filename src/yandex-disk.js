@@ -97,10 +97,10 @@ function createYandexDisk({ pass, root = '', request, now = Date.now, sleep = (m
       if (!res.data || typeof res.data.href!=='string') throw new Error('Яндекс не выдал ссылку для загрузки.');
       await transfer('PUT',res.data.href,bytes);
       const md5=crypto.createHash('md5').update(bytes).digest('hex');
-      for (let i=0;i<20;i++) {
+      for (let i=0;i<40;i++) {
         const check=await meta(diskPath(rel),true);
         if (check?.data?.type==='file' && check.data.md5===md5) return;
-        await sleep(500);
+        await sleep(250);
       }
       throw new Error('Яндекс ещё не подтвердил сохранение файла. Синхронизация будет повторена.');
     },
@@ -111,11 +111,11 @@ function createYandexDisk({ pass, root = '', request, now = Date.now, sleep = (m
       if (res.status!==202 || typeof res.data?.href!=='string') throw new Error('Яндекс не подтвердил удаление.');
       const u=new URL(res.data.href);
       if (u.origin!=='https://cloud-api.yandex.net' || !u.pathname.startsWith('/v1/disk/operations/') || u.search || u.hash) throw new Error('Некорректный адрес операции Яндекса.');
-      for (let i=0;i<30;i++) {
+      for (let i=0;i<60;i++) {
         const op=await send('GET',u.pathname.slice('/v1/disk'.length));
         if (op.data?.status==='success') return;
         if (op.data?.status!=='in-progress') throw new Error('Яндекс не смог удалить файл.');
-        await sleep(500);
+        await sleep(250);
       }
       throw new Error('Удаление на Яндекс Диске ещё не завершено.');
     },
