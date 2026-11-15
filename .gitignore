@@ -8,6 +8,7 @@ renderer/app.gen.js
 # внутренние заметки не публикуются
 WINDOWS.md
 CLAUDE.md
+AGENTS.md
 docs/
 
 # Android: сборка и ключи подписи (ключ хранится только в Secrets репозитория)
