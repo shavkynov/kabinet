@@ -272,6 +272,13 @@ struct AppState {
     on_external: std::sync::OnceLock<Arc<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
+/// Режим окна по id темы (см. src/themes.js): `light*` — светлый, `dark*` — тёмный, иначе системный.
+fn window_theme(id: &str) -> Option<tauri::Theme> {
+    if id == "light" || id.starts_with("light-") { Some(tauri::Theme::Light) }
+    else if id == "dark" || id.starts_with("dark-") { Some(tauri::Theme::Dark) }
+    else { None }
+}
+
 fn arg_str(args: &[Value], i: usize) -> Result<String, String> {
     match args.get(i) {
         Some(Value::String(s)) => Ok(s.clone()),
@@ -345,7 +352,14 @@ async fn call(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<'_, 
             Ok(json!(true))
         }
         "app:setLang" => { LANG_EN.store(arg_str(a, 0).ok().as_deref() == Some("en"), std::sync::atomic::Ordering::SeqCst); chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
-        "ui:setTheme" | "app:about" => Ok(json!(true)),
+        "app:about" => Ok(json!(true)),
+        // Тема окна: системные элементы (заголовок, полосы прокрутки, диалоги) следуют выбору, а не только системе.
+        // Цвета самого интерфейса задаёт renderer через data-theme; «system» и неизвестное значение отдают выбор системе.
+        "ui:setTheme" => {
+            let theme = window_theme(&arg_opt_str(a, 0).unwrap_or_default());
+            if let Some(w) = app.get_webview_window("main") { let _ = w.set_theme(theme); }
+            Ok(json!(true))
+        }
         "stats:setDay" => { stats::set_day_words(&current_dir(&state)?, &arg_str(a, 0)?, a.get(1).unwrap_or(&Value::Null))?; Ok(json!(true)) }
         "stats:summary" => {
             let dir = current_dir(&state)?;
@@ -728,4 +742,20 @@ fn main() {
         .invoke_handler(tauri::generate_handler![call])
         .run(tauri::generate_context!())
         .expect("не удалось запустить Кабинет на Tauri");
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::window_theme;
+
+    #[test]
+    fn window_theme_follows_chosen_mode() {
+        assert_eq!(window_theme("light"), Some(tauri::Theme::Light));
+        assert_eq!(window_theme("light-sage"), Some(tauri::Theme::Light));
+        assert_eq!(window_theme("dark"), Some(tauri::Theme::Dark));
+        assert_eq!(window_theme("dark-ember"), Some(tauri::Theme::Dark));
+        assert_eq!(window_theme("system"), None);
+        assert_eq!(window_theme("lightning"), None);
+        assert_eq!(window_theme(""), None);
+    }
 }
