@@ -79,15 +79,25 @@ pub fn stamp_now() -> String {
     stamp_at(&now_local())
 }
 
-/// Название главы или карточки для имени файла: без запретных знаков, не длиннее 60.
+/// Название главы или карточки для имени файла: без запретных знаков, не длиннее 60 UTF-16 единиц (как slice(0, 60) в JS).
 pub fn safe_name(s: &str) -> String {
     let replaced: String = s.chars().map(|c| if "\\/:*?\"<>|\n\r\t".contains(c) { '-' } else { c }).collect();
-    let cut: String = replaced.trim_start_matches('.').trim().chars().take(60).collect();
+    let trimmed = replaced.trim_start_matches('.').trim();
+    let mut cut = String::new();
+    let mut utf16_len = 0;
+    for c in trimmed.chars() {
+        let w = c.len_utf16();
+        if utf16_len + w > 60 {
+            break;
+        }
+        utf16_len += w;
+        cut.push(c);
+    }
     if cut.is_empty() { "без названия".to_string() } else { cut }
 }
 
 /// Как path.extname в Node: расширение последнего звена с точкой или пустая строка.
-/// Последнее звено отделяем и по «/», и по «\»: путь может прийти из любой системы.
+/// Последнее звено отделяем и по «/», и по «\\»: путь может прийти из любой системы.
 pub fn extname(rel: &str) -> String {
     let base = rel.rsplit(|c| c == '/' || c == '\\').next().unwrap_or("");
     match base.rfind('.') {
@@ -208,6 +218,7 @@ mod tests {
         assert_eq!(safe_name("..скрытое"), "скрытое");
         assert_eq!(safe_name("   "), "без названия");
         assert_eq!(safe_name(&"я".repeat(100)).chars().count(), 60);
+        assert_eq!(safe_name(&"😀".repeat(40)).chars().count(), 30);
         assert_eq!(extname("Главы/abc123.md"), ".md");
         assert_eq!(extname("Главы\\abc123.md"), ".md");
         assert_eq!(extname("project.json"), ".json");
