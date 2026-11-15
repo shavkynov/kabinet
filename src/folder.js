@@ -79,7 +79,7 @@ function walkLocal(dir) {
   };
   const isFile = (entry, full) => {
     if (entry.isFile()) return true;
-    if (!entry.isSymbolicLink()) return false;
+    if (typeof entry.isSymbolicLink !== 'function' || !entry.isSymbolicLink()) return false; // у файловой прослойки телефона ссылок нет
     try { return fs.statSync(path.join(full, entry.name)).isFile(); } catch (err) {
       if (err.code === 'ENOENT') return false; // битая ссылка
       throw fail(entry.name, err);
