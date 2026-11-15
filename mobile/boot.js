@@ -267,7 +267,10 @@ function wireContextMenu(be) {
     const editable = !!(e.target.closest && e.target.closest('.ProseMirror[contenteditable="true"], textarea, input'));
     if (!editable && !sel) return;
     e.preventDefault();
-    be.emit('ui:contextMenu', { x: e.clientX, y: e.clientY, misspelledWord: '', suggestions: [], selectionText: sel.slice(0, 2000), isEditable: editable || !!(a && a.isContentEditable), editFlags: {} });
+    const isEditable = editable || !!(a && a.isContentEditable);
+    // В Chromium эти флаги даёт сам браузер; в WebView их нет, и без них все пункты, кроме «Выделить всё», серые.
+    const editFlags = { canCut: isEditable && !!sel, canCopy: !!sel, canPaste: isEditable, canSelectAll: isEditable };
+    be.emit('ui:contextMenu', { x: e.clientX, y: e.clientY, misspelledWord: '', suggestions: [], selectionText: sel.slice(0, 2000), isEditable, editFlags });
   });
 }
 

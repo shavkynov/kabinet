@@ -936,7 +936,19 @@ function createBackend(host, { session } = {}) {
       } catch { /* буфер недоступен */ }
       return true;
     }
-    if (typeof document !== 'undefined') document.execCommand(cmd);
+    if (typeof document === 'undefined') return true;
+    if (cmd === 'copy' || cmd === 'cut') {
+      const text = String(window.getSelection() || '');
+      let done = false;
+      try { done = document.execCommand(cmd); } catch { /* ниже запасной путь */ }
+      if (!done && text) {
+        // В Android WebView execCommand('copy') иногда ничего не делает: пишем в буфер напрямую.
+        try { await navigator.clipboard.writeText(text); done = true; } catch { /* буфер недоступен */ }
+        if (done && cmd === 'cut') document.execCommand('delete');
+      }
+      return true;
+    }
+    document.execCommand(cmd);
     return true;
   });
   handle('ctx:replaceMisspelling', () => true);
