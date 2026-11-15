@@ -107,18 +107,6 @@ pub fn stem(rel: &str) -> String {
 // guard_write может вызываться под sync_save_lock: повторно его здесь не берём.
 static CONFLICT_COPY_LOCK: Mutex<()> = Mutex::new(());
 
-fn content_conflict_name(now: &chrono::DateTime<chrono::Local>, label: &str, suffix: &str, ext: &str, bytes: &[u8]) -> String {
-    let digest: String = sha2::Sha256::digest(bytes).iter().map(|b| format!("{:02x}", b)).collect();
-    let head = format!("{} ", stamp_at(now));
-    let tail = format!(" ({}) {}{}", suffix, digest, ext);
-    let mut title = String::new();
-    for c in safe_name(label).chars() {
-        if head.len() + title.len() + c.len_utf8() + tail.len() > 220 { break; }
-        title.push(c);
-    }
-    format!("{}{}{}", head, title, tail)
-}
-
 // None — файл отсутствует; Some(true) — та же версия; Some(false) — другая.
 // Ошибку чтения не принимаем за отсутствие копии.
 fn conflict_copy_state(path: &Path, bytes: &[u8]) -> crate::store::R<Option<bool>> {
@@ -129,13 +117,17 @@ fn conflict_copy_state(path: &Path, bytes: &[u8]) -> crate::store::R<Option<bool
     }
 }
 
-/// Кандидаты имени конфликтной копии: обычное (время + название) и с SHA-256 содержимого.
-/// Второе нужно, если под обычным именем уже лежит ДРУГАЯ версия (одна секунда, одно название).
-pub(crate) fn conflict_names(now: &chrono::DateTime<chrono::Local>, label: &str, suffix: &str, ext: &str, bytes: &[u8]) -> Vec<String> {
-    vec![
-        format!("{} {} ({}){}", stamp_at(now), safe_name(label), suffix, ext),
-        content_conflict_name(now, label, suffix, ext, bytes),
-    ]
+/// Кандидаты имени конфликтной копии: «время название (пометка)», затем с номером 2…9, если имя занято другой версией.
+pub(crate) fn conflict_names(now: &chrono::DateTime<chrono::Local>, label: &str, suffix: &str, ext: &str, _bytes: &[u8]) -> Vec<String> {
+    let head = format!("{} ", stamp_at(now));
+    let tail = format!(" ({})", suffix);
+    let mut title = String::new();
+    for c in safe_name(label).chars() {
+        if head.len() + title.len() + c.len_utf8() + tail.len() > 200 { break; }
+        title.push(c);
+    }
+    let base = format!("{}{}{}", head, title, tail);
+    (1..=9).map(|n| if n == 1 { format!("{}{}", base, ext) } else { format!("{} {}{}", base, n, ext) }).collect()
 }
 
 /// Сохраняет версию в «Конфликты» под первым подходящим именем из кандидатов и возвращает его.
@@ -310,17 +302,25 @@ mod conflict_collision_tests {
     }
 
     #[test]
-    fn edited_hashed_copy_stops_preservation_instead_of_overwriting() {
+    fn edited_copy_is_not_overwritten_next_version_gets_a_number() {
         let p = Project::new();
         let file = p.file("aaaaaa.md", "foreign one");
         let first = p.save(&file);
         fs::write(&file, "foreign two").unwrap();
         let second = p.save(&file);
+        assert_ne!(first, second);
         fs::write(p.path(&second), "manually edited copy").unwrap();
-        assert!(guard_write_at(&p.0, &file, "mine", "Same title", at()).is_err());
+        let third = p.save(&file);
+        assert_ne!(third, second);
         assert_eq!(p.saved(&first), "foreign one");
         assert_eq!(p.saved(&second), "manually edited copy");
-        assert_eq!(fs::read_to_string(file).unwrap(), "foreign two");
+        assert_eq!(p.saved(&third), "foreign two");
+    }
+
+    #[test]
+    fn long_unicode_label_keeps_extension_and_short_name() {
+        let n = conflict_names(&at(), &"漢".repeat(60), "с другого устройства", ".json", b"x");
+        assert!(n[0].len() <= 220 && n[0].ends_with(".json") && !n[0].contains('\u{fffd}'));
     }
 
     #[test]
@@ -344,14 +344,6 @@ mod conflict_collision_tests {
         assert_eq!(names.len(), 8);
         for (name, text) in &copies { assert_eq!(&p.saved(name), text); }
         assert_eq!(fs::read_dir(p.0.join(CONFLICT_DIR)).unwrap().count(), 8);
-    }
-
-    #[test]
-    fn hashed_name_keeps_extension_and_unicode_boundaries() {
-        let name = content_conflict_name(&at(), &"漢".repeat(60), "с другого устройства", ".json", b"foreign");
-        assert!(name.len() <= 220);
-        assert!(name.ends_with(".json"));
-        assert!(!name.contains('\u{fffd}'));
     }
 
     #[test]

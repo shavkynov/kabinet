@@ -89,13 +89,16 @@ test('copy failure stops the guard without altering the source', (t) => {
 });
 
 
-test('a manually edited conflict copy is not replaced on retry', (t) => {
+test('a manually edited conflict copy is not replaced: the next version gets a number', (t) => {
   const { dir, file } = setup(t);
   fs.writeFileSync(file, 'foreign');
   const name = guardWrite(dir, file, 'mine', 'Chapter', now);
   const target = path.join(dir, 'Конфликты', name);
   fs.writeFileSync(target, 'manually edited copy');
-  assert.throws(() => guardWrite(dir, file, 'mine', 'Chapter', now), /Сохранение остановлено/);
+  const next = guardWrite(dir, file, 'mine', 'Chapter', now);
+  assert.notEqual(next, name);
+  assert.match(next, / 2\.md$/);
   assert.equal(fs.readFileSync(target, 'utf8'), 'manually edited copy');
+  assert.equal(fs.readFileSync(path.join(dir, 'Конфликты', next), 'utf8'), 'foreign');
   assert.equal(fs.readFileSync(file, 'utf8'), 'foreign');
 });
