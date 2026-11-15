@@ -171,7 +171,7 @@ function pastInfo(raw, pos) {
     if (/(?:[аеиоуыэюя]тели|[аеиоуыэюя]нели)$/.test(w)) return null; // «родители»
     return { guess: w };
   }
-  if (PAST_MASC.test(w) && w.length >= 6) return { guess: w };
+  if (PAST_MASC.test(w) && w.length >= 5) return { guess: w };
   return null;
 }
 

@@ -54,3 +54,17 @@ test('разбор пустого и латинского текста не па
   assert.deepEqual(m.analyzeBlock('').words, []);
   assert.equal(pos('hello 123')['123'], 'num');
 });
+
+test('части речи: «я», местоимения с н- после предлога, «каждой», «одеяло»', () => {
+  const pos = (t) => m.tokenize(t).map((w) => w.pos);
+  assert.equal(pos('Я иду')[0], 'pron');
+  assert.equal(pos('у него')[1], 'pron');
+  assert.equal(pos('с ними')[1], 'pron');
+  assert.equal(pos('в каждой мышце')[1], 'pron');
+  assert.equal(pos('натянула одеяло')[1], 'noun');
+  assert.notEqual(pos('рука на штурвале')[2], 'verb');
+});
+
+test('предложения: многоточие из трёх точек перед строчной буквой не кончает предложение', () => {
+  assert.equal(m.sentences('Вдруг... всё стихло. Тишина.').length, 2);
+});
