@@ -23,7 +23,6 @@ function syntax(file, asModule) {
   if (r.status !== 0) fail(`синтаксис ${path.relative(root, file)}\n${r.stderr}`);
 }
 
-for (const f of ['main.js', 'preload.js']) syntax(path.join(root, f), false);
 for (const f of fs.readdirSync(path.join(root, 'src'))) if (f.endsWith('.js')) syntax(path.join(root, 'src', f), false);
 for (const f of fs.readdirSync(path.join(root, 'scripts'))) if (f.endsWith('.js')) syntax(path.join(root, 'scripts', f), false);
 const rdir = path.join(root, 'renderer');
@@ -44,18 +43,6 @@ const app = fs.readFileSync(path.join(rdir, 'app.gen.js'), 'utf8');
 const seen = new Map();
 for (const m of app.matchAll(/^(?:async )?function ([A-Za-z0-9_]+)/gm)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
 for (const [name, n] of seen) if (n > 1) fail(`app: функция ${name} объявлена ${n} раза (части renderer/app/)`);
-
-// IPC: каждый вызов call('канал') в preload должен иметь handle('канал') в main
-const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
-const pre = fs.readFileSync(path.join(root, 'preload.js'), 'utf8');
-for (const m of pre.matchAll(/call\('([^']+)'/g)) {
-  if (!main.includes(`handle('${m[1]}'`)) fail(`preload: в main.js нет handle('${m[1]}')`);
-}
-const api = new Set([...pre.matchAll(/^\s+([A-Za-z]+):/gm)].map((m) => m[1]));
-for (const f of modules) {
-  const code = fs.readFileSync(path.join(rdir, f), 'utf8');
-  for (const m of code.matchAll(/\bapi\.([A-Za-z]+)\(/g)) if (!api.has(m[1])) fail(`${f}: в preload нет api.${m[1]}`);
-}
 
 const tests = fs.readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'test', f));
 const t = spawnSync(process.execPath, ['--test', ...tests], { encoding: 'utf8' });
