@@ -86,8 +86,27 @@ export class TypeSounds {
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       this.noise = buf;
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    // После долгого сворачивания/сна звуковое устройство может уйти: контекст остаётся «suspended»,
+    // «interrupted» или «closed» и сам не оживает. Пробуем resume, а если не помогло — строим заново.
+    if (this.ctx.state === 'closed') this._drop();
+    else if (this.ctx.state !== 'running') {
+      this.stuck = (this.stuck || 0) + 1;
+      if (this.stuck > 3) { this._drop(); return this._ensure(); }
+      try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* повторим при следующем звуке */ }
+    } else this.stuck = 0;
     return this.ctx;
+  }
+
+  /** Забыть звуковой контекст: следующий звук создаст новый (буферы записей от контекста не зависят). */
+  _drop() {
+    const old = this.ctx;
+    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0;
+    if (old) { try { const r = old.close(); if (r && r.catch) r.catch(() => {}); } catch { /* уже закрыт */ } }
+  }
+
+  /** Окно снова на виду: контекст мог «умереть» в фоне — пересоздаём, если он не работает. */
+  revive() {
+    if (this.ctx && this.ctx.state !== 'running') this._drop();
   }
 
   play(kind) {

@@ -66,6 +66,10 @@ async function pollCloudState() {
 }
 
 function wireDock() {
+  // Звук клавиш после долгого сворачивания: проверяем звуковой контекст, когда окно снова на виду.
+  const reviveSound = () => { if (!document.hidden) sounds.revive(); };
+  document.addEventListener('visibilitychange', reviveSound);
+  window.addEventListener('focus', reviveSound);
   $('#cloudStop').addEventListener('click', async () => {
     const b = $('#cloudStop');
     b.disabled = true;
