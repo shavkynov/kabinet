@@ -91,6 +91,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: node experiments/tauri-app/build.cjs
       - run: npm i --no-save playwright@1.49.1
       - run: npx playwright install --with-deps chromium
       - run: node test-ui/ui-smoke.js
