@@ -99,6 +99,32 @@ fn open_url(url: &str) {
     #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
 }
 
+/// Полный экран. F11 приходит дважды (ускоритель меню и клавиша из окна), поэтому повтор в пределах 300 мс игнорируется.
+/// На Windows и Linux в полном экране полоска меню прячется; Alt (см. peek_menu) показывает её на время.
+fn toggle_fullscreen(app: &tauri::AppHandle) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    if now.saturating_sub(LAST.swap(now, std::sync::atomic::Ordering::SeqCst)) < 300 { return; }
+    if let Some(w) = app.get_webview_window("main").or_else(|| app.webview_windows().into_values().next()) {
+        let on = w.is_fullscreen().unwrap_or(false);
+        let _ = w.set_fullscreen(!on);
+        #[cfg(not(target_os = "macos"))]
+        { if on { let _ = w.show_menu(); } else { let _ = w.hide_menu(); } }
+    }
+}
+
+/// Alt в полном экране: показать или спрятать полоску меню (вне полного экрана ничего не делает).
+fn peek_menu(app: &tauri::AppHandle) {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(w) = app.get_webview_window("main").or_else(|| app.webview_windows().into_values().next()) {
+        if w.is_fullscreen().unwrap_or(false) {
+            if w.is_menu_visible().unwrap_or(false) { let _ = w.hide_menu(); } else { let _ = w.show_menu(); }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app;
+}
+
 /// Выполнить системную проверку орфографии там, где это разрешено: на macOS в главном потоке, иначе в рабочем.
 async fn spell_run<T: Send + 'static>(app: &tauri::AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     #[cfg(target_os = "macos")]
@@ -271,12 +297,8 @@ fn on_menu(app: &tauri::AppHandle, id: &str) {
         }
         "log:folder" => { if let Some(d) = applog::folder() { open_path(&d); } }
         "app:updates" => open_url("https://github.com/shavkynov/kabinet/releases"),
-        "app:fullscreen" => {
-            if let Some(w) = app.get_webview_window("main").or_else(|| app.webview_windows().into_values().next()) {
-                let on = w.is_fullscreen().unwrap_or(false);
-                let _ = w.set_fullscreen(!on);
-            }
-        }
+        "app:fullscreen" => toggle_fullscreen(&app),
+        "app:menuPeek" => peek_menu(&app),
         "backup:info" => {
             // Текст о месте хранения копий берётся из существующего раздела «Резервные копии».
             // Путь вычисляется ровно той же `backup_root`, что и `make_backup`, — в интерфейсе алгоритм не дублируется.
@@ -531,6 +553,10 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             let word = arg_str(a, 0)?;
             let en = LANG_EN.load(std::sync::atomic::Ordering::SeqCst);
             Ok(json!(spell_run(&app, move || spell::learn(&word, en)).await.unwrap_or(false)))
+        }
+        "app:fullscreen" | "app:menuPeek" => {
+            if channel == "app:fullscreen" { toggle_fullscreen(&app); } else { peek_menu(&app); }
+            Ok(json!(true))
         }
         "ctx:replaceMisspelling" => {
             let word = serde_json::to_string(&arg_str(a, 0)?).map_err(|e| e.to_string())?;

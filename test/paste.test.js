@@ -29,3 +29,14 @@ test('вставка из Word: знак из личной области вме
   const text = `${pua}\tПривет!\r\n${pua} Ка${shy}к дела?\r\n`;
   assert.deepStrictEqual(p(text), ['— Привет!', '— Как дела?']);
 });
+
+test('pasteAsParagraphs: голый текст из Блокнота — абзац на строку; один абзац, Markdown-заголовок и браузерный HTML — обычным путём', () => {
+  const { pasteAsParagraphs } = require('../src/paste');
+  assert.equal(pasteAsParagraphs('', 'текст\r\nтекст\r\nтекст'), true);
+  assert.equal(pasteAsParagraphs('', 'раз\n\nдва'), true);
+  assert.equal(pasteAsParagraphs('', 'одна строка'), false);
+  assert.equal(pasteAsParagraphs('', 'одна строка\n'), false);
+  assert.equal(pasteAsParagraphs('', '# Заголовок\nтекст'), false);
+  assert.equal(pasteAsParagraphs('<p>из браузера</p>', 'а\nб'), false);
+  assert.equal(pasteAsParagraphs('<p class="MsoNormal">из Word</p>', 'а\nб'), true);
+});

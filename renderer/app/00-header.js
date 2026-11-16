@@ -17,7 +17,7 @@ import { TextAnalysis, refreshAnalysis, scanTense, scanRhythm, analysisRanges, a
 import { Typography, fixDocTypography } from './typo.js';
 import { AlignParagraph, toggleAlign } from './align.js';
 import { Slice, Fragment } from '@tiptap/pm/model';
-import { isOfficeHtml, officeTextToParagraphs } from '../src/paste.js';
+import { isOfficeHtml, officeTextToParagraphs, pasteAsParagraphs } from '../src/paste.js';
 import { clipboardPlain } from '../src/clip.js';
 import { isTheme } from '../src/themes.js';
 import { isEngine } from '../src/searchengines.js';

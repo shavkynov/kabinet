@@ -32,4 +32,17 @@ function officeTextToParagraphs(text) {
   return out;
 }
 
-module.exports = { isOfficeHtml, officeTextToParagraphs };
+/**
+ * Вставлять буфер как «абзац на строку»? Да для офисного HTML и для голого текста из Блокнота, Notepad++ и т. п.
+ * (там HTML нет, а строки без пустой строки между ними иначе слиплись бы в один абзац с переносами).
+ * Текст с заголовками Markdown («# …») и одна строка идут обычным путём.
+ */
+function pasteAsParagraphs(html, plain) {
+  if (isOfficeHtml(html)) return true;
+  if (html) return false;
+  const t = String(plain || '');
+  if (!new RegExp(`[\\r\\n${String.fromCharCode(11, 0x2028, 0x2029)}]`).test(t.replace(/[\r\n]+$/, ''))) return false;
+  return !/^\s{0,3}#{1,6}\s/m.test(t);
+}
+
+module.exports = { isOfficeHtml, officeTextToParagraphs, pasteAsParagraphs };

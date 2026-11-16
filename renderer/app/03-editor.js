@@ -3,7 +3,7 @@
 // Вставка из Word и других офисных программ: абзац на строку, тире сохраняются (см. src/paste.js).
 function handleOfficePaste(view, event) {
   const cd = event.clipboardData;
-  if (!cd || !view.editable || !isOfficeHtml(cd.getData('text/html'))) return false;
+  if (!cd || !view.editable || !pasteAsParagraphs(cd.getData('text/html'), cd.getData('text/plain'))) return false;
   const paragraphs = officeTextToParagraphs(cd.getData('text/plain'));
   if (!paragraphs.length) return false;
   const { schema } = view.state;

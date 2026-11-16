@@ -66,6 +66,18 @@ async function pollCloudState() {
 }
 
 function wireDock() {
+  // F11 — полный экран: окно просмотра забирает эту клавишу себе, поэтому ловим её сами (Rust не даст сработать дважды).
+  // В полном экране полоска меню спрятана; Alt, нажатый и отпущенный отдельно, показывает или прячет её.
+  if (!/Mac/i.test(navigator.platform || '') && api.toggleFullscreen) {
+    let altAlone = false;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F11' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); api.toggleFullscreen().catch(() => {}); altAlone = false; return; }
+      altAlone = e.key === 'Alt' && !e.repeat;
+    }, true);
+    document.addEventListener('keyup', (e) => {
+      if (e.key === 'Alt' && altAlone) { altAlone = false; api.menuPeek().catch(() => {}); }
+    }, true);
+  }
   // Меню окна строит оболочка: при запуске на английском сообщаем язык (раньше это происходило только при переключении).
   if (LANG === 'en') api.setLang('en').catch(() => {});
   // Звук клавиш после долгого сворачивания: проверяем звуковой контекст, когда окно снова на виду.

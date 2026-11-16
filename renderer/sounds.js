@@ -105,7 +105,19 @@ export class TypeSounds {
       if (this.stuck === 1) this._note(`ctx not running: ${this.ctx.state}`);
       if (this.stuck > 3) { this._drop(); return this._ensure(); }
       try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* повторим при следующем звуке */ }
-    } else this.stuck = 0;
+    } else {
+      this.stuck = 0;
+      // Контекст числится «running», но его часы стоят: звука нет (так «засыпает» звук в свёрнутом окне на macOS).
+      // Сверяем время контекста с настоящим временем с прошлого звука; если не идёт, строим контекст заново.
+      const now = performance.now();
+      const ct = this.ctx.currentTime;
+      if (this.tick && now - this.tick.at > 1500 && (ct - this.tick.ct) * 1000 < (now - this.tick.at) * 0.3) {
+        this._note(`ctx stalled: ${((ct - this.tick.ct) * 1000).toFixed(0)} ms of ${(now - this.tick.at).toFixed(0)} ms`);
+        this._drop();
+        return this._ensure();
+      }
+      this.tick = { at: now, ct };
+    }
     return this.ctx;
   }
 
@@ -117,7 +129,7 @@ export class TypeSounds {
   _drop() {
     const old = this.ctx;
     this._note(`ctx recreated, was ${old ? old.state : "none"}`);
-    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0; this.wasRunning = false;
+    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0; this.wasRunning = false; this.tick = null;
     if (old) { try { const r = old.close(); if (r && r.catch) r.catch(() => {}); } catch { /* уже закрыт */ } }
   }
 
