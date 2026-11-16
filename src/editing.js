@@ -167,7 +167,24 @@ const COMMON = new Set(`был была было были будет будут 
 
 const COMMON_EN = new Set(`said asked replied answered looked seemed went came took made thought knew about which these those other where there their would could should
   something nothing anything everything someone people thing things never always again before after through still little around another because while until`.split(/\s+/));
-const REPEAT_POS = new Set(['verb', 'noun', 'adj', 'adv']);
+const REPEAT_POS = new Set(['verb', 'noun', 'adj', 'adv', 'part']);
+
+// Корень для повторов: слова одного корня считаются повтором, даже если они разных частей речи или с приставкой:
+// «красивый — красиво», «холод — холодный», «говорить — говорящий», «думать — подумал», «видеть — увидел».
+const ROOT_PREFIXES = ['пере', 'пред', 'под', 'про', 'при', 'раз', 'рас', 'воз', 'вос', 'вы', 'на', 'по', 'за', 'от', 'об', 'до', 'из', 'ис', 'со', 'с', 'в', 'у', 'о'];
+function rootVariants(stemWord, pos) {
+  let r = stemWord;
+  if (pos === 'part') r = r.replace(/(ущ|ющ|ащ|ящ|вш|ённ|енн|нн)$/, '');
+  if ((pos === 'adj' || pos === 'adv') && r.length >= 5 && r.endsWith('н')) r = r.slice(0, -1); // холодн- → холод-
+  const out = [r];
+  if (pos === 'verb' || pos === 'part') {
+    // приставка может быть, а может быть частью корня («смотр-» и «по-смотр-»): слово записывается в обоих видах
+    for (const p of ROOT_PREFIXES) {
+      if (r.startsWith(p) && r.length - p.length >= 3) { out.push(r.slice(p.length)); break; }
+    }
+  }
+  return out;
+}
 
 /** Основа слова для сравнения; '' если слово не подходит для поиска повторов. */
 function repeatKey(word) {
@@ -182,8 +199,17 @@ function repeatKey(word) {
     const cut = w.length >= 7 ? 3 : w.length === 6 ? 2 : 1;
     return `${word.pos}:${w.slice(0, -cut)}`;
   }
-  const s = stem(w, word.pos);
-  return s.length >= 3 ? `${word.pos}:${s}` : '';
+  const s = rootVariants(stem(w, word.pos), word.pos)[0];
+  return s.length >= 3 ? `ru:${s}` : '';
+}
+
+/** Все ключи слова для повторов: основа и, у глаголов с приставкой, основа без неё. Пусто, если слово не подходит. */
+function repeatKeys(word) {
+  const first = repeatKey(word);
+  if (!first) return [];
+  const w = norm(word.text);
+  if (/^[a-z'’-]+$/.test(w) || !/[а-я]/.test(w)) return [first];
+  return rootVariants(stem(w, word.pos), word.pos).filter((x) => x.length >= 3).map((x) => `ru:${x}`);
 }
 
 /**
@@ -220,12 +246,16 @@ function repeatPairs(seq, windowSize) {
   }
   seq.forEach((w, i) => {
     if (w.skip) return; // слово из «Не отмечать здесь»: в сравнении не участвует, но места в ряду занимает
-    const key = repeatKey(w);
-    if (!key) return;
-    if (names.size && names.has(key.slice(key.indexOf(':') + 1))) return;
-    const j = last.get(key);
-    if (j !== undefined && i - j <= windowSize) pairs.push([j, i]);
-    last.set(key, i);
+    const keys = repeatKeys(w);
+    if (!keys.length) return;
+    if (names.size && names.has(keys[0].slice(keys[0].indexOf(':') + 1))) return;
+    let j;
+    for (const k of keys) {
+      const jj = last.get(k);
+      if (jj !== undefined && i - jj <= windowSize && (j === undefined || jj > j)) j = jj;
+    }
+    if (j !== undefined) pairs.push([j, i]);
+    for (const k of keys) last.set(k, i);
   });
   return pairs;
 }

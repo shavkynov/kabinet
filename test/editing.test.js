@@ -106,3 +106,17 @@ test('паразиты: список из одних «все формы» да�
   assert.equal(ed.compileFillers([]), null);
   assert.equal(ed.compileFillers(['по*']), null, 'недопустимая запись отбрасывается');
 });
+
+test('повторы по корню: разные части речи и приставки', () => {
+  const pairsOf = (text) => {
+    const m = require('../src/morph');
+    const words = m.tokenize(text).map((w) => ({ text: w.text, pos: m.classify(m.norm(w.text)), proper: false }));
+    return ed.repeatPairs(words, 25).map(([a, b]) => `${words[a].text.toLowerCase()}~${words[b].text.toLowerCase()}`);
+  };
+  assert.ok(pairsOf('Красивый закат был красиво окрашен.').includes('красивый~красиво'), 'прилагательное и наречие');
+  assert.ok(pairsOf('Холодный ветер нёс холод.').includes('холодный~холод'), 'прилагательное и существительное');
+  assert.ok(pairsOf('Он смотрел в окно, потом посмотрел на часы.').includes('смотрел~посмотрел'), 'глагол с приставкой');
+  assert.ok(pairsOf('Она думала о нём и подумала снова.').includes('думала~подумала'), 'думала и подумала');
+  assert.ok(pairsOf('Говорящий голос звучал, и он начал говорить.').includes('говорящий~говорить'), 'причастие и глагол');
+  assert.deepEqual(pairsOf('Голова кружилась, а голос стал тише.'), [], 'голос и голова — разные корни');
+});
