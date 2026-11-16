@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "kabinet-core"
-version = "0.40.2"
+version = "0.40.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "kabinet-tauri"
-version = "0.40.2"
+version = "0.40.3"
 dependencies = [
  "kabinet-core",
  "keyring",
