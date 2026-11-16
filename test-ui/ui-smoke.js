@@ -47,11 +47,12 @@ function fakeTauri() {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message + (process.env.STACK ? '\n' + e.stack : '')));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/status of 404/.test(m.text())) errors.push('console: ' + m.text()); });
+  page.on('response', (r) => { if (r.status() >= 400 && !/favicon/.test(r.url())) errors.push(`${r.status()} ${r.url()}`); });
   await page.addInitScript(fakeTauri);
   await page.goto(base);
   await page.evaluate(() => { document.documentElement.setAttribute('spellcheck', 'true'); });
-  await page.waitForTimeout(800);
+  await page.waitForSelector('#btnOpen', { state: 'visible', timeout: 20000 }).catch(() => {});
   const checks = [];
   const ok = (cond, label) => { checks.push([cond, label]); };
 
