@@ -93,18 +93,22 @@ function onNativeContext(p) {
   const wordTail = []; // нижний блок меню: связать с карточкой / создать карточку
 
   if (p.misspelledWord) {
+    const w = p.misspelledWord;
     const g = p.suggestions.map((sg) => ({ label: sg, raw: true, onClick: () => api.replaceMisspelling(sg).catch((e) => showError(e.message)) }));
     if (!g.length) g.push({ label: t('Вариантов нет'), disabled: true });
     g.push({
-      label: t('Добавить «{0}» в словарь', p.misspelledWord),
-      onClick: () => api.addCheckWord(p.misspelledWord).then(() => setStatus('ok', t('«{0}» добавлено в словарь', p.misspelledWord))).catch((e) => showError(e.message)),
+      label: t('Добавить «{0}» в словарь', w),
+      onClick: () => api.addCheckWord(w)
+        .then(() => { if (api.spellLearn) api.spellLearn(w).catch(() => {}); window.dispatchEvent(new Event('kabinet:dict-changed')); setStatus('ok', t('«{0}» добавлено в словарь', w)); })
+        .catch((e) => showError(e.message)),
     });
+    if (editor && inEditor) g.push({ label: t('Пропустить'), onClick: () => ignoreSpellWord(editor, w) });
     groups.push(g);
   }
 
   // Системная красная волна: слово и подсказки от окна недоступны, поэтому слово под курсором
   // можно добавить в словарь проекта или пропустить (обе кнопки убирают волну).
-  if (inEditor && settings.spellOn && !p.misspelledWord && !(checker && checker.issueAtPoint(p.x, p.y))) {
+  if (inEditor && settings.spellOn && !p.misspelledWord && !p.spellAvailable && !(checker && checker.issueAtPoint(p.x, p.y))) {
     const w = wordAtPoint(editor, p.x, p.y);
     if (w && w.length >= 2 && !isSpellSkipped(w)) {
       groups.push([

@@ -73,6 +73,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     ignoreCheckRule: (id) => call('check:ignoreRule', id),
     editCommand: (c) => call('ctx:edit', c),
     replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
+    spellLearn: (w) => call('spell:learn', w),
     webSearch: (t, e) => call('ctx:webSearch', t, e),
     listRecents: () => call('recents:list'),
     removeRecent: (p) => call('recents:remove', p),
@@ -159,16 +160,62 @@ const { createCloseCoordinator } = require('./close-coordinator');
   // Правая кнопка: системное меню окна (английское, без карточек и поиска) заменено меню приложения из renderer
   // (renderer/app/12-links.js, onNativeContext). Подсказок орфографии у системы здесь нет: слова проверяет сам Кабинет.
   window.kabinet.onContextMenu = (cb) => {
-    document.addEventListener('contextmenu', (e) => {
+    // Слово под курсором: берём из текста вокруг точки щелчка (слово целиком в одном текстовом узле).
+    const wordRangeAt = (x, y) => {
+      const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+      if (!r || r.startContainer.nodeType !== 3) return null;
+      const text = r.startContainer.textContent;
+      const ch = /[\p{L}\p{M}'’-]/u;
+      let a = r.startOffset;
+      let b = a;
+      while (a > 0 && ch.test(text[a - 1])) a -= 1;
+      while (b < text.length && ch.test(text[b])) b += 1;
+      while (a < b && /['’-]/.test(text[a])) a += 1;
+      while (b > a && /['’-]/.test(text[b - 1])) b -= 1;
+      if (b - a < 2) return null;
+      const range = document.createRange();
+      range.setStart(r.startContainer, a);
+      range.setEnd(r.startContainer, b);
+      return range;
+    };
+    document.addEventListener('contextmenu', async (e) => {
       if (e.defaultPrevented) return;
       e.preventDefault();
-      const sel = String(window.getSelection() || '');
+      const x = e.clientX;
+      const y = e.clientY;
       const a = document.activeElement;
       const editable = !!(e.target.closest && e.target.closest('.ProseMirror[contenteditable="true"], textarea, input'));
-      if (!editable && !sel) return;
+      let selObj = window.getSelection();
+      if (!editable && !String(selObj || '')) return;
+      // Системная проверка орфографии (Windows, macOS): слово под курсором, ошибка ли это и варианты исправления.
+      let misspelledWord = '';
+      let suggestions = [];
+      let spellAvailable = false;
+      const inEditor = !!(e.target.closest && e.target.closest('.ProseMirror[contenteditable="true"]'));
+      if (inEditor && document.documentElement.getAttribute('spellcheck') === 'true') {
+        const range = wordRangeAt(x, y);
+        const cur = String(selObj || '').trim();
+        if (range && (!cur || cur === range.toString())) {
+          const word = range.toString();
+          try {
+            const v = await Promise.race([call('spell:check', word), new Promise((r) => setTimeout(() => r(null), 500))]);
+            if (v && v.available) {
+              spellAvailable = true;
+              if (!v.ok) {
+                misspelledWord = word;
+                suggestions = (v.suggestions || []).slice(0, 6);
+                selObj.removeAllRanges(); // выделяем слово: замена варианта пойдёт на его место
+                selObj.addRange(range);
+              }
+            }
+          } catch { /* без подсказок */ }
+        }
+      }
+      selObj = window.getSelection();
+      const sel = String(selObj || '');
       const isEditable = editable || !!(a && a.isContentEditable);
       const editFlags = { canCut: isEditable && !!sel, canCopy: !!sel, canPaste: isEditable, canSelectAll: isEditable };
-      cb({ x: e.clientX, y: e.clientY, misspelledWord: '', suggestions: [], selectionText: sel.slice(0, 2000), isEditable, editFlags });
+      cb({ x, y, misspelledWord, suggestions, spellAvailable, selectionText: sel.slice(0, 2000), isEditable, editFlags });
     });
   };
   // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.

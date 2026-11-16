@@ -7,6 +7,7 @@ use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searc
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
+mod spell;
 use kabinet_core::http::{Http, Retrying, UreqHttp};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -96,6 +97,21 @@ fn open_url(url: &str) {
     #[cfg(windows)] { let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn(); }
     #[cfg(target_os = "macos")] { let _ = std::process::Command::new("open").arg(url).spawn(); }
     #[cfg(not(any(windows, target_os = "macos")))] { let _ = std::process::Command::new("xdg-open").arg(url).spawn(); }
+}
+
+/// Выполнить системную проверку орфографии там, где это разрешено: на macOS в главном потоке, иначе в рабочем.
+async fn spell_run<T: Send + 'static>(app: &tauri::AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || { let _ = tx.send(f()); }).ok()?;
+        tauri::async_runtime::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(2)).ok()).await.ok().flatten()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(f).await.ok()
+    }
 }
 
 /// Пункт меню. Если сочетание клавиш система не приняла, пункт всё равно создаётся (без сочетания): меню не должно ломать запуск.
@@ -504,6 +520,17 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             };
             if let Some(w) = app.get_webview_window("main") { let _ = w.eval(js); }
             Ok(json!(true))
+        }
+        "spell:check" => {
+            let word = arg_str(a, 0)?;
+            let en = LANG_EN.load(std::sync::atomic::Ordering::SeqCst);
+            let v = spell_run(&app, move || spell::check(&word, en)).await.flatten();
+            Ok(spell::to_json(v))
+        }
+        "spell:learn" => {
+            let word = arg_str(a, 0)?;
+            let en = LANG_EN.load(std::sync::atomic::Ordering::SeqCst);
+            Ok(json!(spell_run(&app, move || spell::learn(&word, en)).await.unwrap_or(false)))
         }
         "ctx:replaceMisspelling" => {
             let word = serde_json::to_string(&arg_str(a, 0)?).map_err(|e| e.to_string())?;

@@ -66,18 +66,27 @@ export function ignoreSpellWord(editor, word) {
 
 export const isSpellSkipped = (word) => { const k = norm(word); return dict.has(k) || ignored.has(k); };
 
-/** Слово, на которое указывают координаты (или '' если там не слово). */
-export function wordAtPoint(editor, x, y) {
+/** Слово, на которое указывают координаты: { word, from, to } или null, если там не слово. */
+export function wordRangeAtPoint(editor, x, y) {
   const hit = editor.view.posAtCoords({ left: x, top: y });
-  if (!hit) return '';
+  if (!hit) return null;
   const $pos = editor.state.doc.resolve(hit.pos);
-  if (!$pos.parent.isTextblock) return '';
+  if (!$pos.parent.isTextblock) return null;
   const text = $pos.parent.textBetween(0, $pos.parent.content.size, undefined, '￼');
   const off = $pos.parentOffset;
   WORD.lastIndex = 0;
   let m;
   while ((m = WORD.exec(text)) !== null) {
-    if (off >= m.index && off <= m.index + m[0].length) return m[0].replace(/-+$/, '');
+    if (off >= m.index && off <= m.index + m[0].length) {
+      const word = m[0].replace(/-+$/, '');
+      const from = $pos.start() + m.index;
+      return { word, from, to: from + word.length };
+    }
   }
-  return '';
+  return null;
+}
+
+export function wordAtPoint(editor, x, y) {
+  const r = wordRangeAtPoint(editor, x, y);
+  return r ? r.word : '';
 }

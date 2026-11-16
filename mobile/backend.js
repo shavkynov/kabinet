@@ -1026,6 +1026,7 @@ function createBackend(host, { session } = {}) {
     feedbackReport: (kind, text, withLog) => call('log:report', kind, text, withLog),
     feedbackOpen: (kind, text, withLog) => call('feedback:open', kind, text, withLog),
     replaceMisspelling: (w) => call('ctx:replaceMisspelling', w),
+    spellLearn: async () => false,
     webSearch: (text, engine) => call('ctx:webSearch', text, engine),
     listRecents: () => call('recents:list'),
     removeRecent: (p) => call('recents:remove', p),

@@ -2107,6 +2107,8 @@ version = "0.40.2"
 dependencies = [
  "kabinet-core",
  "keyring",
+ "objc2-app-kit",
+ "objc2-foundation",
  "rand 0.8.8",
  "rfd",
  "serde_json",
@@ -2115,6 +2117,7 @@ dependencies = [
  "tauri-plugin-deep-link",
  "tauri-plugin-single-instance",
  "url",
+ "windows",
 ]
 
 [[package]]

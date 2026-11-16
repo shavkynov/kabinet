@@ -25,9 +25,12 @@ kabinet-core = { path = "../core" }
 # Данные входа в Яндекс хранятся в защищённом хранилище системы: Credential Manager (Windows), Связка ключей (macOS).
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+windows = { version = "0.62", features = ["Win32_Globalization", "Win32_System_Com"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSSpellChecker"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSRange"] }
 
 # Одна копия программы: ссылка kabinet://… из браузера доходит до уже запущенной.
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
