@@ -28,6 +28,16 @@ export class TypeSounds {
     this.profile = 'typewriter';
     this.last = 0;
     this.noteIdx = 2;
+    this.wasRunning = false; // контекст хотя бы раз работал: если он перестал, это сбой, а не «ещё не разрешили звук»
+    this.hiddenAt = 0;
+    // WKWebView после сворачивания оставляет контекст «живым» (даже running после resume), но звука нет:
+    // после заметного времени в фоне контекст всегда создаётся заново.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) this.hiddenAt = Date.now();
+        else if (this.hiddenAt && Date.now() - this.hiddenAt > 10000) { this.hiddenAt = 0; this._drop(); }
+      });
+    }
   }
 
   setProfile(name) {
@@ -88,8 +98,9 @@ export class TypeSounds {
     }
     // После долгого сворачивания/сна звуковое устройство может уйти: контекст остаётся «suspended»,
     // «interrupted» или «closed» и сам не оживает. Пробуем resume, а если не помогло — строим заново.
-    if (this.ctx.state === 'closed') this._drop();
-    else if (this.ctx.state !== 'running') {
+    if (this.ctx.state === 'running') this.wasRunning = true;
+    if (this.ctx.state === 'closed' || (this.ctx.state !== 'running' && this.wasRunning)) { this._drop(); return this._ensure(); }
+    if (this.ctx.state !== 'running') {
       this.stuck = (this.stuck || 0) + 1;
       if (this.stuck === 1) this._note(`ctx not running: ${this.ctx.state}`);
       if (this.stuck > 3) { this._drop(); return this._ensure(); }
@@ -106,13 +117,13 @@ export class TypeSounds {
   _drop() {
     const old = this.ctx;
     this._note(`ctx recreated, was ${old ? old.state : "none"}`);
-    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0;
+    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0; this.wasRunning = false;
     if (old) { try { const r = old.close(); if (r && r.catch) r.catch(() => {}); } catch { /* уже закрыт */ } }
   }
 
   /** Окно снова на виду: контекст мог «умереть» в фоне — пересоздаём, если он не работает. */
   revive() {
-    if (this.ctx && this.ctx.state !== 'running') this._drop();
+    if (this.ctx && this.ctx.state !== 'running' && this.wasRunning) this._drop();
   }
 
   play(kind) {
