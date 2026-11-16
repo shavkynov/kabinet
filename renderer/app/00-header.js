@@ -6,6 +6,7 @@ import { Ambient, AMBIENTS } from './ambient.js';
 import { createList } from './lists.js';
 import { createCardView } from './cards.js';
 import { NameLinks, setNameLinks, wireLinkHover } from './links.js';
+import { SpellSkip, setSpellSkipWords, ignoreSpellWord, isSpellSkipped, wordAtPoint } from './spellskip.js';
 import { showMenu, closeMenu, ICONS_CHARACTER, ICONS_PLACE, ICONS_ITEM } from './menu.js';
 import { t, tdom, LANG, LOCALE, initDomTranslation, initKeyLabels, setTermsMode, applyTermsDom } from './i18n.js';
 import { LangIssues, initTextCheck } from './textcheck.js';

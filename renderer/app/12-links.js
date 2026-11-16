@@ -14,7 +14,16 @@ function getImageUrl(file) {
   return imageCache.get(file);
 }
 
+// Словарь проекта для системной проверки орфографии: слова из него не подчёркиваются (renderer/spellskip.js).
+async function reloadSpellSkip() {
+  let words = [];
+  try { words = project ? await api.getDictionary() : []; } catch { /* без словаря */ }
+  if (editor) setSpellSkipWords(editor, words);
+}
+window.addEventListener('kabinet:dict-changed', reloadSpellSkip);
+
 function applyLinks() {
+  reloadSpellSkip();
   for (const ed of [editor, editor2]) {
     if (ed) setNameLinks(ed, settings.links ? cardIdx.filter((c) => kindEnabled(c.kind)) : []);
   }
@@ -91,6 +100,18 @@ function onNativeContext(p) {
       onClick: () => api.addCheckWord(p.misspelledWord).then(() => setStatus('ok', t('«{0}» добавлено в словарь', p.misspelledWord))).catch((e) => showError(e.message)),
     });
     groups.push(g);
+  }
+
+  // Системная красная волна: слово и подсказки от окна недоступны, поэтому слово под курсором
+  // можно добавить в словарь проекта или пропустить (обе кнопки убирают волну).
+  if (inEditor && settings.spellOn && !p.misspelledWord && !(checker && checker.issueAtPoint(p.x, p.y))) {
+    const w = wordAtPoint(editor, p.x, p.y);
+    if (w && w.length >= 2 && !isSpellSkipped(w)) {
+      groups.push([
+        { label: t('Добавить «{0}» в словарь', w), onClick: () => api.addCheckWord(w).then(() => { window.dispatchEvent(new Event('kabinet:dict-changed')); setStatus('ok', t('«{0}» добавлено в словарь', w)); }).catch((e) => showError(e.message)) },
+        { label: t('Пропустить'), onClick: () => ignoreSpellWord(editor, w) },
+      ]);
+    }
   }
 
   if (inEditor && checker) {

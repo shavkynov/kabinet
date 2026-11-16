@@ -107,25 +107,82 @@ fn menu_item(app: &tauri::AppHandle, id: &str, label: &str, accel: Option<&str>)
     MenuItemBuilder::with_id(id, label).build(app)
 }
 
+/// Подпись пункта меню на выбранном языке интерфейса (английские подписи — из того же словаря, что и у окна).
+fn mt(ru: &str) -> String {
+    if !LANG_EN.load(std::sync::atomic::Ordering::SeqCst) { return ru.to_string(); }
+    match ru {
+        "Вид" => "View",
+        "Восстановить из копии…" => "Restore from backup…",
+        "Вставить" => "Paste",
+        "Выделить всё" => "Select all",
+        "Вырезать" => "Cut",
+        "Выход" => "Exit",
+        "Где взять новые версии…" => "Where to get new versions…",
+        "Где хранятся копии…" => "Where backups are stored…",
+        "Завершить «Кабинет»" => "Quit Kabinet",
+        "Закрыть окно" => "Close window",
+        "Закрыть проект" => "Close project",
+        "Звуки клавиш вкл / выкл" => "Key sounds on / off",
+        "Импорт глав…" => "Import chapters…",
+        "Кабинет" => "Kabinet",
+        "Копировать" => "Copy",
+        "Новый проект…" => "New project…",
+        "О программе «Кабинет»" => "About Kabinet",
+        "Окно" => "Window",
+        "Орфография при наборе вкл / выкл" => "Spelling as you type on / off",
+        "Открыть папку журнала" => "Open the log folder",
+        "Открыть папку копий" => "Open the backups folder",
+        "Открыть проект…" => "Open project…",
+        "Отменить" => "Undo",
+        "Повторить" => "Redo",
+        "Поиск по проекту…" => "Search project…",
+        "Показать / скрыть панель глав" => "Show / hide chapter panel",
+        "Показать все" => "Show All",
+        "Полный экран" => "Full screen",
+        "Правка" => "Edit",
+        "Проверить текст главы…" => "Check chapter text…",
+        "Режим «печатная машинка»" => "Typewriter mode",
+        "Резервные копии" => "Backups",
+        "Русский" => "Russian",
+        "Свернуть" => "Minimize",
+        "Сделать копию сейчас" => "Make a backup now",
+        "Синхронизация…" => "Sync…",
+        "Синхронизировать сейчас" => "Sync Now",
+        "Скрытые символы" => "Hidden characters",
+        "Скрыть «Кабинет»" => "Hide Kabinet",
+        "Скрыть остальные" => "Hide Others",
+        "Сообщить об ошибке или идее…" => "Report a bug or suggest an idea…",
+        "Справка" => "Help",
+        "Текст и оформление…" => "Text and appearance…",
+        "Только лист" => "Page only",
+        "Файл" => "File",
+        "Фоновый эмбиент вкл / выкл" => "Background ambient on / off",
+        "Шаблоны карточек…" => "Card templates…",
+        "Экспорт проекта…" => "Export project…",
+        "Язык интерфейса" => "Interface language",
+        _ => ru,
+    }.to_string()
+}
+
 /// Главное меню. Пункты «ui:…» передаются окну событием с тем же именем.
 fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{MenuBuilder, SubmenuBuilder};
     let mac = cfg!(target_os = "macos");
-    let it = |id: &str, label: &str, accel: Option<&str>| menu_item(app, id, label, accel);
+    let it = |id: &str, label: &str, accel: Option<&str>| menu_item(app, id, &mt(label), accel);
 
-    let lang = SubmenuBuilder::new(app, "Язык интерфейса")
+    let lang = SubmenuBuilder::new(app, &mt("Язык интерфейса"))
         .item(&it("lang:ru", "Русский", None)?)
         .item(&it("lang:en", "English", None)?)
         .build()?;
     let about = it("app:about", "О программе «Кабинет»", None)?;
-    let backups = SubmenuBuilder::new(app, "Резервные копии")
+    let backups = SubmenuBuilder::new(app, &mt("Резервные копии"))
         .item(&it("ui:backupNow", "Сделать копию сейчас", None)?)
         .item(&it("backup:restore", "Восстановить из копии…", None)?)
         .item(&it("backup:info", "Где хранятся копии…", None)?)
         .item(&it("ui:openBackups", "Открыть папку копий", None)?)
         .build()?;
 
-    let mut file = SubmenuBuilder::new(app, "Файл")
+    let mut file = SubmenuBuilder::new(app, &mt("Файл"))
         .item(&it("ui:newProject", "Новый проект…", Some("CmdOrCtrl+N"))?)
         .item(&it("ui:openProject", "Открыть проект…", Some("CmdOrCtrl+O"))?)
         .item(&it("ui:importFiles", "Импорт глав…", None)?)
@@ -138,24 +195,24 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&it("ui:syncNow", "Синхронизировать сейчас", Some(if mac { "Cmd+Shift+S" } else { "F5" }))?)
         .separator()
         .item(&it("ui:closeProject", "Закрыть проект", Some("CmdOrCtrl+Shift+W"))?)
-        .close_window_with_text("Закрыть окно");
-    if !mac { file = file.separator().item(&lang).item(&about).separator().quit_with_text("Выход"); }
+        .close_window_with_text(&mt("Закрыть окно"));
+    if !mac { file = file.separator().item(&lang).item(&about).separator().quit_with_text(&mt("Выход")); }
     let file = file.build()?;
 
-    let edit = SubmenuBuilder::new(app, "Правка")
-        .undo_with_text("Отменить")
-        .redo_with_text("Повторить")
+    let edit = SubmenuBuilder::new(app, &mt("Правка"))
+        .undo_with_text(&mt("Отменить"))
+        .redo_with_text(&mt("Повторить"))
         .separator()
-        .cut_with_text("Вырезать")
-        .copy_with_text("Копировать")
-        .paste_with_text("Вставить")
-        .select_all_with_text("Выделить всё")
+        .cut_with_text(&mt("Вырезать"))
+        .copy_with_text(&mt("Копировать"))
+        .paste_with_text(&mt("Вставить"))
+        .select_all_with_text(&mt("Выделить всё"))
         .separator()
         .item(&it("ui:openCheck", "Проверить текст главы…", Some("CmdOrCtrl+Shift+L"))?)
         .item(&it("ui:toggleSpell", "Орфография при наборе вкл / выкл", None)?)
         .build()?;
 
-    let view = SubmenuBuilder::new(app, "Вид")
+    let view = SubmenuBuilder::new(app, &mt("Вид"))
         .item(&it("ui:openSearch", "Поиск по проекту…", Some("CmdOrCtrl+F"))?)
         .separator()
         .item(&it("ui:toggleSidebar", "Показать / скрыть панель глав", Some("CmdOrCtrl+\\"))?)
@@ -169,17 +226,17 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&it("app:fullscreen", "Полный экран", Some(if mac { "Ctrl+Cmd+F" } else { "F11" }))?)
         .build()?;
 
-    let updates = SubmenuBuilder::new(app, "Справка")
+    let updates = SubmenuBuilder::new(app, &mt("Справка"))
         .item(&it("ui:feedback", "Сообщить об ошибке или идее…", None)?)
         .item(&it("log:folder", "Открыть папку журнала", None)?)
         .separator()
         .item(&it("app:updates", "Где взять новые версии…", None)?)
         .build()?;
-    let window = SubmenuBuilder::new(app, "Окно").minimize_with_text("Свернуть").build()?;
+    let window = SubmenuBuilder::new(app, &mt("Окно")).minimize_with_text(&mt("Свернуть")).build()?;
 
     let mut menu = MenuBuilder::new(app);
     if mac {
-        let app_menu = SubmenuBuilder::new(app, "Кабинет").item(&about).separator().item(&lang).separator().hide().hide_others().show_all().separator().quit().build()?;
+        let app_menu = SubmenuBuilder::new(app, &mt("Кабинет")).item(&about).separator().item(&lang).separator().hide_with_text(&mt("Скрыть «Кабинет»")).hide_others_with_text(&mt("Скрыть остальные")).show_all_with_text(&mt("Показать все")).separator().quit_with_text(&mt("Завершить «Кабинет»")).build()?;
         menu = menu.item(&app_menu);
     }
     menu.item(&file).item(&edit).item(&view).item(&updates).item(&window).build()
@@ -410,7 +467,7 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             } else { app.exit(0); }
             Ok(json!(true))
         }
-        "app:setLang" => { LANG_EN.store(arg_str(a, 0).ok().as_deref() == Some("en"), std::sync::atomic::Ordering::SeqCst); chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
+        "app:setLang" => { LANG_EN.store(arg_str(a, 0).ok().as_deref() == Some("en"), std::sync::atomic::Ordering::SeqCst); { let h = app.clone(); let _ = app.run_on_main_thread(move || { if let Ok(m) = build_menu(&h) { let _ = h.set_menu(m); } }); } chk.set_lang_if_fixed(if arg_str(a, 0).ok().as_deref() == Some("en") { "en" } else { "ru" }); Ok(json!(true)) }
         "app:about" => Ok(json!(true)),
         // Тема окна: системные элементы (заголовок, полосы прокрутки, диалоги) следуют выбору, а не только системе.
         // Цвета самого интерфейса задаёт renderer через data-theme; «system» и неизвестное значение отдают выбор системе.

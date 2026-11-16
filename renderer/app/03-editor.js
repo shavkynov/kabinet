@@ -40,6 +40,7 @@ function initEditor() {
       StarterKit.configure({ paragraph: false }),
       AlignParagraph,
       NameLinks,
+      SpellSkip,
       Comments,
       TypeAnim.configure({ isEnabled: () => settings.typeAnim }),
       HiddenMarks.configure({ getOptions: () => ({ on: settings.marks, spaces: settings.marksSpaces }) }),

@@ -283,6 +283,7 @@ export function initTextCheck(ctx) {
   async function saveDict(next) {
     try { dictWords = await api.setDictionary(next); } catch (err) { ctx.showError(err.message); }
     renderDict();
+    window.dispatchEvent(new Event('kabinet:dict-changed'));
   }
   async function loadDict() {
     try { dictWords = await api.getDictionary(); } catch { dictWords = []; }
@@ -363,6 +364,7 @@ export function initTextCheck(ctx) {
     try {
       await api.addCheckWord(word);
       loadDict();
+      window.dispatchEvent(new Event('kabinet:dict-changed'));
       // убираем все такие же подчёркивания
       for (const x of decos().filter((y) => y.spec.kind === 'spelling' && y.spec.text.toLowerCase() === word.toLowerCase())) dispatch({ remove: x.spec.id });
       ctx.setStatus('ok', t('«{0}» добавлено в словарь', word));
