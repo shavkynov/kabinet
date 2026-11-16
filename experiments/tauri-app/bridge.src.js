@@ -155,6 +155,21 @@ const { createCloseCoordinator } = require('./close-coordinator');
     'onOpenSearch', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
     'onOpenBackups', 'onOpenFeedback', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
   ]) window.kabinet[name] = none;
+  // Правая кнопка: системное меню окна (английское, без карточек и поиска) заменено меню приложения из renderer
+  // (renderer/app/12-links.js, onNativeContext). Подсказок орфографии у системы здесь нет: слова проверяет сам Кабинет.
+  window.kabinet.onContextMenu = (cb) => {
+    document.addEventListener('contextmenu', (e) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      const sel = String(window.getSelection() || '');
+      const a = document.activeElement;
+      const editable = !!(e.target.closest && e.target.closest('.ProseMirror[contenteditable="true"], textarea, input'));
+      if (!editable && !sel) return;
+      const isEditable = editable || !!(a && a.isContentEditable);
+      const editFlags = { canCut: isEditable && !!sel, canCopy: !!sel, canPaste: isEditable, canSelectAll: isEditable };
+      cb({ x: e.clientX, y: e.clientY, misspelledWord: '', suggestions: [], selectionText: sel.slice(0, 2000), isEditable, editFlags });
+    });
+  };
   // События из Rust: изменения от синхронизации и сообщения об обмене с облаком.
   const listen = tauri && tauri.event && tauri.event.listen;
   // Rust не закрывает окно сразу: просит сначала дописать несохранённое, ждёт записи и только потом закрывает.
