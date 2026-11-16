@@ -612,6 +612,17 @@ pub fn rename_chapter(dir: &Path, id: &str, title: &str) -> R<Value> {
     Ok(view(dir, &meta))
 }
 
+/// Переименовать проект: меняется только название в project.json. Папка на диске и путь в облаке остаются,
+/// поэтому привязка к облаку и обмен не затрагиваются; новое название доезжает на другие устройства обычным обменом.
+pub fn rename_project(dir: &Path, name: &str) -> R<Value> {
+    let mut meta = load_meta(dir)?;
+    let t: String = clean_title(Some(&json!(name))).chars().take(80).collect();
+    if t.is_empty() { return Err("Название проекта не может быть пустым.".into()); }
+    meta.insert("name".into(), json!(t));
+    save_meta(dir, &meta)?;
+    Ok(view(dir, &meta))
+}
+
 pub fn move_chapter(dir: &Path, id: &str, new_index: f64) -> R<Value> {
     let mut meta = load_meta(dir)?;
     let from = find_index(&meta, id)?;
@@ -1749,5 +1760,19 @@ mod meta_copy_collision_tests {
         let _ = fs::remove_dir_all(&dir);
         assert!(all.contains("foreign-one"), "первая чужая версия project.json затёрта второй копией с тем же именем");
         assert!(all.contains("foreign-two"), "вторая чужая версия project.json потеряна");
+    }
+
+    #[test]
+    fn rename_project_changes_only_the_name() {
+        let d = std::env::temp_dir().join(format!("kab-ren-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let p = create_project(&d, "Старое", None).unwrap();
+        assert_eq!(p["name"], json!("Старое"));
+        let r = rename_project(&d, "  Новое   имя ").unwrap();
+        assert_eq!(r["name"], json!("Новое имя"));
+        assert!(d.exists(), "папка не переименована");
+        assert!(rename_project(&d, "   ").is_err(), "пустое название не принимается");
+        assert_eq!(open_project(&d).unwrap()["name"], json!("Новое имя"));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

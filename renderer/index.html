@@ -742,6 +742,20 @@
     <div id="syncBody"></div>
   </dialog>
 
+  <dialog id="renameProjectDialog">
+    <form method="dialog">
+      <h2>Переименовать проект</h2>
+      <label>Название
+        <input id="renameProjectInput" autocomplete="off" required maxlength="80">
+      </label>
+      <p class="hint">Меняется только название. Папка проекта и связь с облаком остаются прежними, другие устройства получат новое название при обмене.</p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Отмена</button>
+        <button value="ok">Переименовать</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="nameDialog">
     <form method="dialog">
       <h2>Новый проект</h2>

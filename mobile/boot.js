@@ -180,6 +180,7 @@ function buildMenu(be, hw) {
     { label: t('Экспорт проекта…'), run: go('ui:export'), disabled: !has },
     { label: t('Сохранить проект в ZIP'), run: () => be.exportZip().catch((e) => toast(e.message)), disabled: !has },
     { label: t('Шаблоны карточек…'), run: go('ui:openTemplates'), disabled: !has },
+    { label: t('Переименовать проект…'), run: go('ui:renameProject'), disabled: !has },
     { label: t('Сообщить об ошибке или идее…'), run: go('ui:feedback') },
     { label: t('Сделать копию сейчас'), run: go('ui:backupNow'), disabled: !has },
     { label: t('До 30 автоматических копий на проект. Хранятся внутри приложения на этом устройстве.'), disabled: true },

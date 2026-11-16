@@ -595,6 +595,16 @@ function addItem(dir, kind, afterId) {
   return { project: view(dir, meta), id };
 }
 
+/** Переименовать проект: только название в project.json (папка и облачный путь не меняются). */
+function renameProject(dir, name) {
+  const meta = loadMeta(dir);
+  const t = cleanTitle(name).slice(0, 80);
+  if (!t) throw new Error(tr('Название проекта не может быть пустым.'));
+  meta.name = t;
+  saveMeta(dir, meta);
+  return view(dir, meta);
+}
+
 function renameItem(dir, kind, id, title) {
   const meta = loadMeta(dir);
   const i = itemIndex(meta, kind, id);
@@ -977,6 +987,7 @@ module.exports = {
   setChapterMarker,
   addItem,
   renameItem,
+  renameProject,
   moveItem,
   setItemIcon,
   deleteItem,

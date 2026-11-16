@@ -365,6 +365,15 @@ function init() {
     if (name) createProjectFromName(name, dlg.dataset.mode || 'novel');
   });
 
+  enterConfirms($('#renameProjectDialog'), $('#renameProjectInput'));
+  $('#renameProjectDialog').addEventListener('close', () => {
+    if ($('#renameProjectDialog').returnValue === 'ok') renameProjectTo($('#renameProjectInput').value.trim());
+  });
+  $('#projectName').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showMenu(e.clientX, e.clientY, [{ label: 'Переименовать проект…', onClick: askRenameProject }]);
+  });
+  if (api.onRenameProject) api.onRenameProject(() => askRenameProject());
   api.onToggleSidebar(() => { if (project) toggleSidebar(); });
   api.onNewProject(() => { if (project) leaveProject(); else showStart(); }); // «Новый проект» ведёт на стартовую страницу: там выбор «Роман» или «Рассказы»
   api.onOpenProject(openProjectFromDialog);

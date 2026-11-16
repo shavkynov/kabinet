@@ -85,6 +85,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     closeProject: () => call('project:close'),
     addChapter: (a) => call('chapter:add', a),
     renameChapter: (id, t) => call('chapter:rename', id, t),
+    renameProject: (name) => call('project:rename', name),
     moveChapter: (id, i) => call('chapter:move', id, i),
     setChapterGoal: (id, g) => call('chapter:setGoal', id, g),
     setDefaultGoal: (g) => call('project:setDefaultGoal', g),
@@ -151,7 +152,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
   };
   for (const name of [
     'onSetLang', 'onOpenCheck', 'onToggleSpell', 'onCheckProgress', 'onContextMenu', 'onToggleSidebar', 'onNewProject',
-    'onOpenProject', 'onCloseProject', 'onToggleTypewriter', 'onToggleMarks', 'onToggleFocus', 'onOpenSettings',
+    'onOpenProject', 'onCloseProject', 'onRenameProject', 'onToggleTypewriter', 'onToggleMarks', 'onToggleFocus', 'onOpenSettings',
     'onOpenSearch', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
     'onOpenBackups', 'onOpenFeedback', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
   ]) window.kabinet[name] = none;
@@ -184,7 +185,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
   // Пункты главного меню .
   const MENU = {
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
-    onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',
+    onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onRenameProject: 'ui:renameProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleMarks: 'ui:toggleMarks',
     onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onExport: 'ui:export',
     onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onRestoreBackup: 'ui:restoreBackup', onOpenBackups: 'ui:openBackups', onOpenFeedback: 'ui:feedback',
     onOpenSync: 'ui:openSync', onSyncNow: 'ui:syncNow', onToggleSound: 'ui:toggleSound', onToggleAmbient: 'ui:toggleAmbient',

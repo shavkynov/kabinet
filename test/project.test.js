@@ -635,3 +635,13 @@ test('корзина: удаление, возврат, окончательно
   v = project.emptyTrash(dir);
   assert.equal(v.trash.length, 0);
 });
+
+test('renameProject меняет только название: папка и главы на месте, пустое имя не принимается', () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kab-ren-')), 'p');
+  project.createProject(dir, 'Старое');
+  const p = project.renameProject(dir, '  Новое   имя ');
+  assert.equal(p.name, 'Новое имя');
+  assert.ok(fs.existsSync(path.join(dir, 'project.json')));
+  assert.throws(() => project.renameProject(dir, '   '));
+  assert.equal(project.openProject(dir).name, 'Новое имя');
+});

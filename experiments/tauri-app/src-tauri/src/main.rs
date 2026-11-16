@@ -194,6 +194,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&it("ui:openSync", "Синхронизация…", None)?)
         .item(&it("ui:syncNow", "Синхронизировать сейчас", Some(if mac { "Cmd+Shift+S" } else { "F5" }))?)
         .separator()
+        .item(&it("ui:renameProject", "Переименовать проект…", None)?)
         .item(&it("ui:closeProject", "Закрыть проект", Some("CmdOrCtrl+Shift+W"))?)
         .close_window_with_text(&mt("Закрыть окно"));
     if !mac { file = file.separator().item(&lang).item(&about).separator().quit_with_text(&mt("Выход")); }
@@ -562,6 +563,12 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
         "project:close" => { if let Ok(d) = current_dir(&state) { let _ = backup_now(&app, &d); } set_current(&state, None); switch_sync(&dav, None).await; Ok(json!(true)) }
         "project:reload" => store::open_project(&current_dir(&state)?),
         "chapter:add" => store::add_chapter(&current_dir(&state)?, arg_opt_str(a, 0).as_deref()),
+        "project:rename" => {
+            let dir = current_dir(&state)?;
+            let proj = store::rename_project(&dir, &arg_str(a, 0)?)?;
+            store::recents_add(&recents_file(&app)?, &dir.to_string_lossy(), proj["name"].as_str().unwrap_or(""))?;
+            Ok(proj)
+        }
         "chapter:rename" => store::rename_chapter(&current_dir(&state)?, &arg_str(a, 0)?, &arg_str(a, 1)?),
         "chapter:move" => store::move_chapter(&current_dir(&state)?, &arg_str(a, 0)?, a.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0)),
         "chapter:setGoal" => store::set_chapter_goal(&current_dir(&state)?, &arg_str(a, 0)?, a.get(1)),

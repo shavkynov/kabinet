@@ -701,6 +701,11 @@ function createBackend(host, { session } = {}) {
   }
 
   handle('chapter:add', (afterId) => project.addChapter(requireDir(), afterId || null));
+  handle('project:rename', (name) => {
+    const proj = project.renameProject(requireDir(), name);
+    recents.add(recentsFile(), { path: currentDir, name: proj.name });
+    return proj;
+  });
   handle('chapter:rename', (id, title) => project.renameChapter(requireDir(), id, title));
   handle('chapter:move', (id, index) => project.moveChapter(requireDir(), id, index));
   handle('chapter:setGoal', (id, goal) => project.setChapterGoal(requireDir(), id, goal));
@@ -1033,6 +1038,7 @@ function createBackend(host, { session } = {}) {
     closeProject: () => call('project:close'),
     addChapter: (afterId) => call('chapter:add', afterId),
     renameChapter: (id, title) => call('chapter:rename', id, title),
+    renameProject: (name) => call('project:rename', name),
     moveChapter: (id, index) => call('chapter:move', id, index),
     setChapterGoal: (id, goal) => call('chapter:setGoal', id, goal),
     setDefaultGoal: (goal) => call('project:setDefaultGoal', goal),
@@ -1092,6 +1098,7 @@ function createBackend(host, { session } = {}) {
     reloadProject: () => call('project:reload'),
     onOpenTemplates: on('ui:openTemplates'),
     onOpenFeedback: on('ui:feedback'),
+    onRenameProject: on('ui:renameProject'),
     onBackupNow: on('ui:backupNow'),
     onOpenBackups: on('ui:openBackups'),
     onOpenSync: on('ui:openSync'),

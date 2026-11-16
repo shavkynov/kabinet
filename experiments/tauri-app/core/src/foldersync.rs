@@ -1528,6 +1528,28 @@ mod tests {
         assert!(!down.is_empty() && down.last().map(|e| e.1 == e.2) == Some(true), "{:?}", down);
     }
 
+    /// Переименование проекта меняет только название: путь в облаке тот же, другое устройство получает новое имя.
+    #[test]
+    fn project_rename_syncs_and_keeps_cloud_path() {
+        let s = FakeServer::new();
+        let a = tmpdir("ren-a").join("p");
+        project(&a, &[("aaaaaa", "текст")]);
+        sync_of(&a, &s, "a").sync().unwrap();
+        let b = tmpdir("ren-b").join("p");
+        std::fs::create_dir_all(&b).unwrap();
+        sync_of(&b, &s, "b").sync().unwrap();
+
+        crate::store::rename_project(&a, "Новое имя").unwrap();
+        let res = sync_of(&a, &s, "a").sync().unwrap();
+        assert!(res.conflicts.is_empty(), "{:?}", res);
+        assert!(s.0.lock().unwrap().files.contains_key("/Кабинет/Роман/project.json"), "путь в облаке прежний");
+        let res_b = sync_of(&b, &s, "b").sync().unwrap();
+        assert!(res_b.conflicts.is_empty(), "{:?}", res_b);
+        let v: Value = serde_json::from_str(&r(&b, "project.json")).unwrap();
+        assert_eq!(v["name"], json!("Новое имя"), "второе устройство получило новое название");
+        assert_eq!(r(&b, "Главы/aaaaaa.md"), "текст");
+    }
+
     /// Второе устройство скачивает много файлов параллельно и получает тот же проект.
     #[test]
     fn first_download_of_many_files_goes_parallel_and_matches() {

@@ -124,6 +124,37 @@ function askNewProject(mode) {
   input.focus();
 }
 
+function askRenameProject() {
+  if (!project) return;
+  const dlg = $('#renameProjectDialog');
+  const input = $('#renameProjectInput');
+  input.value = project.name;
+  dlg.returnValue = '';
+  dlg.showModal();
+  input.focus();
+  input.select();
+}
+
+async function renameProjectTo(name) {
+  if (!project || !name || name === project.name) return;
+  if (!(await flush())) return;
+  const old = project.name;
+  try {
+    const proj = await api.renameProject(name);
+    // «слов за сегодня» ведётся по названию: переносим счётчик на новое имя
+    try {
+      const t = readToday();
+      if (t.by[old] != null) { t.by[proj.name] = (Number(t.by[proj.name]) || 0) + Number(t.by[old]); delete t.by[old]; localStorage.setItem('kabinet.today', JSON.stringify(t)); }
+    } catch { /* счётчик начнётся заново */ }
+    project = proj;
+    $('#projectName').textContent = proj.name;
+    document.title = t('{0} — Кабинет', proj.name);
+    setStatus('ok', t('Проект переименован.'));
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function createProjectFromName(name, mode) {
   if (!(await flush())) return;
   try {
