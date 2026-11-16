@@ -77,6 +77,44 @@ jobs:
           NODE
 
   # Основная версия — Кабинет на Tauri (Rust). Установщики собираются при выпуске версии (метка v0.0.0) или вручную.
+  # Тесты Rust и компиляция оболочки на всех системах при каждом push и запросе слияния,
+  # чтобы поломку под Windows или macOS увидеть сразу, а не при выпуске по метке.
+  rust-check:
+    if: github.ref_type != 'tag'
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+      - name: Библиотеки Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xdg-utils
+      - name: Тесты Rust (ядро)
+        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
+      - name: Окно для оболочки
+        run: |
+          npm run build
+          node experiments/tauri-app/build.cjs
+      - name: Оболочка компилируется
+        run: cargo check --locked --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+
   tauri-test:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: check
@@ -302,6 +340,13 @@ jobs:
           V="${TAG#v}"
           awk -v v="$V" '$0==v{on=1;next} on&&/^[0-9]+\.[0-9]+\.[0-9]+$/{exit} on{print}' src/CHANGELOG.txt > notes.md
           if [ ! -s notes.md ]; then echo "::error::В CHANGELOG.txt нет раздела $V."; exit 1; fi
+          cat >> notes.md <<'FOOTER'
+
+          Первый запуск. Кабинет распространяется свободно и без платной подписи, поэтому система может предупредить:
+          Windows: в окне SmartScreen нажмите «Подробнее», затем «Выполнить в любом случае».
+          macOS: «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть»; если пишет, что файл повреждён: xattr -dr com.apple.quarantine /Applications/Кабинет.app
+          Контрольная сумма SHA256 каждого файла указана на этой странице рядом с файлом.
+          FOOTER
           cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
