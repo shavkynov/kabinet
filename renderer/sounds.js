@@ -91,15 +91,21 @@ export class TypeSounds {
     if (this.ctx.state === 'closed') this._drop();
     else if (this.ctx.state !== 'running') {
       this.stuck = (this.stuck || 0) + 1;
+      if (this.stuck === 1) this._note(`ctx not running: ${this.ctx.state}`);
       if (this.stuck > 3) { this._drop(); return this._ensure(); }
       try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* повторим при следующем звуке */ }
     } else this.stuck = 0;
     return this.ctx;
   }
 
+  _note(msg) {
+    try { window.dispatchEvent(new CustomEvent('kabinet:sound-note', { detail: msg })); } catch { /* журнал недоступен */ }
+  }
+
   /** Забыть звуковой контекст: следующий звук создаст новый (буферы записей от контекста не зависят). */
   _drop() {
     const old = this.ctx;
+    this._note(`ctx recreated, was ${old ? old.state : "none"}`);
     this.ctx = null; this.master = null; this.noise = null; this.stuck = 0;
     if (old) { try { const r = old.close(); if (r && r.catch) r.catch(() => {}); } catch { /* уже закрыт */ } }
   }

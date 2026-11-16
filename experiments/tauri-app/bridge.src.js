@@ -180,6 +180,9 @@ const { createCloseCoordinator } = require('./close-coordinator');
   const report = (m) => { if (sent < 30) { sent += 1; call('log:write', 'error', String(m).slice(0, 800)).catch(() => {}); } };
   window.addEventListener('error', (e) => report(`${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`));
   window.addEventListener('unhandledrejection', (e) => report(`promise: ${(e.reason && e.reason.stack) || e.reason}`));
+  // Диагностика звука (renderer/sounds.js): состояние звукового контекста пишется в журнал, до 10 раз за сеанс.
+  let soundNotes = 0;
+  window.addEventListener('kabinet:sound-note', (e) => { if (soundNotes < 10) { soundNotes += 1; call('log:write', 'info', `звук: ${String(e.detail).slice(0, 200)}`).catch(() => {}); } });
   window.kabinet.onSetLang = subscribe('ui:setLang');
   window.kabinet.onCheckProgress = subscribe('check:progress');
   window.kabinet.onDavEvent = subscribe('dav:event');
