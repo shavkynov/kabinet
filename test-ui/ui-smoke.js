@@ -59,6 +59,11 @@ function fakeTauri() {
   ok(errors.length === 0, 'запуск без исключений: ' + errors.join(' | '));
 
   // открыть проект и проверить редактор
+  if (!(await page.locator('#btnOpen').isVisible())) {
+    console.log('FAIL кнопка «Открыть» не видна. Исключения: ' + (errors.join(' | ') || 'нет'));
+    console.log('Видимый текст: ' + (await page.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 300));
+    await browser.close(); server.close(); process.exit(1);
+  }
   await page.click('#btnOpen');
   await page.waitForSelector('.ProseMirror', { timeout: 5000 }).catch(() => {});
   ok(await page.locator('.ProseMirror').count() >= 1, 'проект открывается, редактор есть');
