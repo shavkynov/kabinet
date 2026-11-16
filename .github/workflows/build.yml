@@ -77,6 +77,24 @@ jobs:
           NODE
 
   # Основная версия — Кабинет на Tauri (Rust). Установщики собираются при выпуске версии (метка v0.0.0) или вручную.
+  # Окно в настоящем Chromium с подставным мостом: запуск без исключений, меню правой кнопки, переименование проекта.
+  ui-smoke:
+    if: github.ref_type != 'tag'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm i --no-save playwright@1.49.1
+      - run: npx playwright install --with-deps chromium
+      - run: node test-ui/ui-smoke.js
+
   # Тесты Rust и компиляция оболочки на всех системах при каждом push и запросе слияния,
   # чтобы поломку под Windows или macOS увидеть сразу, а не при выпуске по метке.
   rust-check:
