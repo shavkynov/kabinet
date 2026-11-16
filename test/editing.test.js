@@ -120,3 +120,14 @@ test('повторы по корню: разные части речи и при
   assert.ok(pairsOf('Говорящий голос звучал, и он начал говорить.').includes('говорящий~говорить'), 'причастие и глагол');
   assert.deepEqual(pairsOf('Голова кружилась, а голос стал тише.'), [], 'голос и голова — разные корни');
 });
+
+test('повторы: «все … все» рядом отмечаются, служебные слова — нет', () => {
+  const m = require('../src/morph');
+  const pairs = (text) => {
+    const w = m.tokenize(text).map((x) => ({ text: x.text, pos: m.classify(m.norm(x.text)), proper: false }));
+    return ed.repeatPairs(w, 25).map(([a, b]) => `${w[a].text.toLowerCase()}~${w[b].text.toLowerCase()}`);
+  };
+  assert.deepEqual(pairs('Вскоре все сядутся в поезд и встречают его. Паркинсон. Все направляются в вагон.'), ['все~все']);
+  assert.deepEqual(pairs('Он сказал, что она знает, что он придёт, и что это так.'), []);
+  assert.deepEqual(pairs('Я пошёл в дом и в лес, а потом в город и на реку.'), []);
+});

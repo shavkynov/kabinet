@@ -234,8 +234,14 @@ function properFlags(text, words, sentences) {
  * Повторы: слова с одной основой ближе друг к другу, чем windowSize слов.
  * seq: все слова подряд [{ text, pos }]. Возвращает Set номеров слов, у которых есть повтор рядом.
  */
+// Служебные слова, которые естественно повторяются рядом: предлоги, союзы, частицы, личные местоимения.
+const SHORT_STOP = new Set(`она оно они мы вы ты этого этому этим этой этом того тому том тем той его для при над под про без или так тут там вот уже ещё еще его неё нее них ними нем нём ему ней ним нас вас нам вам меня тебя мне тебе себя себе мой моя мои моё твой твоя твои наш ваш чем кто где когда если чтобы чтоб как что бы же ли ведь даже только лишь ещё тоже также либо хотя пока будто словно между через после перед около против сквозь вдоль среди кроме ради`.split(/\s+/));
+const CLOSE_WINDOW = 10;
+const CLOSE_OK = new Set(['все', 'всё', 'весь', 'вся']); // в общем списке частых слов, но рядом друг с другом режут глаз
+
 function repeatPairs(seq, windowSize) {
   const last = new Map();
+  const lastShort = new Map();
   const pairs = []; // [индекс предыдущего слова, индекс слова]
   // основы имён собственных (w.proper): пропускаем все формы и все вхождения, в том числе в начале предложения
   const names = new Set();
@@ -247,7 +253,16 @@ function repeatPairs(seq, windowSize) {
   seq.forEach((w, i) => {
     if (w.skip) return; // слово из «Не отмечать здесь»: в сравнении не участвует, но места в ряду занимает
     const keys = repeatKeys(w);
-    if (!keys.length) return;
+    if (!keys.length) {
+      // Короткие и служебные слова («все … все») отмечаются, только если стоят совсем рядом.
+      const t = norm(w.text);
+      if (t.length >= 3 && /^[а-яё-]+$/.test(t) && !w.proper && (!COMMON.has(t) || CLOSE_OK.has(t)) && !SHORT_STOP.has(t)) {
+        const jj = lastShort.get(t);
+        if (jj !== undefined && i - jj <= CLOSE_WINDOW) pairs.push([jj, i]);
+        lastShort.set(t, i);
+      }
+      return;
+    }
     if (names.size && names.has(keys[0].slice(keys[0].indexOf(':') + 1))) return;
     let j;
     for (const k of keys) {
