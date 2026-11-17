@@ -26,6 +26,7 @@ async function loadAnalysis(root, lang = 'ru') {
   write(path.join(dir, 'src', 'package.json'), '{"type":"commonjs"}');
   write(path.join(dir, 'renderer', 'package.json'), '{"type":"module"}');
   fs.copyFileSync(path.join(root, 'renderer', 'analysis.js'), path.join(dir, 'renderer', 'analysis.js'));
+  fs.copyFileSync(path.join(root, 'renderer', 'lazy.js'), path.join(dir, 'renderer', 'lazy.js'));
   write(path.join(dir, 'renderer', 'i18n.js'), `export const LANG = '${lang}';
 export const t = (s, ...a) => s.replace(/\\{(\\d+)\\}/g, (m, i) => (a[i] === undefined ? m : a[i]));`);
   const nm = path.join(dir, 'node_modules', '@tiptap');

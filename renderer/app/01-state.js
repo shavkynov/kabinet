@@ -20,8 +20,16 @@ const MOB = { kbd: false, drawer: null };
 // Окно «Синхронизация…» с сетевой папкой (36-dav.js): session — вход, выполненный в главном процессе; mode — 'link' (связать открытый проект) или 'open' (открыть проект из папки).
 const DAV = { session: null, label: '', mode: 'link', lastError: '' };
 
+// Не системный alert(): он блокирует всю страницу, и в окне Tauri диалог может оказаться незаметным — программа выглядит зависшей.
 function showError(message) {
-  alert(tdom(message));
+  const text = tdom(message);
+  try {
+    const dlg = document.getElementById('errorDialog');
+    dlg.querySelector('#errorDialogText').textContent = text;
+    if (!dlg.open) dlg.showModal();
+  } catch (e) {
+    console.error(text);
+  }
 }
 
 // ---------- комментарии к фрагментам (логика в 34-comments.js) ----------

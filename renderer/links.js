@@ -9,6 +9,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { t } from './i18n.js';
+import { isBig, lazyView } from './lazy.js';
 import { nameRegex, isCapital } from '../src/namematch.js';
 
 const linkKey = new PluginKey('nameLinks');
@@ -70,10 +71,16 @@ export const NameLinks = Extension.create({
       new Plugin({
         key: linkKey,
         state: {
-          init: (_, { doc }) => decorate(doc),
-          apply: (tr, old) => (tr.docChanged || tr.getMeta(linkKey) ? decorate(tr.doc) : old),
+          init: (_, { doc }) => ({ set: decorate(doc), stale: false }),
+          apply: (tr, old) => {
+            if (tr.getMeta(linkKey)) return { set: decorate(tr.doc), stale: false };
+            if (!tr.docChanged) return old;
+            if (isBig(tr.doc)) return { set: old.set.map(tr.mapping, tr.doc), stale: true }; // см. lazy.js
+            return { set: decorate(tr.doc), stale: false };
+          },
         },
-        props: { decorations: (state) => linkKey.getState(state) },
+        props: { decorations: (state) => linkKey.getState(state).set },
+        view: lazyView(linkKey, (st) => linkKey.getState(st).stale),
       }),
     ];
   },

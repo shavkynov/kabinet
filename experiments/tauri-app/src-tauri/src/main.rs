@@ -903,7 +903,7 @@ fn main() {
             };
             if let Ok(Some(start)) = app.deep_link().get_current() { take(start.iter().map(|u| u.to_string()).collect()); }
             app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
-            app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(45)) as Box<dyn Http>))));
+            app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))));
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.
             let h = app.handle().clone();

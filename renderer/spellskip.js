@@ -5,6 +5,7 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { isBig, lazyView } from './lazy.js';
 
 const skipKey = new PluginKey('spellSkip');
 const WORD = /[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu;
@@ -39,10 +40,16 @@ export const SpellSkip = Extension.create({
     return [new Plugin({
       key: skipKey,
       state: {
-        init: (_, { doc }) => decorate(doc),
-        apply: (tr, old) => (tr.docChanged || tr.getMeta(skipKey) ? decorate(tr.doc) : old),
+        init: (_, { doc }) => ({ set: decorate(doc), stale: false }),
+        apply: (tr, old) => {
+          if (tr.getMeta(skipKey)) return { set: decorate(tr.doc), stale: false };
+          if (!tr.docChanged) return old;
+          if (isBig(tr.doc)) return { set: old.set.map(tr.mapping, tr.doc), stale: true };
+          return { set: decorate(tr.doc), stale: false };
+        },
       },
-      props: { decorations: (state) => skipKey.getState(state) },
+      props: { decorations: (state) => skipKey.getState(state).set },
+      view: lazyView(skipKey, (st) => skipKey.getState(st).stale),
     })];
   },
 });

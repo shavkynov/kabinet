@@ -9,6 +9,7 @@ import * as EN from '../src/en.js';
 import { analyzeTenseBlock as analyzeTenseBlockRu, detectBase } from '../src/tense.js';
 import { compileFillers, findFillers, repeatPairs, properFlags, skipKey } from '../src/editing.js';
 import { t, LANG } from './i18n.js';
+import { isBig, lazyView } from './lazy.js';
 
 // Язык текста = язык интерфейса: для английского свои части речи, пассив, времена, основы слов и анафора.
 const analyzeBlock = LANG === 'en' ? EN.analyzeBlock : analyzeBlockRu;
@@ -271,15 +272,26 @@ export const TextAnalysis = Extension.create({
       key: analysisKey,
       state: {
         init: (_, state) => build(state.doc, opts.getConfig()),
-        apply: (tr, old, _o, state) => (tr.docChanged || tr.getMeta(analysisKey) ? build(state.doc, opts.getConfig()) : old),
+        apply: (tr, old, _o, state) => {
+          if (tr.getMeta(analysisKey)) return build(state.doc, opts.getConfig());
+          if (!tr.docChanged) return old;
+          // большая глава: пока идёт ввод, разметка только сдвигается, полный пересчёт — когда ввод затих (lazy.js)
+          if (old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), stale: true };
+          return build(state.doc, opts.getConfig());
+        },
       },
       props: { decorations(state) { return analysisKey.getState(state).set; } },
-      view: () => ({
-        update(view, prev) {
-          const now = analysisKey.getState(view.state);
-          if (now !== analysisKey.getState(prev)) opts.onStats(now.stats, now.active);
-        },
-      }),
+      view: (editorView) => {
+        const lazy = lazyView(analysisKey, (st) => !!analysisKey.getState(st).stale)(editorView);
+        return {
+          update(view, prev) {
+            const now = analysisKey.getState(view.state);
+            if (now !== analysisKey.getState(prev) && !now.stale) opts.onStats(now.stats, now.active);
+            lazy.update(view);
+          },
+          destroy() { lazy.destroy(); },
+        };
+      },
     })];
   },
 });
