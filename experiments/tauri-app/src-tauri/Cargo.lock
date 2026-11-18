@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "kabinet-tauri"
-version = "0.40.4"
+version = "0.40.5"
 dependencies = [
  "kabinet-core",
  "keyring",

@@ -121,9 +121,9 @@
 
 **Требование.** Установщики Windows и macOS, версионированные Releases, артефакты/логи, полный JS/Rust CI, корректные permissions; проверять прогоны workflow, а не только YAML; чистая установка на Windows/macOS без dev tools: установка, первый запуск, OAuth/deep-link, старый проект, понятные предупреждения.
 
-**Сделано.** `bundle.active=true`, NSIS x64 и dmg aarch64 собираются в GitHub Actions; артефакты загружаются; установщики ad-hoc/без подписи; релизы 0.39.0–0.40.4 выпущены; CI проверяет Rust на Linux/Windows/macOS, JS, `ui-smoke`; релизный workflow по тегу.
+**Сделано.** `bundle.active=true`, NSIS x64 и dmg aarch64 собираются в GitHub Actions; артефакты загружаются; установщики ad-hoc/без подписи; релизы 0.39.0–0.40.4 выпущены; CI проверяет Rust на Linux/Windows/macOS, JS, `ui-smoke`; релизный workflow по тегу. 0.40.5 подготовлена: версии `package.json`/`tauri.conf.json`/`Cargo.toml` совпадают, раздел в `CHANGELOG.txt` есть; тег ставит автор.
 
-**Осталось.** Чистая установка и первый запуск на Windows/macOS; инструкция для SmartScreen/Gatekeeper; проверка deep-link/OAuth из установленного приложения; Intel-сборка macOS; теги ставит автор.
+**Осталось.** Поставить тег `0.40.5` (сборка и Release пойдут сами); чистая установка и первый запуск на Windows/macOS; инструкция для SmartScreen/Gatekeeper; проверка deep-link/OAuth из установленного приложения; Intel-сборка macOS.
 
 **Не делать.** Платные сертификаты, нотаризацию, автообновление; локальную сборку установщиков (только GitHub Actions).
 
