@@ -283,7 +283,7 @@ function findRepeats(seq, windowSize) {
 }
 
 // ---------- исключения подсветки «Не отмечать здесь» (хранятся в настройках проекта) ----------
-const SKIP_CATS = ['adv', 'passive', 'long', 'repeat', 'filler'];
+const SKIP_CATS = ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark'];
 const SKIP_MAX = 300; // записей на категорию
 const SKIP_LEN = 160;
 

@@ -55,7 +55,7 @@ test('переход «‹ ›»: места по категориям в пор
   const paras = ['Он вдруг просто ушёл. Дверь скрипнула медленно.', 'Дверь была закрыта рабочими, и он медленно вернулся вдруг просто так.'];
   const { result, state } = runBuild(mod, paras, cfg({ longMin: 6 }));
   const r = mod.analysisRanges(state);
-  for (const cat of mod.AN_NAV_CATS) {
+  for (const cat of ['adv', 'passive', 'long', 'repeat', 'filler']) {
     const list = r[cat];
     assert.ok(list.length > 0, `в категории ${cat} есть места`);
     assert.deepEqual(list, [...list].sort((a, b) => a.from - b.from), `${cat}: по порядку`);
@@ -151,4 +151,19 @@ test('слова-паразиты: «слово*» и «слово~» работ
   assert.equal(count(), 3);
   cfgNow = { ...only, fillers: ['почувствовал'] };
   assert.equal(count(), 1);
+});
+
+test('стиль текста: подсветка с подсказкой, счётчик и места для «‹ ›»; реплики героев не проверяются', () => {
+  const paras = ['Отряд осуществлял разведку и начал идти. Он был зол.', '— Это является данностью, — прошипел он, скалясь.'];
+  const { result, state } = runBuild(mod, paras, { cats: { chancery: true, weak: true, tell: true, chain: true, remark: true }, longMin: 30, fillers: [], repeatWin: 25 });
+  const cls = (c) => byClass(result.set, c);
+  assert.equal(cls('an-chancery').length, 1);
+  assert.match(cls('an-chancery')[0].attrs.title, /осуществлять/);
+  assert.equal(cls('an-weak').length, 1);
+  assert.equal(cls('an-tell').length, 1);
+  assert.equal(cls('an-remark').length, 1);
+  assert.equal(result.stats.chancery, 1); // «является» внутри реплики не считается
+  const r = mod.analysisRanges(state);
+  assert.equal(r.chancery.length, 1);
+  assert.equal(r.remark.length, 1);
 });

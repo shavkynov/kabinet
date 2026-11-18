@@ -10,6 +10,7 @@ function applyAnalysisSettings() {
   const win = $('#anRepeatWin');
   if (document.activeElement !== win) win.value = String(settings.anRepeatWin);
   renderFillers();
+  $('#styleBox').hidden = LANG !== 'ru'; // правила стиля написаны для русского текста
   $('#tenseMode').value = settings.tenseMode;
   document.querySelectorAll('#viewAnalysis [data-extra]').forEach((row) => { row.hidden = !settings.anShow[row.dataset.extra] && !settings.an[row.dataset.extra]; });
   document.querySelectorAll('#viewAnalysis input[data-anshow]').forEach((box) => { box.checked = !!settings.anShow[box.dataset.anshow]; });
@@ -79,7 +80,7 @@ function showAnalysisStats(st, active) {
 }
 
 // ---------- переход к предыдущему и следующему месту в «Подсветке» ----------
-const NAV_NAMES = { adv: 'Наречия', passive: 'Страдательный залог', long: 'Длинные предложения', repeat: 'Повторы слов', filler: 'Слова-паразиты' };
+const NAV_NAMES = { adv: 'Наречия', passive: 'Страдательный залог', long: 'Длинные предложения', repeat: 'Повторы слов', filler: 'Слова-паразиты', chancery: 'Канцелярит и штампы', weak: 'Слабые глаголы', tell: 'Назвал, а не показал', chain: 'Цепочки существительных', remark: 'Ремарки при репликах' };
 
 function stepAnalysis(cat, dir) {
   if (!editor) return;

@@ -627,6 +627,45 @@
         </label>
         </div>
         <p id="anTotal" class="an-total"></p>
+        <details id="styleBox" class="more">
+          <summary><span>Стиль текста</span></summary>
+          <p class="hint">Советы Норы Галь, Хемингуэя и Никитина. Это подсказки, а не ошибки: у каждого приёма бывает законное место. Речь героев не проверяется. Наведите курсор на отмеченное место, чтобы увидеть совет.</p>
+          <label class="an-row">
+            <input id="an_chancery" type="checkbox" data-an="chancery">
+            <span class="an-sw an-sw-chancery"></span>
+            <span class="an-name">Канцелярит и штампы</span>
+            <span class="an-nav"><button type="button" data-an-nav="chancery" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chancery" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+            <span id="anCount_chancery" class="an-count"></span>
+          </label>
+          <label class="an-row">
+            <input id="an_weak" type="checkbox" data-an="weak">
+            <span class="an-sw an-sw-weak"></span>
+            <span class="an-name">Слабые глаголы</span>
+            <span class="an-nav"><button type="button" data-an-nav="weak" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="weak" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+            <span id="anCount_weak" class="an-count"></span>
+          </label>
+          <label class="an-row">
+            <input id="an_tell" type="checkbox" data-an="tell">
+            <span class="an-sw an-sw-tell"></span>
+            <span class="an-name">Назвал, а не показал</span>
+            <span class="an-nav"><button type="button" data-an-nav="tell" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="tell" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+            <span id="anCount_tell" class="an-count"></span>
+          </label>
+          <label class="an-row">
+            <input id="an_chain" type="checkbox" data-an="chain">
+            <span class="an-sw an-sw-chain"></span>
+            <span class="an-name">Цепочки существительных</span>
+            <span class="an-nav"><button type="button" data-an-nav="chain" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chain" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+            <span id="anCount_chain" class="an-count"></span>
+          </label>
+          <label class="an-row">
+            <input id="an_remark" type="checkbox" data-an="remark">
+            <span class="an-sw an-sw-remark"></span>
+            <span class="an-name">Ремарки при репликах</span>
+            <span class="an-nav"><button type="button" data-an-nav="remark" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="remark" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+            <span id="anCount_remark" class="an-count"></span>
+          </label>
+        </details>
         <details class="more">
           <summary><span>Список слов-паразитов</span> <span id="fillerCount" translate="no"></span></summary>
           <p class="hint">Слова и фразы, которые подсвечиваются. Уберите лишнее крестиком, добавьте свои. Слово можно добавить и из текста: выделите, правый клик.</p>

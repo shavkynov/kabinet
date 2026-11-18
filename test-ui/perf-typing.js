@@ -62,7 +62,7 @@ function fakeTauri() {
     window.__perf = { long: [] };
     new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__perf.long.push(Math.round(e.duration)); }).observe({ entryTypes: ['longtask'] });
   });
-  if (process.env.FEATURES) await page.addInitScript(() => { localStorage.setItem('kabinet.settings', JSON.stringify({ an: { repeat: true, filler: true, long: true, verb: true, adj: true, adv: true, part: true, pron: true, passive: true, tense: true }, marks: true, links: true, spellOn: true })); });
+  if (process.env.FEATURES) await page.addInitScript(() => { localStorage.setItem('kabinet.settings', JSON.stringify({ an: { repeat: true, filler: true, long: true, verb: true, adj: true, adv: true, part: true, pron: true, passive: true, tense: true, chancery: true, weak: true, tell: true, chain: true, remark: true }, marks: true, links: true, spellOn: true })); });
   await page.goto(base);
   await page.evaluate(() => { document.documentElement.setAttribute('spellcheck', 'true'); });
   await page.waitForSelector('#btnOpen', { state: 'visible', timeout: 20000 });

@@ -946,4 +946,11 @@ module.exports = {
   "Тип: {0}\nВерсия: {1}\nСистема: {2} {3}\n\nСообщение:\n{4}": "Type: {0}\nVersion: {1}\nSystem: {2} {3}\n\nMessage:\n{4}",
   "{0}\n\nВерсия: {1} ({2} {3})": "{0}\n\nVersion: {1} ({2} {3})",
   "Сообщить об ошибке или идее…": "Report a bug or suggest an idea…",
+  "Канцелярит и штампы": "Bureaucratese and clichés",
+  "Слабые глаголы": "Weak verbs",
+  "Назвал, а не показал": "Told, not shown",
+  "Цепочки существительных": "Noun chains",
+  "Ремарки при репликах": "Dialogue tags",
+  "Стиль текста": "Text style",
+  "Советы Норы Галь, Хемингуэя и Никитина. Это подсказки, а не ошибки: у каждого приёма бывает законное место. Речь героев не проверяется. Наведите курсор на отмеченное место, чтобы увидеть совет.": "Advice from Nora Gal, Hemingway and Nikitin. These are hints, not errors: every device has its place. Characters' speech is not checked. Hover a marked spot to see the advice. (Russian text only.)",
 };

@@ -986,6 +986,7 @@ body.focus-mode #status { bottom: 12px; }
 :root {
   --an-verb: #2fb344; --an-noun: #3b82c4; --an-adj: #f59f00; --an-adv: #e6c200;
   --an-part: #8e5cc2; --an-pron: #14b8a6; --an-passive: #e5484d; --an-long: #e5484d; --an-filler: #d6409f; --an-repeat: #e5873a; --an-tense: #3b82f6; --an-rhythm: #0d9488;
+  --an-chancery: #7c5cff; --an-weak: #c2410c; --an-tell: #0891b2; --an-chain: #a16207; --an-remark: #be185d;
 }
 .ProseMirror .an-verb { background: color-mix(in srgb, var(--an-verb) 34%, transparent); }
 .ProseMirror .an-noun { background: color-mix(in srgb, var(--an-noun) 30%, transparent); }
@@ -1004,6 +1005,11 @@ body.focus-mode #status { bottom: 12px; }
 .ProseMirror .an-repeat { box-shadow: inset 0 -2px 0 var(--an-repeat); background: color-mix(in srgb, var(--an-repeat) 14%, transparent); }
 .ProseMirror .an-rhythm { background: color-mix(in srgb, var(--an-rhythm) 16%, transparent); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--an-rhythm) 55%, transparent); }
 .ProseMirror .an-rhythm-start { box-shadow: inset 0 -2px 0 var(--an-rhythm); background: color-mix(in srgb, var(--an-rhythm) 28%, transparent); }
+.ProseMirror .an-chancery { background: color-mix(in srgb, var(--an-chancery) 22%, transparent); box-shadow: inset 0 -2px 0 var(--an-chancery); }
+.ProseMirror .an-weak { box-shadow: inset 0 -2px 0 var(--an-weak); background: color-mix(in srgb, var(--an-weak) 14%, transparent); }
+.ProseMirror .an-tell { box-shadow: inset 0 -2px 0 var(--an-tell); background: color-mix(in srgb, var(--an-tell) 16%, transparent); }
+.ProseMirror .an-chain { background: color-mix(in srgb, var(--an-chain) 22%, transparent); }
+.ProseMirror .an-remark { box-shadow: inset 0 -2px 0 var(--an-remark); background: color-mix(in srgb, var(--an-remark) 14%, transparent); }
 .ProseMirror .an-long { background: color-mix(in srgb, var(--an-long) 10%, transparent); }
 
 .seg { display: flex; gap: 2px; padding: 2px; background: var(--sel); border-radius: 8px; margin: 2px 0 8px; }
@@ -1019,6 +1025,11 @@ body.focus-mode #status { bottom: 12px; }
 .an-sw-repeat { background: color-mix(in srgb, var(--an-repeat) 22%, transparent); border-bottom: 3px solid var(--an-repeat); border-radius: 0; height: 11px; }
 .an-sw-tense { background: color-mix(in srgb, var(--an-tense) 22%, transparent); border-bottom: 3px solid var(--an-tense); border-radius: 0; height: 11px; }
 .an-sw-rhythm { background: color-mix(in srgb, var(--an-rhythm) 22%, transparent); border-bottom: 3px solid var(--an-rhythm); border-radius: 0; height: 11px; }
+.an-sw-chancery { background: color-mix(in srgb, var(--an-chancery) 30%, transparent); border-bottom: 3px solid var(--an-chancery); border-radius: 0; height: 11px; }
+.an-sw-weak { background: color-mix(in srgb, var(--an-weak) 22%, transparent); border-bottom: 3px solid var(--an-weak); border-radius: 0; height: 11px; }
+.an-sw-tell { background: color-mix(in srgb, var(--an-tell) 22%, transparent); border-bottom: 3px solid var(--an-tell); border-radius: 0; height: 11px; }
+.an-sw-chain { background: color-mix(in srgb, var(--an-chain) 35%, transparent); }
+.an-sw-remark { background: color-mix(in srgb, var(--an-remark) 22%, transparent); border-bottom: 3px solid var(--an-remark); border-radius: 0; height: 11px; }
 .an-sw-long { background: color-mix(in srgb, var(--an-long) 25%, transparent); }
 .an-name { flex: 1; }
 .an-nav { display: inline-flex; gap: 1px; flex: none; }

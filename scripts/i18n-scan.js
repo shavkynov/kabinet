@@ -121,7 +121,7 @@ function collect() {
     for (const f of fs.readdirSync(full)) {
       const p = path.join(full, f);
       if (!fs.statSync(p).isFile()) continue;
-      if (dir === 'src' && (f === 'i18n-en.js' || f === 'typo.js' || f === 'morph.js' || f === 'rhythm.js' || f === 'adverbs-ru.js' || f === 'editing.js' || f === 'tense.js' || f === 'import.js' || f === 'terms.js' || f === 'stem.js' || f === 'declension.js')) continue; // словарь и список коротких слов
+      if (dir === 'src' && (f === 'i18n-en.js' || f === 'typo.js' || f === 'morph.js' || f === 'rhythm.js' || f === 'adverbs-ru.js' || f === 'editing.js' || f === 'tense.js' || f === 'import.js' || f === 'terms.js' || f === 'stem.js' || f === 'declension.js' || f === 'style.js')) continue; // словарь и список коротких слов
       if (/\.(js|html)$/.test(f)) files.push(p);
     }
   }
