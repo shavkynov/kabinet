@@ -5,6 +5,7 @@ const PANELS = {
   sound: ['#soundPanel', '#btnSound'],
   check: ['#checkPanel', '#btnCheck'],
   typing: ['#typingPanel', '#btnTyping'],
+  style: ['#stylePanel', '#btnStyle'],
 };
 
 function anyPanelOpen() {
@@ -31,6 +32,17 @@ function togglePanel(name) {
   if ($(PANELS[name][0]).hidden) openPanel(name);
   else closePanels();
 }
+
+// Кнопки «Панель глав» и «Панель справа» ездят вместе с краем своей панели (см. style.css). Правой кнопке нужно знать,
+// сколько места занимают остальные значки справа: меряем их и кладём ширину в --tools-w.
+function wireChromeLayout() {
+  const box = $('#chromeRight');
+  if (!box || typeof ResizeObserver === 'undefined') return;
+  const set = () => document.documentElement.style.setProperty('--tools-w', `${Math.ceil(box.getBoundingClientRect().width)}px`);
+  new ResizeObserver(set).observe(box);
+  set();
+}
+wireChromeLayout();
 
 const openSettings = () => openPanel('text');
 const closeSettings = closePanels;

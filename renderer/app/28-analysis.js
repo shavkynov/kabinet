@@ -3,6 +3,8 @@
 const AN_NAMES = { verb: 'Глаголы', noun: 'Существительные', adj: 'Прилагательные', adv: 'Наречия', part: 'Причастия и деепричастия', pron: 'Местоимения' };
 let lastAn = '';
 
+const STYLE_KEYS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
+
 function applyAnalysisSettings() {
   for (const k of AN_CATS) $(`#an_${k}`).checked = !!settings.an[k];
   const inp = $('#anLongMin');
@@ -10,11 +12,13 @@ function applyAnalysisSettings() {
   const win = $('#anRepeatWin');
   if (document.activeElement !== win) win.value = String(settings.anRepeatWin);
   renderFillers();
-  $('#styleBox').hidden = LANG !== 'ru'; // правила стиля написаны для русского текста
+  $('#btnStyle').hidden = LANG !== 'ru'; // правила стиля написаны для русского текста
+  if (LANG !== 'ru') $('#stylePanel').hidden = true;
   $('#tenseMode').value = settings.tenseMode;
   document.querySelectorAll('#viewAnalysis [data-extra]').forEach((row) => { row.hidden = !settings.anShow[row.dataset.extra] && !settings.an[row.dataset.extra]; });
   document.querySelectorAll('#viewAnalysis input[data-anshow]').forEach((box) => { box.checked = !!settings.anShow[box.dataset.anshow]; });
-  $('#btnCheck').classList.toggle('lit', AN_CATS.some((k) => settings.an[k]));
+  $('#btnCheck').classList.toggle('lit', AN_CATS.some((k) => !STYLE_KEYS.includes(k) && settings.an[k]));
+  $('#btnStyle').classList.toggle('lit', STYLE_KEYS.some((k) => settings.an[k]));
   $('#anFillerSpeech').checked = settings.fillerSkipSpeech;
   const sig = JSON.stringify([settings.an, settings.tenseMode, settings.anLongMin, settings.anRepeatWin, settings.fillers, settings.fillerSkipSpeech]);
   if (sig !== lastAn) {

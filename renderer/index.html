@@ -290,6 +290,11 @@
           <path d="M2 7.5l3.2 3.2L11 3.5"/><path d="M12.5 11.5h4"/>
         </svg>
       </button>
+      <button id="btnStyle" class="chrome-btn" type="button" title="Стиль текста: канцелярит, слабые глаголы, лишние слова и другое" aria-label="Стиль текста">
+        <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 2.5h14M2 6h9"/><path d="M2 11c1.2-1.5 2.2-1.5 3.4 0s2.2 1.5 3.4 0 2.2-1.5 3.4 0 2.2 1.5 3.4 0"/>
+        </svg>
+      </button>
       <button id="btnSound" class="chrome-btn" type="button" title="Звук клавиш и фоновый эмбиент" aria-label="Звук">
         <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M2 5h2.5L8 2v10L4.5 9H2z"/><path d="M11 4.6c1 .8 1 3.8 0 4.8M13.4 2.8c2 1.9 2 6.5 0 8.4"/>
@@ -319,18 +324,10 @@
         <button type="button" data-cmd="rule" title="Разделитель">—</button>
       </div>
 
-      <h3>Шрифт</h3>
+      <h3>Шрифт и лист</h3>
       <div class="row">
         <label for="setFont">Гарнитура</label>
         <select id="setFont"></select>
-      </div>
-      <div class="row">
-        <button id="btnAddFont" type="button" class="secondary small">Добавить шрифт из файла…</button>
-        <button id="btnRemoveFont" type="button" class="secondary small" hidden>Убрать этот</button>
-      </div>
-      <div class="row">
-        <label for="setFontName">Имя шрифта из системы</label>
-        <input id="setFontName" class="text" type="text" placeholder="например, Baskerville" autocomplete="off" spellcheck="false">
       </div>
       <div class="row">
         <label for="setSize">Размер</label>
@@ -355,12 +352,22 @@
       </div>
       <div class="row">
         <label for="setPara">Абзацы</label>
-        <select id="setPara">
+        <select id="setPara" title="Красная строка попадает и в скопированный текст, и в экспорт (текст, HTML, PDF); в самой главе знаков отступа нет.">
           <option value="space">Отступ между абзацами</option>
           <option value="indent">Красная строка</option>
         </select>
       </div>
-      <p class="hint">В режиме «Красная строка» отступ попадает и в скопированный текст, и в экспорт (текст, HTML, PDF). В самой главе знаков отступа нет.</p>
+      <details class="more">
+        <summary><span>Свой шрифт</span></summary>
+        <div class="row">
+          <button id="btnAddFont" type="button" class="secondary small">Добавить из файла…</button>
+          <button id="btnRemoveFont" type="button" class="secondary small" hidden>Убрать этот</button>
+        </div>
+        <div class="row">
+          <label for="setFontName">Имя из системы</label>
+          <input id="setFontName" class="text" type="text" placeholder="например, Baskerville" autocomplete="off" spellcheck="false">
+        </div>
+      </details>
 
       <h3>Оформление</h3>
       <div class="row">
@@ -384,16 +391,6 @@
         </select>
       </div>
       <div class="row">
-        <label for="setSearchEngine">Поиск слова в интернете</label>
-        <select id="setSearchEngine">
-          <option value="yandex">Яндекс</option>
-          <option value="google">Google</option>
-          <option value="duckduckgo">DuckDuckGo</option>
-          <option value="bing">Bing</option>
-          <option value="wikipedia">Википедия</option>
-        </select>
-      </div>
-      <div class="row">
         <label for="setPaper">Бумага</label>
         <select id="setPaper">
           <option value="none">Гладкая</option>
@@ -408,32 +405,46 @@
           <input id="numGrain" class="num" type="text" inputmode="decimal" autocomplete="off" aria-label="Зернистость, число">
         </div>
       </div>
-      <h3>Дополнительно</h3>
-      <div class="row">
-        <label for="setExportNumbers">Нумеровать главы при экспорте</label>
-        <input id="setExportNumbers" type="checkbox">
-      </div>
-      <div class="row">
-        <label for="setLinks">Подсвечивать имена из карточек</label>
-        <input id="setLinks" type="checkbox">
-      </div>
-      <div class="row">
-        <label for="setProjectGoalOn">Счётчик цели проекта внизу</label>
-        <input id="setProjectGoalOn" type="checkbox">
-      </div>
-      <div class="row stories-only">
-        <label for="setStoryCharacters">Показывать персонажей</label>
-        <input id="setStoryCharacters" type="checkbox">
-      </div>
-      <div class="row stories-only">
-        <label for="setStoryPlaces">Показывать места</label>
-        <input id="setStoryPlaces" type="checkbox">
-      </div>
-      <div class="row stories-only">
-        <label for="setStoryItems">Показывать предметы</label>
-        <input id="setStoryItems" type="checkbox">
-      </div>
-      <p class="hint">Числа можно вписать вручную, стрелки вверх и вниз меняют их на шаг. Горячие клавиши: ⌘B, ⌘I, заголовки ⌘⌥1 и ⌘⌥2.</p>
+
+
+      <details class="more">
+        <summary><span>Проект и поиск</span></summary>
+        <div class="row">
+          <label for="setSearchEngine">Поиск слова в интернете</label>
+          <select id="setSearchEngine">
+            <option value="yandex">Яндекс</option>
+            <option value="google">Google</option>
+            <option value="duckduckgo">DuckDuckGo</option>
+            <option value="bing">Bing</option>
+            <option value="wikipedia">Википедия</option>
+          </select>
+        </div>
+        <div class="row">
+          <label for="setLinks">Подсвечивать имена из карточек</label>
+          <input id="setLinks" type="checkbox">
+        </div>
+        <div class="row">
+          <label for="setProjectGoalOn">Счётчик цели проекта внизу</label>
+          <input id="setProjectGoalOn" type="checkbox">
+        </div>
+        <div class="row">
+          <label for="setExportNumbers">Нумеровать главы при экспорте</label>
+          <input id="setExportNumbers" type="checkbox">
+        </div>
+        <div class="row stories-only">
+          <label for="setStoryCharacters">Показывать персонажей</label>
+          <input id="setStoryCharacters" type="checkbox">
+        </div>
+        <div class="row stories-only">
+          <label for="setStoryPlaces">Показывать места</label>
+          <input id="setStoryPlaces" type="checkbox">
+        </div>
+        <div class="row stories-only">
+          <label for="setStoryItems">Показывать предметы</label>
+          <input id="setStoryItems" type="checkbox">
+        </div>
+      </details>
+      <p class="hint">Числа можно вписать вручную; стрелки вверх и вниз меняют их на шаг.</p>
     </div>
 
     <!-- звук клавиш и эмбиент -->
@@ -500,39 +511,31 @@
 
     <!-- проверки при наборе: своё окно у кнопки на верхней панели -->
     <div id="typingPanel" class="panel" hidden>
-      <h3>При наборе</h3>
+      <h3>Набор</h3>
       <div class="row">
-        <label class="wrap" for="setSpell">Подчёркивать ошибки при наборе</label>
+        <label class="wrap" for="setSpell" title="Орфографию подчёркивает сама система, без интернета.">Подчёркивать ошибки</label>
         <input id="setSpell" type="checkbox">
       </div>
-      <p class="hint">Орфографию подчёркивает сама система, без интернета.</p>
       <div class="row">
-        <label class="wrap" for="setTypeAnim">Плавное появление набираемых букв</label>
+        <label class="wrap" for="setTypeAnim">Плавное появление букв</label>
         <input id="setTypeAnim" type="checkbox">
       </div>
+
+      <h3>Автозамена при наборе</h3>
       <div class="row">
-        <label class="wrap" for="setMarks">Показывать скрытые символы (⌘⇧8)</label>
-        <input id="setMarks" type="checkbox">
-      </div>
-      <div class="row">
-        <label class="wrap" for="setMarksSpaces">…и обычные пробелы точками</label>
-        <input id="setMarksSpaces" type="checkbox">
-      </div>
-      <p class="hint">¶ — конец абзаца, ° — неразрывный пробел, → — табуляция и красная строка, ↵ — мягкий перенос. Метки видны только на экране: в текст, копирование и экспорт они не попадают.</p>
-      <div class="row">
-        <label class="wrap" for="setTypo">Типографика: «ёлочки», тире, многоточие</label>
+        <label class="wrap" for="setTypo">«Ёлочки», тире, многоточие</label>
         <input id="setTypo" type="checkbox">
       </div>
       <div class="row">
-        <label class="wrap" for="setTypoNbsp">Неразрывные пробелы после коротких слов</label>
+        <label class="wrap" for="setTypoNbsp">Неразрывный пробел после коротких слов</label>
         <input id="setTypoNbsp" type="checkbox">
       </div>
       <div class="row">
         <label class="wrap" for="setTypoLayout">Убирать пустые строки между абзацами</label>
         <input id="setTypoLayout" type="checkbox">
       </div>
-      <div class="row">
-        <label class="wrap" for="setTypoKeep">Оставлять пустых строк подряд, не более</label>
+      <div class="row typo-sub">
+        <label class="wrap" for="setTypoKeep">…но оставлять подряд не более</label>
         <select id="setTypoKeep">
           <option value="0">0 (убрать все)</option>
           <option value="1">1</option>
@@ -540,10 +543,94 @@
           <option value="3">3</option>
         </select>
       </div>
+
+      <h3>Вся глава сразу</h3>
       <div class="row">
         <button id="btnFixTypo" type="button" class="secondary wide-btn">Привести типографику главы в порядок</button>
       </div>
-      <p class="hint">Исправит кавычки, тире и многоточие во всей главе, уберёт двойные и лишние пробелы, мягкие переносы и невидимые знаки, пробелы перед запятой и точкой, оформит реплики длинным тире. Если неразрывные пробелы выключены, заменит обычными и те, что уже есть в тексте. С галочкой «Убирать пустые строки между абзацами» удалит и пустые абзацы; расстояние между абзацами тогда задаёт режим «Абзацы» (отступ или красная строка). Всё действует одной правкой, её можно отменить (⌘Z).</p>
+      <p class="hint">Применяет те же правила ко всей главе одной правкой; ⌘Z отменяет.</p>
+      <details class="more">
+        <summary><span>Что именно исправится</span></summary>
+        <p class="hint">Кавычки, тире и многоточие; двойные и лишние пробелы; пробелы перед запятой и точкой; мягкие переносы и невидимые знаки; реплики оформляются длинным тире. Если неразрывные пробелы выключены, заменит обычными и те, что уже есть в тексте. С галочкой «Убирать пустые строки между абзацами» удалит и пустые абзацы: расстояние между абзацами тогда задаёт режим «Абзацы» (отступ или красная строка).</p>
+      </details>
+
+      <details class="more">
+        <summary><span>Скрытые символы (⌘⇧8)</span></summary>
+        <div class="row">
+          <label class="wrap" for="setMarks">Показывать скрытые символы</label>
+          <input id="setMarks" type="checkbox">
+        </div>
+        <div class="row">
+          <label class="wrap" for="setMarksSpaces">…и обычные пробелы точками</label>
+          <input id="setMarksSpaces" type="checkbox">
+        </div>
+        <p class="hint">¶ конец абзаца, ° неразрывный пробел, → табуляция и красная строка, ↵ мягкий перенос. Метки видны только на экране: в текст, копирование и экспорт они не попадают.</p>
+      </details>
+    </div>
+
+    <!-- стиль текста -->
+    <div id="stylePanel" class="panel" hidden>
+      <h3>Стиль текста</h3>
+      <p class="hint">Места, где слог можно упростить или оживить. Это не ошибки: у каждого приёма бывает законное место. Реплики героев не проверяются. Курсор на отмеченном показывает совет, стрелки ‹ › листают места.</p>
+      <div id="styleBox">
+        <label class="an-row an-row2">
+          <input id="an_chancery" type="checkbox" data-an="chancery">
+          <span class="an-sw an-sw-chancery"></span>
+          <span class="an-txt"><span class="an-name">Канцелярит и штампы</span><span class="an-eg">«является», «осуществлять», «в целях»; штампы — когда их несколько рядом</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="chancery" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chancery" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_chancery" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_weak" type="checkbox" data-an="weak">
+          <span class="an-sw an-sw-weak"></span>
+          <span class="an-txt"><span class="an-name">Слабые глаголы</span><span class="an-eg">«начал идти», «стал думать», «находился»</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="weak" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="weak" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_weak" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_tell" type="checkbox" data-an="tell">
+          <span class="an-sw an-sw-tell"></span>
+          <span class="an-txt"><span class="an-name">Назвал, а не показал</span><span class="an-eg">«был зол», «со страхом», «увидел, как»</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="tell" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="tell" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_tell" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_chain" type="checkbox" data-an="chain">
+          <span class="an-sw an-sw-chain"></span>
+          <span class="an-txt"><span class="an-name">Цепочки существительных</span><span class="an-eg">«осуществление проверки выполнения требований»</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="chain" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chain" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_chain" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_remark" type="checkbox" data-an="remark">
+          <span class="an-sw an-sw-remark"></span>
+          <span class="an-txt"><span class="an-name">Ремарки при репликах</span><span class="an-eg">«прошипел он, скалясь» — несколько украшений сразу</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="remark" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="remark" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_remark" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_redund" type="checkbox" data-an="redund">
+          <span class="an-sw an-sw-redund"></span>
+          <span class="an-txt"><span class="an-name">Лишние слова и тавтология</span><span class="an-eg">«вернулся обратно», «в феврале месяце», «рассказал рассказ»</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="redund" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="redund" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_redund" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_which" type="checkbox" data-an="which">
+          <span class="an-sw an-sw-which"></span>
+          <span class="an-txt"><span class="an-name">Лавина «который» и «что»</span><span class="an-eg">три придаточных и больше в одном предложении</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="which" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="which" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_which" class="an-count"></span>
+        </label>
+        <label class="an-row an-row2">
+          <input id="an_own" type="checkbox" data-an="own">
+          <span class="an-sw an-sw-own"></span>
+          <span class="an-txt"><span class="an-name">Лишнее «свой» и «его»</span><span class="an-eg">«снял свою шляпу», когда и так ясно, чья шляпа</span></span>
+          <span class="an-nav"><button type="button" data-an-nav="own" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="own" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
+          <span id="anCount_own" class="an-count"></span>
+        </label>
+      </div>
+      <p class="hint">Только для русского текста. Слова-паразиты, повторы, длинные предложения и части речи — в разделе «Проверка».</p>
     </div>
 
     <!-- анализ и проверка текста -->
@@ -627,66 +714,6 @@
         </label>
         </div>
         <p id="anTotal" class="an-total"></p>
-        <details id="styleBox" class="more">
-          <summary><span>Стиль текста</span></summary>
-          <p class="hint">Советы Норы Галь, Хемингуэя и Никитина. Это подсказки, а не ошибки: у каждого приёма бывает законное место. Речь героев не проверяется. Наведите курсор на отмеченное место, чтобы увидеть совет.</p>
-          <label class="an-row">
-            <input id="an_chancery" type="checkbox" data-an="chancery">
-            <span class="an-sw an-sw-chancery"></span>
-            <span class="an-name">Канцелярит и штампы</span>
-            <span class="an-nav"><button type="button" data-an-nav="chancery" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chancery" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_chancery" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_weak" type="checkbox" data-an="weak">
-            <span class="an-sw an-sw-weak"></span>
-            <span class="an-name">Слабые глаголы</span>
-            <span class="an-nav"><button type="button" data-an-nav="weak" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="weak" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_weak" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_tell" type="checkbox" data-an="tell">
-            <span class="an-sw an-sw-tell"></span>
-            <span class="an-name">Назвал, а не показал</span>
-            <span class="an-nav"><button type="button" data-an-nav="tell" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="tell" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_tell" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_chain" type="checkbox" data-an="chain">
-            <span class="an-sw an-sw-chain"></span>
-            <span class="an-name">Цепочки существительных</span>
-            <span class="an-nav"><button type="button" data-an-nav="chain" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="chain" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_chain" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_remark" type="checkbox" data-an="remark">
-            <span class="an-sw an-sw-remark"></span>
-            <span class="an-name">Ремарки при репликах</span>
-            <span class="an-nav"><button type="button" data-an-nav="remark" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="remark" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_remark" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_redund" type="checkbox" data-an="redund">
-            <span class="an-sw an-sw-redund"></span>
-            <span class="an-name">Лишние слова и тавтология</span>
-            <span class="an-nav"><button type="button" data-an-nav="redund" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="redund" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_redund" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_which" type="checkbox" data-an="which">
-            <span class="an-sw an-sw-which"></span>
-            <span class="an-name">Лавина «который» и «что»</span>
-            <span class="an-nav"><button type="button" data-an-nav="which" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="which" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_which" class="an-count"></span>
-          </label>
-          <label class="an-row">
-            <input id="an_own" type="checkbox" data-an="own">
-            <span class="an-sw an-sw-own"></span>
-            <span class="an-name">Лишнее «свой» и «его»</span>
-            <span class="an-nav"><button type="button" data-an-nav="own" data-dir="-1" title="Предыдущее место" aria-label="Предыдущее место">‹</button><button type="button" data-an-nav="own" data-dir="1" title="Следующее место" aria-label="Следующее место">›</button></span>
-            <span id="anCount_own" class="an-count"></span>
-          </label>
-        </details>
         <details class="more">
           <summary><span>Список слов-паразитов</span> <span id="fillerCount" translate="no"></span></summary>
           <p class="hint">Слова и фразы, которые подсвечиваются. Уберите лишнее крестиком, добавьте свои. Слово можно добавить и из текста: выделите, правый клик.</p>

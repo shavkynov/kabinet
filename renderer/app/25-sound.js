@@ -131,6 +131,7 @@ function wireChrome() {
   $('#btnFixTypo').addEventListener('click', fixChapterTypography);
   $('#btnCheck').addEventListener('click', () => togglePanel('check'));
   $('#btnTyping').addEventListener('click', () => togglePanel('typing'));
+  $('#btnStyle').addEventListener('click', () => togglePanel('style'));
   wireSheetClick();
   document.querySelectorAll('.start-lang button').forEach((b) => {
     b.classList.toggle('on', b.dataset.lang === LANG);

@@ -368,6 +368,20 @@ dialog .hint { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
 .chrome-btn:hover { background: var(--sel); color: var(--text); opacity: 1; }
 .chrome-btn.on { background: var(--sel); color: var(--accent); opacity: 1; }
 #btnSidebar { left: 84px; }
+/* Кнопка панели глав сидит у правого края панели, а когда панель скрыта, уезжает к левому краю окна
+   (на macOS правее светофора, на Windows и Linux почти вплотную). */
+body:not(.mob) #btnSidebar {
+  left: max(var(--chrome-left, 84px), calc(min(var(--sidebar-w, 260px), 30vw) - 40px));
+  transition: left .15s ease;
+}
+body:not(.mob).sidebar-hidden #btnSidebar { left: var(--chrome-left, 84px); }
+/* Кнопка панели справа: у левого края правой панели; без панели или в узкой панели встаёт рядом с остальными значками. */
+body:not(.mob) #btnNotes {
+  position: fixed; top: 6px;
+  right: max(calc(var(--tools-w, 190px) + 14px), calc(min(var(--notes-w, 280px), 30vw) - 40px));
+  transition: right .15s ease;
+}
+body:not(.mob).notes-hidden #btnNotes { right: calc(var(--tools-w, 190px) + 14px); }
 #chromeRight {
   position: fixed; top: 6px; right: 12px; z-index: 6;
   display: flex; gap: 2px; -webkit-app-region: no-drag;
@@ -1173,7 +1187,7 @@ body.focus-mode #status { bottom: 12px; }
 
 /* Windows и Linux: обычная рамка окна, места под кнопки macOS не нужно */
 body.plat-win #drag, body.plat-other #drag { display: none; }
-body.plat-win #btnSidebar, body.plat-other #btnSidebar { left: 12px; }
+body.plat-win, body.plat-other { --chrome-left: 12px; }
 
 .row-check { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; }
 .tense-base { margin: 8px 0; }
@@ -1275,3 +1289,13 @@ body.focus-mode #statusDock:not(.has-err), body.mob #statusDock { display: none;
 
 .bar-sep { align-self: center; width: 1px; height: 14px; margin: 0 6px; background: var(--line); flex: none; }
 body.mob .bar-sep { display: none; }
+
+/* ---------- «Стиль текста»: отдельная панель; «При наборе»: подчинённая строка ---------- */
+.an-row2 { align-items: flex-start; padding: 6px 0; }
+.an-row2 .an-sw { margin-top: 3px; }
+.an-txt { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.an-eg { color: var(--muted); font-size: 11.5px; line-height: 1.35; white-space: normal; }
+#stylePanel { width: 380px; }
+.panel .typo-sub { padding-left: 18px; }
+.panel .row:has(#setTypoLayout:not(:checked)) + .typo-sub { opacity: .45; pointer-events: none; }
+.panel #setPara { min-width: 190px; }
