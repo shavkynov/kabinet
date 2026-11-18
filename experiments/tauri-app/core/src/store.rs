@@ -1290,7 +1290,7 @@ pub fn set_analysis_skip(dir: &Path, raw: &Value) -> R<Value> {
     let mut meta = load_meta(dir)?;
     let mut skip = Map::new();
     if let Some(obj) = raw.as_object() {
-        for cat in ["adv", "passive", "long", "repeat", "filler", "chancery", "weak", "tell", "chain", "remark"] {
+        for cat in ["adv", "passive", "long", "repeat", "filler", "chancery", "weak", "tell", "chain", "remark", "redund", "which", "own"] {
             let Some(list) = obj.get(cat).and_then(|v| v.as_array()) else { continue };
             let mut seen = HashSet::new();
             let mut out: Vec<String> = vec![];

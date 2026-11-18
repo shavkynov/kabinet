@@ -20,11 +20,11 @@ const CONJ = LANG === 'en' ? new Set(['and', 'but', 'or']) : undefined;
 
 export const analysisKey = new PluginKey('textAnalysis');
 
-export const AN_CATS = ['verb', 'noun', 'adj', 'adv', 'part', 'pron', 'passive', 'long', 'filler', 'repeat', 'tense', 'rhythm', 'chancery', 'weak', 'tell', 'chain', 'remark'];
+export const AN_CATS = ['verb', 'noun', 'adj', 'adv', 'part', 'pron', 'passive', 'long', 'filler', 'repeat', 'tense', 'rhythm', 'chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 // Категории с подсказкой, переходом «‹ ›» и исключением «Не отмечать здесь».
-export const AN_NAV_CATS = ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark'];
+export const AN_NAV_CATS = ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 // Стиль текста (src/style.js): только для русского текста.
-const STYLE_CATS = ['chancery', 'weak', 'tell', 'chain', 'remark'];
+const STYLE_CATS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 
 // Подсказки к подсвеченным словам (атрибут title; цвет и форма подсветки не меняются). Шаблоны переводятся один раз:
 // подсветка пересчитывается при наборе, а подсказок в тексте тысячи.
@@ -52,14 +52,14 @@ function wordsPhrase(n) {
   return `${n} ${a === 1 && b !== 11 ? 'слово' : a >= 2 && a <= 4 && (b < 12 || b > 14) ? 'слова' : 'слов'}`;
 }
 
-const emptyRanges = () => ({ adv: [], passive: [], long: [], repeat: [], filler: [], chancery: [], weak: [], tell: [], chain: [], remark: [] });
+const emptyRanges = () => ({ adv: [], passive: [], long: [], repeat: [], filler: [], chancery: [], weak: [], tell: [], chain: [], remark: [], redund: [], which: [], own: [] });
 
 const styleCache = new WeakMap();
-function styleOf(node, text, words, cats) {
+function styleOf(node, text, words, cats, sentences) {
   const sig = STYLE_CATS.map((k) => (cats[k] ? 1 : 0)).join('');
   const c = styleCache.get(node);
   if (c && c.sig === sig) return c.res;
-  const res = scanStyle(text, words, cats);
+  const res = scanStyle(text, words, cats, sentences);
   styleCache.set(node, { sig, res });
   return res;
 }
@@ -166,7 +166,7 @@ export function scanRhythm(doc) {
 function build(doc, cfg) {
   const cats = cfg.cats || {};
   const any = AN_CATS.some((k) => cats[k]);
-  const stats = { words: 0, verb: 0, noun: 0, adj: 0, adv: 0, part: 0, pron: 0, passive: 0, long: 0, filler: 0, repeat: 0, tense: 0, rhythm: 0, chancery: 0, weak: 0, tell: 0, chain: 0, remark: 0 };
+  const stats = { words: 0, verb: 0, noun: 0, adj: 0, adv: 0, part: 0, pron: 0, passive: 0, long: 0, filler: 0, repeat: 0, tense: 0, rhythm: 0, chancery: 0, weak: 0, tell: 0, chain: 0, remark: 0, redund: 0, which: 0, own: 0 };
   if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges() };
   const decos = [];
   const T = tpl();
@@ -251,7 +251,7 @@ function build(doc, cfg) {
       }
     }
     if (LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
-      const st = styleOf(node, blockText, r.words, cats);
+      const st = styleOf(node, blockText, r.words, cats, r.sentences);
       for (const cat of STYLE_CATS) {
         if (!cats[cat]) continue;
         for (const h of st[cat]) {

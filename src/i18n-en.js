@@ -953,4 +953,7 @@ module.exports = {
   "Ремарки при репликах": "Dialogue tags",
   "Стиль текста": "Text style",
   "Советы Норы Галь, Хемингуэя и Никитина. Это подсказки, а не ошибки: у каждого приёма бывает законное место. Речь героев не проверяется. Наведите курсор на отмеченное место, чтобы увидеть совет.": "Advice from Nora Gal, Hemingway and Nikitin. These are hints, not errors: every device has its place. Characters' speech is not checked. Hover a marked spot to see the advice. (Russian text only.)",
+  "Лишние слова и тавтология": "Redundant words and tautology",
+  "Лавина «который» и «что»": "Pile of \"which\" and \"that\" clauses",
+  "Лишнее «свой» и «его»": "Needless \"own\" and \"his/her\"",
 };

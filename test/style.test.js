@@ -71,3 +71,32 @@ test('только выбранные виды ищутся', () => {
   assert.equal(r.weak.length, 1);
   assert.deepEqual(r.chancery, []);
 });
+
+const scan2 = (text, kinds) => { const a = analyzeBlock(text); return scanStyle(text, a.words, kinds, a.sentences); };
+const found2 = (text, kind) => scan2(text, { [kind]: true })[kind].map((h) => text.slice(h.start, h.end));
+
+test('плеоназмы и лишние уточнения', () => {
+  assert.deepEqual(found2('В феврале месяце он вернулся обратно и кивнул головой. Она упала вниз.', 'redund'), ['В феврале месяце', 'вернулся обратно', 'кивнул головой', 'упала вниз']);
+  assert.deepEqual(found2('Он вернулся домой и поднял голову. Она упала на пол.', 'redund'), []);
+});
+
+test('тавтология: однокоренные разных частей речи рядом; далеко и в разных предложениях нет', () => {
+  assert.deepEqual(found2('Вспоминаю случай, случившийся со мной.', 'redund'), ['случай, случившийся']);
+  assert.deepEqual(found2('Он рассказал мне рассказ.', 'redund'), ['рассказал мне рассказ']);
+  assert.deepEqual(found2('Он рассказал много. Потом был рассказ.', 'redund'), []);
+  assert.deepEqual(found2('Он сказал слово и открыл словарь.', 'redund'), []);
+});
+
+test('лавина «который» и «что»: три и больше в одном предложении', () => {
+  const heavy = 'Это человек, который знал, что дом, который стоит у реки, продаётся.';
+  assert.equal(found2(heavy, 'which').length, 1);
+  assert.deepEqual(found2('Это человек, который знал, что дом продаётся.', 'which'), []);
+  assert.deepEqual(found2('— Я знаю, что дом, который стоит у реки, что-то значит, — сказал он, что-то.', 'which'), []);
+});
+
+test('«свой» и «его»: лишнее притяжательное при частях тела и одежде', () => {
+  assert.deepEqual(found2('Он снял свою шляпу и вытер свой лоб.', 'own'), ['свою шляпу', 'свой лоб']);
+  assert.deepEqual(found2('Она поправила её волосы.', 'own'), ['её волосы']);
+  assert.deepEqual(found2('Он взял её руку и пошёл к своему дому.', 'own'), []); // чужая рука; дом не часть тела
+  assert.deepEqual(found2('— Я сниму свою шляпу, — сказал он.', 'own'), []); // реплика героя
+});

@@ -52,7 +52,7 @@ test('repeatPairs: те же слова, что у findRepeats, с парой «
 test('исключения подсветки: ключ и очистка данных из файла проекта', () => {
   assert.equal(ed.skipKey('  Ёлка\u00a0  ЕЛКА '), 'елка елка');
   assert.equal(ed.skipKey('x'.repeat(500)).length, 160);
-  assert.deepEqual(ed.SKIP_CATS, ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark']);
+  assert.deepEqual(ed.SKIP_CATS, ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own']);
   const clean = ed.cleanSkip({ adv: ['Вдруг', 'вдруг', '', 5, 'ВДРУГ  '], passive: ['был построен'], bogus: ['x'], filler: 'нет', long: [] });
   assert.deepEqual(clean, { adv: ['вдруг'], passive: ['был построен'] });
   assert.deepEqual(ed.cleanSkip(null), {});

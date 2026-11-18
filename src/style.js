@@ -7,6 +7,9 @@
 //   tell     — «назвал, а не показал»: названо чувство («был зол») или посредник («увидел, как»);
 //   chain    — цепочка отглагольных существительных («осуществление проверки выполнения требований»);
 //   remark   — ремарка при реплике, перегруженная украшениями («прошипел он зло, скалясь»).
+//   redund   — лишние слова: плеоназмы («нелепый абсурд»), лишние уточнения («в феврале месяце») и тавтология («случай, случившийся»);
+//   which    — лавина «который» и «что»: три придаточных и больше в одном предложении;
+//   own      — лишнее «свой»/«его» там, где и так ясно, чья рука или шляпа («снял свою шляпу»).
 // Реплики героев не проверяются (там разговорная и книжная речь уместны), кроме самих ремарок автора.
 // Только русский язык: для английского вернётся пустой результат.
 
@@ -103,6 +106,102 @@ function findChains(text, speech) {
   return out;
 }
 
+
+// ---------- лишние слова: плеоназмы и лишние уточнения ----------
+const MONTHS = 'январ|феврал|март|апрел|ма[еия]|июн|июл|август|сентябр|октябр|ноябр|декабр';
+const REDUND = [
+  rule('(?:нелепый|абсурдный)\\s+абсурд|памятн\\p{L}*\\s+сувенир\\p{L}*|свободн\\p{L}*\\s+вакансии?\\p{L}*|молод\\p{L}*\\s+юнош\\p{L}*|главн\\p{L}*\\s+суть|прейскурант\\s+цен|народн\\p{L}*\\s+фольклор\\p{L}*|внутренн\\p{L}*\\s+интерьер\\p{L}*|перв\\p{L}*\\s+премьер\\p{L}*|ответн\\p{L}*\\s+реакци\\p{L}*|полн\\p{L}*\\s+аншлаг\\p{L}*|взаимн\\p{L}*\\s+сотрудничеств\\p{L}*', 'плеоназм: слово повторяет смысл соседнего, одно лишнее'),
+  rule('(?:вернул|верн\\p{L}*|возвраща\\p{L}*)\\s+обратно', 'плеоназм: «вернуться» уже значит «обратно»'),
+  rule('(?:подня\\p{L}*|поднима\\p{L}*|взлет\\p{L}*|взлетел\\p{L}*|подпрыг\\p{L}*|взбеж\\p{L}*|вскоч\\p{L}*)\\s+вверх', 'плеоназм: «подняться» уже значит «вверх»'),
+  rule('(?:спуст\\p{L}*|спуска\\p{L}*|упа\\p{L}*|пада\\p{L}*|опуст\\p{L}*|опуска\\p{L}*|свалил\\p{L}*)\\s+вниз', 'плеоназм: «спуститься, упасть» уже значит «вниз»'),
+  rule('(?:обернул\\p{L}*|обора\\p{L}*|оглян\\p{L}*|отступ\\p{L}*|отпрян\\p{L}*|отшатн\\p{L}*|попя\\p{L}*|пят\\p{L}*)\\s+назад', 'плеоназм: направление уже в самом глаголе'),
+  rule('повтор\\p{L}*\\s+(?:ещё|еще|снова|опять)\\s+раз|повтор\\p{L}*\\s+(?:снова|опять)', 'плеоназм: «повторить» уже значит «ещё раз»'),
+  rule('(?:закончи\\p{L}*|завершил\\p{L}*|довёл\\p{L}*|довел\\p{L}*)\\s+до\\s+конца', 'плеоназм: «закончить» уже значит «до конца»'),
+  rule('самый\\s+наилучш\\p{L}*|самая\\s+наилучш\\p{L}*|самое\\s+наилучш\\p{L}*|более\\s+(?:лучш\\p{L}*|худш\\p{L}*|оптимальн\\p{L}*)|менее\\s+худш\\p{L}*|(?:очень|совсем)\\s+(?:огромн\\p{L}*|громадн\\p{L}*|гигантск\\p{L}*|крохотн\\p{L}*)', 'избыточная степень: оно уже «самое»'),
+  rule('свой\\s+собственн\\p{L}*|своего\\s+собственн\\p{L}*|своей\\s+собственн\\p{L}*|своим\\s+собственн\\p{L}*|своими\\s+собственн\\p{L}*|своё\\s+собственн\\p{L}*|свою\\s+собственн\\p{L}*|свои\\s+собственн\\p{L}*', '«свой собственный»: одно из слов лишнее (кроме намеренного нажима)'),
+  rule('весь\\s+целиком|вся\\s+целиком|всё\\s+целиком|все\\s+целиком|полностью\\s+весь|полностью\\s+вс[её]|совершенно\\s+полностью|окончательно\\s+завершил\\p{L}*', 'плеоназм: «целиком» и «весь» говорят одно и то же'),
+  rule('кив(?:нул|нула|нули|ает|ают|ать|ал|ала|али)\\s+головой', '«кивнул» уже значит «головой»'),
+  // лишние уточнения: «в феврале месяце»
+  rule(`в\\s+(?:${MONTHS})\\p{L}*\\s+месяц[еа]`, 'лишнее уточнение: «в феврале» и так понятно, что месяц'),
+  rule('в\\s+\\d{4}\\s+году\\s+году', 'лишнее слово'),
+];
+
+// Тавтология: однокоренные слова разных частей речи рядом («случай, случившийся», «рассказал рассказ»).
+// Однокоренные одной части речи (работала, работе) ищут «Повторы слов».
+const TAUT_PREFIXES = ['пере', 'раз', 'рас', 'без', 'бес', 'воз', 'вос', 'пре', 'при', 'про', 'под', 'над', 'пред', 'обо', 'от', 'об', 'по', 'вы', 'за', 'на', 'до', 'со'];
+const TAUT_POS = new Set(['verb', 'noun', 'adj', 'adv', 'part']);
+const TAUT_WINDOW = 4; // слов между первым и вторым словом пары включительно
+const TAUT_MIN_ROOT = 4; // общее начало корня, букв
+function tautRoots(w, pos) {
+  const low = w.toLowerCase().replace(/ё/g, 'е');
+  const out = [low];
+  if (pos !== 'verb' && pos !== 'part') return out; // приставки снимаем только у глаголов: у существительных они чаще часть корня
+  for (const p of TAUT_PREFIXES) if (low.startsWith(p) && low.length - p.length >= 4) { out.push(low.slice(p.length)); break; }
+  return out;
+}
+function commonStart(a, b) {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i += 1;
+  return i;
+}
+function findTautology(text, words, speech) {
+  const out = [];
+  const list = words.filter((w) => TAUT_POS.has(w.pos) && w.text.length >= 5 && !speech.some(([a, b]) => w.start >= a && w.start < b));
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length && j - i <= TAUT_WINDOW; j += 1) {
+      const a = list[i];
+      const b = list[j];
+      if (a.pos === b.pos) continue; // одна часть речи: это «Повторы слов»
+      if (/[.!?…]/.test(text.slice(a.end, b.start))) continue; // разные предложения
+      const rb = tautRoots(b.text, b.pos);
+      if (!tautRoots(a.text, a.pos).some((x) => rb.some((y) => commonStart(x, y) >= TAUT_MIN_ROOT))) continue;
+      out.push({ start: a.start, end: b.end, tip: `тавтология: однокоренные «${a.text.toLowerCase()}» и «${b.text.toLowerCase()}» рядом` });
+      break;
+    }
+  }
+  return out;
+}
+
+// ---------- лавина «который» и «что» ----------
+const WHICH = new RegExp(`${L}(?:котор(?:ый|ая|ое|ые|ого|ой|ому|ым|ых|ыми|ую|ом))${E}|,\\s*что${E}`, 'giu');
+const WHICH_MIN = 3;
+function findWhichAvalanche(text, sentences, speech) {
+  const out = [];
+  const marks = [...text.matchAll(WHICH)].map((m) => m.index).filter((x) => !speech.some(([a, b]) => x >= a && x < b)); // слова героев не считаем
+  if (marks.length < WHICH_MIN) return out;
+  const sents = sentences && sentences.length ? sentences : [...text.matchAll(/[^.!?…]+[.!?…]*/g)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
+  for (const s of sents) {
+    if (speech.some(([a, b]) => s.start >= a && s.start < b)) continue;
+    const n = marks.filter((x) => x >= s.start && x < s.end).length;
+    if (n >= WHICH_MIN) {
+      let st = s.start;
+      while (st < s.end && /\s/.test(text[st])) st += 1;
+      out.push({ start: st, end: s.end, tip: `${n} придаточных на «который» и «что» в одном предложении: разбейте его или уберите лишние` });
+    }
+  }
+  return out;
+}
+
+// ---------- лишнее «свой» и «его» ----------
+const BODY = '(?:рук|ног|голов|глаз|лиц|плеч|спин|губ|палец|пальц|волос|шею|шее|груд|ладон|взгляд|сердц|уш[еи]|нос|рот|лоб|щ[её]к|колен|локт|кулак|шляп|шапк|пальто|куртк|плащ|сумк|очк|пиджак|платк|перчатк|ботинк|сапог|кепк|карман)\\p{L}*';
+const OWN = [
+  { re: new RegExp(`${L}(?:свой|своя|своё|свою|своей|своего|своему|своим|своими|свои|своих|своем)\\s+(?:\\p{L}+\\s+)?${BODY}${E}`, 'giu'), tip: '«свой» часто лишний: и так ясно, чья рука или шляпа («снял шляпу»)' },
+];
+// «Он поднял его руку»: притяжательное при подлежащем того же лица, если владелец не другой человек
+const OWN_SUBJ = new RegExp(`${L}(?:он|она)\\s+(?:не\\s+)?\\p{L}+\\s+(?:(?:на|в|за|к|по)\\s+)?(?:его|её|ее)\\s+(?:\\p{L}+\\s+)?${BODY}${E}`, 'giu');
+function findOwn(text, speech) {
+  const out = scanTable(text, OWN, speech, 'own');
+  for (const m of text.matchAll(OWN_SUBJ)) {
+    const subj = m[0].slice(0, m[0].indexOf(' ')).toLowerCase();
+    const poss = /(?:его)/i.test(m[0]) ? 'его' : 'её';
+    if ((subj === 'он' && poss !== 'его') || (subj === 'она' && poss === 'его')) continue; // «он … её руку»: чужая
+    if (speech.some(([a, b]) => m.index >= a && m.index < b)) continue;
+    const i = m[0].search(/(?:его|её|ее)(?!\p{L})/iu);
+    out.push({ start: m.index + i, end: m.index + m[0].length, tip: 'если рука или шляпа принадлежит самому герою, «его/её» лишнее; если чужая, оставьте' });
+  }
+  return out;
+}
+
 // ---------- ремарки при репликах ----------
 // Ремарка — слова автора рядом с репликой, до 14 слов. Баллы за украшения; перегруз — два балла и больше.
 const SAID_PLAIN = new RegExp(`${L}(?:сказал|сказала|сказали|спросил|спросила|спросили|ответил|ответила|ответили|произнёс|произнесла|произнес|крикнул|крикнула|закричал|закричала|добавил|добавила|продолжил|продолжила)${E}`, 'iu');
@@ -158,7 +257,7 @@ function findRemarks(text, words, speech) {
 }
 
 // ---------- общий разбор абзаца ----------
-const KINDS = ['chancery', 'weak', 'tell', 'chain', 'remark'];
+const KINDS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 
 function scanTable(text, table, speech, kind) {
   const out = [];
@@ -188,8 +287,8 @@ function dedupe(list) {
  * Разбор абзаца. words: слова из morph.analyzeBlock (нужны только для ремарок). kinds: какие виды искать.
  * Возвращает { chancery: [{ start, end, tip }], weak, tell, chain, remark } (позиции внутри text).
  */
-function scanStyle(text, words, kinds) {
-  const res = { chancery: [], weak: [], tell: [], chain: [], remark: [] };
+function scanStyle(text, words, kinds, sentences) {
+  const res = { chancery: [], weak: [], tell: [], chain: [], remark: [], redund: [], which: [], own: [] };
   const want = (k) => !kinds || kinds[k];
   if (!KINDS.some(want)) return res;
   const speech = speechRanges(text);
@@ -198,6 +297,9 @@ function scanStyle(text, words, kinds) {
   if (want('tell')) res.tell = dedupe(scanTable(text, TELL, speech, 'tell'));
   if (want('chain')) res.chain = findChains(text, speech).map((c) => ({ ...c, tip: 'цепочка отглагольных существительных: перестройте фразу глаголом' }));
   if (want('remark')) res.remark = findRemarks(text, words || [], speech).map((r) => ({ start: r.start, end: r.end, tip: `ремарка перегружена: ${r.why.join(', ')}` }));
+  if (want('redund')) res.redund = dedupe([...scanTable(text, REDUND, speech, 'redund'), ...findTautology(text, words || [], speech)]);
+  if (want('which')) res.which = findWhichAvalanche(text, sentences, speech);
+  if (want('own')) res.own = dedupe(findOwn(text, speech));
   return res;
 }
 
