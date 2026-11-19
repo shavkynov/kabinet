@@ -105,15 +105,19 @@ function findNounChains(text, sentence) {
     .sort((a, b) => a.start - b.start || b.end - a.end);
 }
 
-function isSubordinateClauseRoot(token) {
+function isSubordinateClauseRoot(token, children) {
   if (!SUBORDINATE_RELATIONS.has(token.deprel)) return false;
-  return ['VERB', 'AUX', 'ADJ', 'NOUN'].includes(token.upos);
+  if (token.upos === 'VERB' || token.upos === 'AUX') return true;
+  if (token.upos !== 'ADJ' && token.upos !== 'NOUN') return false;
+  const dependents = children.get(token.id) || [];
+  return dependents.some((child) => child.deprel === 'cop' || child.deprel === 'nsubj' || child.deprel === 'nsubj:pass');
 }
 
 function findSubordinateAvalanches(text, sentence) {
   const tokens = sentence.tokens || [];
   const byId = tokenIndex(tokens);
-  const clauseRoots = tokens.filter(isSubordinateClauseRoot);
+  const children = childrenByHead(tokens);
+  const clauseRoots = tokens.filter((token) => isSubordinateClauseRoot(token, children));
 
   const clauseIds = new Set(clauseRoots.map((t) => t.id));
   const depthMemo = new Map();
