@@ -288,3 +288,45 @@ test('redund: повреждённые данные и неполная морф
   ];
   assert.deepEqual(redundHits(text, noCase), []);
 });
+
+test('redund: obj/nsubj для направленного слова не считаются обстоятельством', () => {
+  const objText = 'Он вернулся обратно.';
+  const objRows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['вернулся', 'вернуться', 'VERB', {}, 0, 'root'],
+    ['обратно', 'обратно', 'ADV', {}, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(redundHits(objText, objRows), []);
+  const nsubjText = 'Он поднялся наверх.';
+  const nsubjRows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['поднялся', 'подняться', 'VERB', {}, 0, 'root'],
+    ['наверх', 'наверх', 'NOUN', { Case: 'Nom' }, 2, 'nsubj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(redundHits(nsubjText, nsubjRows), []);
+});
+
+test('redund: все направленные пары с advmod сохраняются', () => {
+  const cases = [
+    ['Он вернулся обратно.', 'вернулся', 'вернуться', 'обратно', 'ADV'],
+    ['Он поднялся наверх.', 'поднялся', 'подняться', 'наверх', 'ADV'],
+    ['Он спустился вниз.', 'спустился', 'спуститься', 'вниз', 'ADV'],
+    ['Он вошёл внутрь.', 'вошёл', 'войти', 'внутрь', 'ADV'],
+    ['Он вышел наружу.', 'вышел', 'выйти', 'наружу', 'ADV'],
+    ['Он упал вниз.', 'упал', 'упасть', 'вниз', 'ADV'],
+  ];
+  for (const [text, verb, lemma, adverb, upos] of cases) {
+    const rows = [
+      ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+      [verb, lemma, 'VERB', {}, 0, 'root'],
+      [adverb, adverb, upos, {}, 2, 'advmod'],
+      ['.', '.', 'PUNCT', {}, 2, 'punct'],
+    ];
+    const found = redundHits(text, rows);
+    assert.equal(found.length, 1, text);
+    assert.equal(found[0].fragment, `${verb} ${adverb}`, text);
+    assert.equal(found[0].fragment, text.slice(found[0].start, found[0].end), text);
+  }
+});

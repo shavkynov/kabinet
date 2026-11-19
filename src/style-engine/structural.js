@@ -595,7 +595,7 @@ function findRedund(text, sentence, speech = speechRanges(text)) {
     // Направленный плеоназм: вернуться обратно, подняться вверх и т.п.
     if (token.upos === 'VERB' && DIRECTIONAL_PLEONASMS.has(lemmaOf(token))) {
       const allowed = DIRECTIONAL_PLEONASMS.get(lemmaOf(token));
-      const adverb = kids.find((child) => ['advmod', 'obj', 'nsubj'].includes(child.deprel)
+      const adverb = kids.find((child) => child.deprel === 'advmod'
         && ['ADV', 'NOUN'].includes(child.upos)
         && (allowed.has(lemmaOf(child)) || allowed.has(String(child.text || '').toLowerCase().replace(/ё/g, 'е')))
         && validSpan(child, text) && !tokenInSpeech(child, speech));
