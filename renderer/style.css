@@ -1405,3 +1405,22 @@ body.typing #sheetBar button { pointer-events: none; }
 #canvas.split #p2Scroll { padding: 18px clamp(16px, 4vw, 40px) 40vh; scrollbar-gutter: stable both-edges; }
 
 #chromeRight .chrome-btn { min-width: 30px; }
+
+/* Правая панель видна: ряд значков лежит целиком над ней, а не наполовину на листе. Если панель уже ряда (она может быть
+   от 200 px), значки сжимаются; от ширины панели ≈ 290 px вид прежний. Лист при этом не сужается. */
+body:not(.mob):not(.notes-hidden):not(.focus-mode) #chromeRight {
+  width: calc(min(var(--notes-w, 280px), 30vw) - 20px);
+  justify-content: flex-end; gap: 0;
+  container-type: inline-size; /* только при заданной ширине: у auto-ширины такой контейнер схлопнулся бы */
+}
+body:not(.mob):not(.notes-hidden) #chromeRight .chrome-btn { flex: 0 1 32px; min-width: 21px; }
+body:not(.mob):not(.notes-hidden) #chromeRight .chrome-sep { margin: 0 4px; }
+/* Чем уже панель, тем мельче сами значки, чтобы они не слипались. */
+@container (max-width: 236px) {
+  #chromeRight .chrome-btn svg { width: 16px; height: 12.4px; }
+  #chromeRight #btnSettings { font-size: 14px; }
+}
+@container (max-width: 206px) {
+  #chromeRight .chrome-btn svg { width: 14px; height: 10.9px; }
+  #chromeRight #btnSettings { font-size: 13px; }
+}
