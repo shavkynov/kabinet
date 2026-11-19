@@ -153,16 +153,46 @@ function isSubordinateClauseRoot(token, children) {
   return hasWhatMark(token, children);
 }
 
+function hasValidDependencyForest(tokens) {
+  const ids = new Set();
+  for (const token of tokens) {
+    if (!token || !Number.isInteger(token.id) || ids.has(token.id)) return false;
+    ids.add(token.id);
+    if (!Number.isInteger(token.head) || token.head < 0) return false;
+  }
+  const byId = new Map(tokens.map((token) => [token.id, token]));
+  for (const token of tokens) {
+    if (token.head > 0 && !byId.has(token.head)) return false;
+  }
+  for (const token of tokens) {
+    const seen = new Set();
+    let current = token;
+    while (current && current.head > 0) {
+      if (seen.has(current.id)) return false;
+      seen.add(current.id);
+      current = byId.get(current.head);
+    }
+  }
+  return true;
+}
+
 function clauseBounds(root, children, text) {
+  if (!validSpan(root, text)) return null;
   let start = root.start;
   let end = root.end;
   const marker = (children.get(root.id) || []).find((child) => (child.deprel === 'nsubj' || child.deprel === 'mark')
     && isMarker(child));
-  if (marker) start = marker.start;
+  if (marker) {
+    if (!validSpan(marker, text)) return null;
+    start = marker.start;
+  }
+  const visited = new Set();
   const stack = [root];
   while (stack.length) {
     const token = stack.pop();
-    if (!validSpan(token, text)) continue;
+    if (!token || visited.has(token.id)) return null; // цикл/повторное ребро: abstain
+    visited.add(token.id);
+    if (!validSpan(token, text)) return null;
     if (token.deprel !== 'conj' && token.deprel !== 'punct') end = Math.max(end, token.end);
     for (const child of children.get(token.id) || []) stack.push(child);
   }
@@ -172,13 +202,16 @@ function clauseBounds(root, children, text) {
 function findSubordinateAvalanches(text, sentence) {
   const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
   if (!tokens.length) return [];
+  if (!hasValidDependencyForest(tokens)) return [];
   const byId = tokenIndex(tokens);
   const children = childrenByHead(tokens);
   const clauseIds = new Set();
   const clauseRoots = [];
   for (const token of tokens) {
     if (!validSpan(token, text) || !isSubordinateClauseRoot(token, children)) continue;
-    const [start, end] = clauseBounds(token, children, text);
+    const bounds = clauseBounds(token, children, text);
+    if (!bounds) return [];
+    const [start, end] = bounds;
     if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end > text.length) continue;
     if (text.slice(start, end).length !== end - start) continue;
     clauseIds.add(token.id);
@@ -189,19 +222,30 @@ function findSubordinateAvalanches(text, sentence) {
   const depthMemo = new Map();
   function clauseDepth(token, visiting = new Set()) {
     if (depthMemo.has(token.id)) return depthMemo.get(token.id);
-    if (visiting.has(token.id)) return 0;
+    if (visiting.has(token.id)) return null;
     const next = new Set(visiting);
     next.add(token.id);
     let parent = byId.get(token.head);
     const seen = new Set([token.id]);
     while (parent && !seen.has(parent.id) && !clauseIds.has(parent.id)) { seen.add(parent.id); parent = byId.get(parent.head); }
-    const depth = parent && clauseIds.has(parent.id) && !next.has(parent.id) ? clauseDepth(parent, next) + 1 : 1;
+    if (parent && seen.has(parent.id)) return null;
+    let depth = 1;
+    if (parent && clauseIds.has(parent.id)) {
+      const parentDepth = clauseDepth(parent, next);
+      if (parentDepth === null) return null;
+      depth = parentDepth + 1;
+    }
     depthMemo.set(token.id, depth);
     return depth;
   }
 
-  const clauses = clauseRoots.map((clause) => ({ ...clause, depth: clauseDepth(clause.token) }))
-    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const clauses = [];
+  for (const clause of clauseRoots) {
+    const depth = clauseDepth(clause.token);
+    if (depth === null) return [];
+    clauses.push({ ...clause, depth });
+  }
+  clauses.sort((a, b) => a.start - b.start || a.end - b.end);
 
   // Кластеры: вложенные/пересекающиеся клаузы или клаузы, разделённые только
   // пунктуацией/пробелами. Если между клаузами есть буквы (главная часть),

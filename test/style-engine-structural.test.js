@@ -447,3 +447,16 @@ test('which: битые offsets/дерево не дают finding и не бр�
   assert.doesNotThrow(() => analyzeStructural(text, parsed, { which: true }));
   assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
 });
+
+test('which: цикл в дереве зависимостей завершает анализ без finding', () => {
+  const text = 'Дом, который стоял.';
+  const parsed = parse(text, [
+    ['Дом', 'дом', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    [',', ',', 'PUNCT', {}, 4, 'punct', 3],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 4, 'nsubj', 5],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 3, 'acl:relcl', 13],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 18],
+  ]);
+  assert.doesNotThrow(() => analyzeStructural(text, parsed, { which: true }));
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
+});
