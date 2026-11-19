@@ -80,7 +80,6 @@ function createDocumentSnapshot(doc) {
 }
 
 function sameDocument(snapshot, currentDoc) {
-  if (!currentDoc) return true;
   return typeof snapshot.doc.eq === 'function' ? snapshot.doc.eq(currentDoc) : snapshot.doc === currentDoc;
 }
 
@@ -97,7 +96,7 @@ function segmentFor(snapshot, start, end) {
 
 /**
  * findings: [{ category, start, end, fragment, ... }].
- * currentDoc: актуальный doc; если не равен snapshot.doc — результат отбрасывается.
+ * currentDoc: обязательный актуальный doc; если не передан или не равен snapshot.doc — результат отбрасывается.
  * Возвращает { ranges, diagnostics, droppedNested }.
  */
 function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
@@ -105,6 +104,9 @@ function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
     ? snapshotOrDoc
     : createDocumentSnapshot(snapshotOrDoc);
   const diagnostics = [];
+  if (!currentDoc) {
+    return { ranges: [], diagnostics: [{ code: 'missing-current-document', message: 'нужен актуальный ProseMirror document' }], droppedNested: 0 };
+  }
   if (!Array.isArray(findings)) {
     return { ranges: [], diagnostics: [{ code: 'invalid-findings', message: 'findings должен быть массивом' }], droppedNested: 0 };
   }
