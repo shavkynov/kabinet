@@ -32,18 +32,20 @@ function sentenceFromBlock(block, source, cursor) {
     });
   }
   const sentenceText = comment ? comment.slice(9) : rawTokens.map((t) => t.text).join(' ');
-  let start = source.indexOf(sentenceText, cursor);
+  // Комментарий # text может быть нормализован парсером (лишние пробелы, U+2028),
+  // поэтому границы ищем по первому токену, а не по всей строке комментария.
+  const first = rawTokens[0];
+  let start = first ? source.indexOf(first.text, cursor) : source.indexOf(sentenceText, cursor);
   if (start < 0) start = cursor;
-  const end = start + sentenceText.length;
-  // Позиции токенов ищем последовательно внутри предложения; CoNLL-U сохраняет порядок.
   let at = start;
   for (const token of rawTokens) {
     const found = source.indexOf(token.text, at);
-    token.start = found >= 0 && found + token.text.length <= end ? found : at;
+    token.start = found >= 0 ? found : at;
     token.end = token.start + token.text.length;
     token.confidence = null;
     at = token.end;
   }
+  const end = rawTokens.length ? rawTokens[rawTokens.length - 1].end : start + sentenceText.length;
   return {
     sentence: { start, end, text: source.slice(start, end), tokens: rawTokens },
     next: end,

@@ -48,6 +48,19 @@ test('chain: соседство существительных без генит
   assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
 });
 
+test('chain: «здание министерства образования» — не цепочка номинализаций', () => {
+  const text = 'Здание министерства образования было построено.';
+  const parsed = parse(text, [
+    ['Здание', 'здание', 'NOUN', { Case: 'Nom' }, 4, 'nsubj:pass', 0],
+    ['министерства', 'министерство', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 7],
+    ['образования', 'образование', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 20],
+    ['было', 'быть', 'AUX', { VerbForm: 'Fin' }, 5, 'aux:pass', 32],
+    ['построено', 'построить', 'VERB', { VerbForm: 'Part' }, 0, 'root', 37],
+    ['.', '.', 'PUNCT', {}, 5, 'punct', 46],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
 test('chain: нормальная согласованная именная группа не срабатывает', () => {
   const text = 'Старые книги лежали на столе.';
   const parsed = parse(text, [
@@ -61,24 +74,48 @@ test('chain: нормальная согласованная именная гр
   assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
 });
 
-test('which: три реальные зависимые клаузы отмечаются, а не просто три слова «что/который»', () => {
-  const text = 'Он понял, что дом, который стоял, продаётся, когда стемнело.';
+test('which: три вложенных относительных придаточных отмечаются', () => {
+  const text = 'Дом, который стоял у реки, который видел лес, который шумел, продаётся.';
   const parsed = parse(text, [
-    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
-    ['понял', 'понять', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
-    ['что', 'что', 'SCONJ', {}, 4, 'mark', 10],
-    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 7, 'nsubj', 13],
-    ['который', 'который', 'PRON', { Case: 'Nom' }, 6, 'nsubj', 18],
-    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 4, 'acl:relcl', 26],
-    ['продаётся', 'продаваться', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 33],
-    ['когда', 'когда', 'SCONJ', {}, 9, 'mark', 44],
-    ['стемнело', 'стемнеть', 'VERB', { VerbForm: 'Fin' }, 7, 'advcl', 50],
-    ['.', '.', 'PUNCT', {}, 8, 'punct', 58],
+    ['Дом', 'дом', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    [',', ',', 'PUNCT', {}, 4, 'punct', 3],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 4, 'nsubj', 5],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 1, 'acl:relcl', 13],
+    ['у', 'у', 'ADP', {}, 6, 'case', 19],
+    ['реки', 'река', 'NOUN', { Case: 'Gen' }, 4, 'obl', 21],
+    [',', ',', 'PUNCT', {}, 9, 'punct', 25],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 9, 'nsubj', 27],
+    ['видел', 'видеть', 'VERB', { VerbForm: 'Fin' }, 6, 'acl:relcl', 35],
+    ['лес', 'лес', 'NOUN', { Case: 'Acc' }, 9, 'obj', 41],
+    [',', ',', 'PUNCT', {}, 13, 'punct', 44],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 13, 'nsubj', 46],
+    ['шумел', 'шуметь', 'VERB', { VerbForm: 'Fin' }, 10, 'acl:relcl', 54],
+    [',', ',', 'PUNCT', {}, 15, 'punct', 59],
+    ['продаётся', 'продаваться', 'VERB', { VerbForm: 'Fin' }, 13, 'conj', 61],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 70],
   ]);
   const hits = analyzeStructural(text, parsed, { which: true }).which;
   assert.equal(hits.length, 1);
-  assert.equal(hits[0].fragment, text);
-  assert.match(hits[0].explanation, /3 зависимых клауз/);
+  assert.equal(hits[0].fragment, 'который стоял у реки, который видел лес, который шумел');
+  assert.equal(hits[0].confidence, 'high');
+  assert.match(hits[0].explanation, /3 относительных/);
+  assert.match(hits[0].explanation, /вложенность — 3/);
+});
+
+test('which: цепочка advcl/csubj без «который/что» не считается лавиной', () => {
+  const text = 'Он шёл, думая, как придётся терпеть.';
+  const parsed = parse(text, [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
+    ['шёл', 'идти', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
+    [',', ',', 'PUNCT', {}, 4, 'punct', 6],
+    ['думая', 'думать', 'VERB', { VerbForm: 'Conv' }, 2, 'advcl', 7],
+    [',', ',', 'PUNCT', {}, 6, 'punct', 12],
+    ['как', 'как', 'SCONJ', {}, 7, 'mark', 13],
+    ['придётся', 'прийтись', 'VERB', { VerbForm: 'Fin' }, 4, 'advcl', 16],
+    ['терпеть', 'терпеть', 'VERB', { VerbForm: 'Inf' }, 7, 'csubj', 24],
+    ['.', '.', 'PUNCT', {}, 2, 'punct', 30],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
 });
 
 test('which: омонимичное «что» и обычное предложение не дают срабатывания', () => {

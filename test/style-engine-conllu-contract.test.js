@@ -44,3 +44,40 @@ test('CoNLL-U → contract: два предложения сохраняют п�
   assert.equal(src.slice(parsed.sentences[1].start, parsed.sentences[1].end), 'Дом стоял.');
   assert.deepEqual(validateParseResult(src, parsed), { valid: true, errors: [] });
 });
+
+test('CoNLL-U → contract: нормализованные пробелы в # text не ломают offsets', () => {
+  const src = 'Он  пришёл.  Потом   ушёл.';
+  const normalized = `# text = Он пришёл.
+1	Он	он	PRON	_	Case=Nom	2	nsubj	_	_
+2	пришёл	прийти	VERB	_	VerbForm=Fin	0	root	_	_
+3	.	.	PUNCT	_	_	2	punct	_	_
+
+# text = Потом ушёл.
+1	Потом	потом	ADV	_	_	2	advmod	_	_
+2	ушёл	уйти	VERB	_	VerbForm=Fin	0	root	_	_
+3	.	.	PUNCT	_	_	2	punct	_	_
+`;
+  const parsed = conlluToContract(src, normalized);
+  assert.equal(parsed.sentences.length, 2);
+  assert.equal(src.slice(parsed.sentences[0].start, parsed.sentences[0].end), 'Он  пришёл.');
+  assert.equal(src.slice(parsed.sentences[1].start, parsed.sentences[1].end), 'Потом   ушёл.');
+  assert.deepEqual(validateParseResult(src, parsed), { valid: true, errors: [] });
+});
+
+test('CoNLL-U → contract: U+2028 и табуляции сохраняют исходные offsets', () => {
+  const src = 'Он\tпришёл.\u2028Потом ушёл.';
+  const conllu = `# text = Он пришёл.
+1	Он	он	PRON	_	Case=Nom	2	nsubj	_	_
+2	пришёл	прийти	VERB	_	VerbForm=Fin	0	root	_	_
+3	.	.	PUNCT	_	_	2	punct	_	_
+
+# text = Потом ушёл.
+1	Потом	потом	ADV	_	_	2	advmod	_	_
+2	ушёл	уйти	VERB	_	VerbForm=Fin	0	root	_	_
+3	.	.	PUNCT	_	_	2	punct	_	_
+`;
+  const parsed = conlluToContract(src, conllu);
+  assert.equal(parsed.sentences[0].text, 'Он\tпришёл.');
+  assert.equal(parsed.sentences[1].start, 11);
+  assert.deepEqual(validateParseResult(src, parsed), { valid: true, errors: [] });
+});

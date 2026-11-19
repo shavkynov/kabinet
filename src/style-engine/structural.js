@@ -1,7 +1,10 @@
 'use strict';
 
-const SUBORDINATE_RELATIONS = new Set(['acl:relcl', 'ccomp', 'advcl', 'csubj', 'csubj:pass']);
+const RELATIVE_CLAUSE = 'acl:relcl';
+const WHAT_CLAUSE_RELATIONS = new Set(['ccomp', 'acl']);
 const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция)$/u;
+// Лексикализованные существительные с «отглагольным» суффиксом, но без процессного значения.
+const NOMINALIZATION_STOP = new Set(['здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление', 'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение', 'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие']);
 
 function tokenIndex(tokens) {
   const byId = new Map();
@@ -26,7 +29,7 @@ function isGenitiveNoun(token) {
 
 function isNominalization(token) {
   const lemma = String(token.lemma || '').toLowerCase().replace(/ё/g, 'е');
-  return token.upos === 'NOUN' && NOMINALIZATION_ENDINGS.test(lemma);
+  return token.upos === 'NOUN' && NOMINALIZATION_ENDINGS.test(lemma) && !NOMINALIZATION_STOP.has(lemma);
 }
 
 /**
@@ -106,11 +109,33 @@ function findNounChains(text, sentence) {
 }
 
 function isSubordinateClauseRoot(token, children) {
-  if (!SUBORDINATE_RELATIONS.has(token.deprel)) return false;
-  if (token.upos === 'VERB' || token.upos === 'AUX') return true;
-  if (token.upos !== 'ADJ' && token.upos !== 'NOUN') return false;
   const dependents = children.get(token.id) || [];
-  return dependents.some((child) => child.deprel === 'cop' || child.deprel === 'nsubj' || child.deprel === 'nsubj:pass');
+  const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
+    || (['ADJ', 'NOUN'].includes(token.upos) && dependents.some((child) => child.deprel === 'cop' || child.deprel === 'nsubj' || child.deprel === 'nsubj:pass'));
+  if (!hasPredicate) return false;
+  if (token.deprel === RELATIVE_CLAUSE) return true;
+  if (!WHAT_CLAUSE_RELATIONS.has(token.deprel)) return false;
+  // Для «что»-клауз нужен именно союз/местоимение «что», а не любой advcl/csubj.
+  return dependents.some((child) => child.deprel === 'mark' && ['что', 'который'].includes(String(child.lemma || child.text || '').toLowerCase()));
+}
+
+
+function clauseBounds(root, children) {
+  let start = root.start;
+  let end = root.end;
+  const kids = children.get(root.id) || [];
+  const marker = kids.find((child) => (child.deprel === 'nsubj' || child.deprel === 'mark')
+    && ['который', 'что'].includes(String(child.lemma || child.text || '').toLowerCase()));
+  if (marker) start = marker.start;
+  const stack = [root];
+  while (stack.length) {
+    const token = stack.pop();
+    if (token.deprel !== 'conj' && token.deprel !== 'punct') {
+      end = Math.max(end, token.end);
+    }
+    for (const child of children.get(token.id) || []) stack.push(child);
+  }
+  return [start, end];
 }
 
 function findSubordinateAvalanches(text, sentence) {
@@ -127,8 +152,9 @@ function findSubordinateAvalanches(text, sentence) {
     const next = new Set(visiting);
     next.add(token.id);
     let parent = byId.get(token.head);
-    while (parent && parent.id !== token.id && !clauseIds.has(parent.id)) parent = byId.get(parent.head);
-    const depth = parent && clauseIds.has(parent.id) ? clauseDepth(parent, next) + 1 : 1;
+    const seen = new Set([token.id]);
+    while (parent && !seen.has(parent.id) && !clauseIds.has(parent.id)) { seen.add(parent.id); parent = byId.get(parent.head); }
+    const depth = parent && clauseIds.has(parent.id) && !next.has(parent.id) ? clauseDepth(parent, next) + 1 : 1;
     depthMemo.set(token.id, depth);
     return depth;
   }
@@ -136,16 +162,17 @@ function findSubordinateAvalanches(text, sentence) {
   const maxDepth = clauseRoots.length ? Math.max(...clauseRoots.map((t) => clauseDepth(t))) : 0;
   if (clauseRoots.length < 3 && maxDepth < 3) return [];
 
-  const start = sentence.start;
-  const end = sentence.end;
+  const bounds = clauseRoots.map((root) => clauseBounds(root, children));
+  const start = Math.min(...bounds.map((b) => b[0]));
+  const end = Math.max(...bounds.map((b) => b[1]));
   return [{
     category: 'which',
     start,
     end,
     fragment: text.slice(start, end),
-    explanation: `В предложении обнаружено ${clauseRoots.length} зависимых клауз; максимальная вложенность — ${maxDepth}.`,
+    explanation: `В предложении обнаружено ${clauseRoots.length} относительных/изъяснительных придаточных; максимальная вложенность — ${maxDepth}.`,
     method: [...new Set(clauseRoots.map((token) => `dependency:${token.deprel}`)), 'clause-nesting'],
-    confidence: 'medium',
+    confidence: maxDepth >= 2 ? 'high' : 'medium',
     limitations: ['Качество зависит от сегментации и синтаксического парсера; эллиптические и бессоюзные конструкции могут быть разобраны неполно.'],
   }];
 }
