@@ -29,12 +29,18 @@ function wireSidebar() {
   const resizer = $('#resizer');
 
   resizer.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
+    // Панель скрыта: полоска у края возвращает её; пока курсор не ушёл правее порога скрытия, панель не прячется снова.
+    let armed = !document.body.classList.contains('sidebar-hidden');
+    if (!armed) applySidebarHidden(false);
     document.body.classList.add('resizing');
     let collapse = false; // потянули почти до левого края: на отпускании панель скроется
+    const startW = sidebarWidth; // ширина до перетаскивания: к ней панель вернётся, если её скрыли
     const sidebar = $('#sidebar');
 
     const onMove = (ev) => {
+      if (!armed) { if (ev.clientX < 110) return; armed = true; }
       collapse = ev.clientX < 110;
       if (collapse) {
         sidebar.style.opacity = '.45'; // подсказка: сейчас панель скроется
@@ -49,6 +55,7 @@ function wireSidebar() {
       document.body.classList.remove('resizing');
       sidebar.style.opacity = '';
       if (collapse) {
+        sidebarWidth = setSidebarWidth(startW);
         applySidebarHidden(true);
       } else {
         try { localStorage.setItem('kabinet.sidebarWidth', String(sidebarWidth)); } catch { /* ignore */ }

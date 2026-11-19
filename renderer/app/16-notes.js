@@ -140,23 +140,46 @@ function wireNotes() {
     const w = Number(localStorage.getItem('kabinet.notesW'));
     if (w) root.style.setProperty('--notes-w', `${Math.max(200, Math.min(560, w))}px`);
   } catch { /* ignore */ }
-  $('#notesResizer').addEventListener('mousedown', (e) => {
+  const notesResizer = $('#notesResizer');
+  notesResizer.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
+    // Панель скрыта: полоска у края возвращает её; пока курсор не ушёл левее порога скрытия, панель не прячется снова.
+    const edge = () => window.innerWidth - 110;
+    let armed = !document.body.classList.contains('notes-hidden');
+    if (!armed) applyNotesHidden(false);
     document.body.classList.add('resizing');
+    const bar = $('#notesbar');
+    const startW = root.style.getPropertyValue('--notes-w'); // ширина до перетаскивания: к ней панель вернётся, если её скрыли
     let w = 0;
+    let collapse = false; // потянули почти до правого края: на отпускании панель скроется
     const onMove = (ev) => {
-      w = Math.max(200, Math.min(560, Math.round(window.innerWidth - ev.clientX)));
-      root.style.setProperty('--notes-w', `${w}px`);
+      if (!armed) { if (ev.clientX > edge()) return; armed = true; }
+      collapse = ev.clientX > edge();
+      if (collapse) {
+        bar.style.opacity = '.45'; // подсказка: сейчас панель скроется
+      } else {
+        bar.style.opacity = '';
+        w = Math.max(200, Math.min(560, Math.round(window.innerWidth - ev.clientX)));
+        root.style.setProperty('--notes-w', `${w}px`);
+      }
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.body.classList.remove('resizing');
-      if (w) { try { localStorage.setItem('kabinet.notesW', String(w)); } catch { /* ignore */ } }
+      bar.style.opacity = '';
+      if (collapse) {
+        if (startW) root.style.setProperty('--notes-w', startW); else root.style.removeProperty('--notes-w');
+        applyNotesHidden(true);
+      } else if (w) { try { localStorage.setItem('kabinet.notesW', String(w)); } catch { /* ignore */ } }
+      setTimeout(updateTwPad, 0);
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+  // двойной клик по границе скрывает панель
+  notesResizer.addEventListener('dblclick', () => applyNotesHidden(true));
 }
 
 function applyNotesHidden(hidden) {
@@ -310,7 +333,9 @@ function wireLists() {
   $('#addChapter').addEventListener('click', () => addDoc('chapter'));
   $('#addNote').addEventListener('click', addNote);
   wireNotes();
-  $('#btnNotes').addEventListener('click', () => applyNotesHidden(notesShown()));
+  // На компьютере кнопки нет: правая панель прячется и возвращается границей. Кнопка осталась только на Android.
+  if (document.body.classList.contains('mob')) $('#btnNotes').addEventListener('click', () => applyNotesHidden(notesShown()));
+  else $('#btnNotes').remove();
   try {
     if (localStorage.getItem('kabinet.notesHidden') === '1') document.body.classList.add('notes-hidden');
   } catch { /* ignore */ }

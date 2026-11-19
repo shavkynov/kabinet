@@ -115,7 +115,9 @@ function wireChrome() {
   wireNarrowLayout();
   wireChromeFade();
 
-  $('#btnSidebar').addEventListener('click', toggleSidebar);
+  // На компьютере кнопки нет: панель глав прячется и возвращается границей (⌘\ тоже работает). Кнопка осталась только на Android.
+  if (document.body.classList.contains('mob')) $('#btnSidebar').addEventListener('click', toggleSidebar);
+  else $('#btnSidebar').remove();
   $('#btnSettings').addEventListener('click', toggleSettings);
   $('#btnSound').addEventListener('click', () => togglePanel('sound'));
   $('#btnSplit').addEventListener('click', toggleSplit);
