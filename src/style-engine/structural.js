@@ -1,7 +1,7 @@
 'use strict';
 
 const SUBORDINATE_RELATIONS = new Set(['acl:relcl', 'ccomp', 'advcl', 'csubj', 'csubj:pass']);
-const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ение|ция)$/u;
+const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция)$/u;
 
 function tokenIndex(tokens) {
   const byId = new Map();
