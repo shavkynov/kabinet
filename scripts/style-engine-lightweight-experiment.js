@@ -100,7 +100,12 @@ function time(fn, n = 20) {
     times.push(Number(process.hrtime.bigint() - t0) / 1e6);
   }
   times.sort((a, b) => a - b);
-  return { medianMs: times[Math.floor(times.length / 2)], p95Ms: times[Math.ceil(times.length * 0.95) - 1] };
+  const count = times.length;
+  const medianMs = count % 2 === 1
+    ? times[(count - 1) / 2]
+    : (times[count / 2 - 1] + times[count / 2]) / 2;
+  const p95Ms = times[Math.ceil(count * 0.95) - 1];
+  return { medianMs, p95Ms };
 }
 
 const oldAll = paragraphs.map((p) => {
