@@ -179,25 +179,29 @@ function findWhichLight(text, variant = 'B1') {
     const markers = markerList(text, sentence.start, sentence.end, speech);
     if (!markers.length) continue;
     let keep = markers;
+    let segmentCount = markers.length;
     if (variant === 'B1') {
       if (markers.length < 3) continue;
     } else {
       // B2: разные пунктуационные сегменты, и в каждом есть глагол.
       const bySegment = new Map();
       for (const marker of markers) {
-        const before = text.slice(sentence.start, marker.start);
+        // Маркер «, что» начинается с разделителя: относим его к следующему сегменту.
+        const markerBodyStart = marker.text.startsWith(',') ? marker.start + 1 : marker.start;
+        const before = text.slice(sentence.start, markerBodyStart);
         const seg = before.split(/[,;:]/).length - 1;
         if (!bySegment.has(seg)) bySegment.set(seg, []);
         bySegment.get(seg).push(marker);
       }
-      const valid = [];
+      const validSegments = [];
       for (const [seg, list] of bySegment) {
         const bounds = segmentBounds(text, sentence, seg);
         const hasVerb = block.words.some((w) => w.pos === 'verb' && w.start >= bounds[0] && w.end <= bounds[1]);
-        if (hasVerb) valid.push(...list);
+        if (hasVerb) validSegments.push(list);
       }
-      if (valid.length < 3) continue;
-      keep = valid;
+      if (validSegments.length < 3) continue;
+      keep = validSegments.flat();
+      segmentCount = validSegments.length;
     }
     const [start, end] = sentenceSpan(text, sentence);
     out.push({
@@ -207,7 +211,7 @@ function findWhichLight(text, variant = 'B1') {
       fragment: text.slice(start, end),
       variant,
       confidence: 'low',
-      explanation: `Эвристика перегруженности: ${keep.length} маркеров придаточных; это не подсчёт клауз по дереву.`,
+      explanation: `Эвристика перегруженности: ${keep.length} маркеров в ${segmentCount} сегментах; это не подсчёт клауз по дереву.`,
       method: variant === 'B1'
         ? ['regex:marker', 'sentence-boundary', 'speech-boundary']
         : ['regex:marker', 'punctuation-segments', 'morph:verb', 'sentence-boundary', 'speech-boundary'],

@@ -125,3 +125,9 @@ test('B1: «потому что» — отдельная группа', () => {
   const two = 'Он знал, что дом, потому что был дождь.';
   assert.equal(findWhichLight(two, 'B1').length, 0);
 });
+
+test('B2: три маркера в одном сегменте с глаголом не считаются перегруженностью', () => {
+  const text = 'Он знал потому что был дождь так что всё изменилось что бы ни случилось.';
+  assert.equal(findWhichLight(text, 'B1').length, 1);
+  assert.deepEqual(findWhichLight(text, 'B2'), []);
+});

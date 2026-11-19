@@ -63,7 +63,7 @@ function controlFindings() {
   return all;
 }
 
-function metrics(items, variant) {
+function metrics(items, variant, mode = 'exact') {
   let tp = 0;
   let fp = 0;
   let fn = 0;
@@ -81,7 +81,7 @@ function metrics(items, variant) {
     const expected = item.expected || [];
     const used = new Set();
     for (const h of found) {
-      const e = expected.findIndex((x, i) => !used.has(i) && x.start === h.start && x.end === h.end);
+      const e = expected.findIndex((x, i) => !used.has(i) && (mode === 'exact' ? (x.start === h.start && x.end === h.end) : (x.start < h.end && x.end > h.start)));
       if (e >= 0) { tp += 1; used.add(e); } else { fp += 1; falseHits.push({ id: item.id || item.text, fragment: h.fragment || item.text.slice(h.start, h.end) }); }
     }
     expected.forEach((x, i) => { if (!used.has(i)) { fn += 1; misses.push({ id: item.id || item.text, fragment: x.text }); } });
@@ -145,7 +145,7 @@ for (const rule of ['chain', 'which']) {
           }
           results.probe[key] = { items: items.length, flagged };
         } else {
-          results.probe[key] = { items: items.length, ...metrics(items, variant) };
+          results.probe[key] = { items: items.length, ...metrics(items, variant, 'exact'), overlap: metrics(items, variant, 'overlap') };
         }
       }
     }
