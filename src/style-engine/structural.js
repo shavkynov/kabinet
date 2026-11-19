@@ -1,7 +1,5 @@
 'use strict';
 
-const { CATEGORIES } = require('./contract');
-
 const SUBORDINATE_RELATIONS = new Set(['acl:relcl', 'ccomp', 'advcl', 'csubj', 'csubj:pass']);
 const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ение|ция)$/u;
 
@@ -101,7 +99,6 @@ function findSubordinateAvalanches(text, sentence) {
   const tokens = sentence.tokens || [];
   const byId = tokenIndex(tokens);
   const clauseRoots = tokens.filter(isSubordinateClauseRoot);
-  if (clauseRoots.length < 3) return [];
 
   const clauseIds = new Set(clauseRoots.map((t) => t.id));
   const depthMemo = new Map();
@@ -117,7 +114,7 @@ function findSubordinateAvalanches(text, sentence) {
     return depth;
   }
 
-  const maxDepth = Math.max(...clauseRoots.map((t) => clauseDepth(t)));
+  const maxDepth = clauseRoots.length ? Math.max(...clauseRoots.map((t) => clauseDepth(t))) : 0;
   if (clauseRoots.length < 3 && maxDepth < 3) return [];
 
   const start = sentence.start;
