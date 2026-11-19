@@ -100,7 +100,7 @@ function time(fn, n = 20) {
     times.push(Number(process.hrtime.bigint() - t0) / 1e6);
   }
   times.sort((a, b) => a - b);
-  return { medianMs: times[Math.floor(times.length / 2)], p95Ms: times[Math.floor(times.length * 0.95)] };
+  return { medianMs: times[Math.floor(times.length / 2)], p95Ms: times[Math.ceil(times.length * 0.95) - 1] };
 }
 
 const oldAll = paragraphs.map((p) => {
@@ -111,7 +111,7 @@ const expAll = paragraphs.map((p) => experimentalFor(p));
 const joined = paragraphs.join('\n\n');
 
 const results = {
-  note: 'Probe синтетический и не является независимым корпусом; holdout заморожен до прогона.',
+  note: 'Probe синтетический и не является независимым корпусом; независимо подтвердить фиксацию holdout по истории Git нельзя.',
   control: {
     paragraphs: paragraphs.length,
     counts: controlCounts(),
