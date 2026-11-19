@@ -2,7 +2,7 @@
 
 **Статус:** проект методики. Тексты не собраны, разметка не начата, код в рамках этой задачи не изменялся.  
 **Ветка:** `feature/linguistic-style-engine`.  
-**HEAD на момент аудита:** `57b03426f5cd79e8aaf7378aeaa4bc8eb29827a1`.
+**Базовый HEAD архитектурной ревизии:** `57b03426f5cd79e8aaf7378aeaa4bc8eb29827a1` — состояние до создания этого документа (`42e36bb`). Это не текущий HEAD после `42e36bb`.
 
 ## 0. Краткое резюме
 
@@ -184,13 +184,23 @@ Rust-парсер:
 
 ### 2.3. «Назвал, а не показал» (`tell`)
 
-- **Определение:** автор/нарратор прямо называет эмоцию или состояние вместо показа через действие/деталь/речь, и это снижает художественный эффект.
-- **Текущая логика:** шаблоны/словари в `src/style.js`; категория принципиально эвристическая.
-- **Нужные признаки:** лексика эмоций/состояний, конструкция называния, границы нарратива/речи, ирония/функция.
-- **Доступно:** POS/лемма/зависимости; **недоступно** понимание художественной функции.
-- **FP:** эмоция в прямой речи; ирония; намеренное называние; жанровая условность; эмоция как сюжетный факт.
-- **FN:** эмоция без лексического маркера; имплицитное называние.
-- **Объективность:** низкая; П/Р субъективны.
+- **Определение категории:** автор/нарратор прямо называет эмоцию или состояние вместо показа через действие/деталь/речь, и это снижает художественный эффект.
+- **Три разных явления, которые нельзя смешивать:**
+  1. **Прямое называние** эмоции/состояния («он испытывал страх», «ей было грустно»).
+  2. **Демонстрация** через действие/телесную реакцию/деталь («руки дрожали», «он отвернулся»).
+  3. **Шаблонное/клишеобразное изображение** эмоции («сердце ёкнуло», «мороз по коже»).
+- **Что является положительным для `tell`:** прямое называние в нарративе, где возможен показ и нет иронической/сюжетной функции.
+- **Что не является автоматически положительным:**
+  - демонстрация через действие;
+  - шаблонная телесная реакция — это отдельная проблема клише, а не обязательно «назвал, а не показал»;
+  - эмоция в прямой речи, ирония, намеренное называние, жанровая условность.
+- **Поля разметки:** `phenomenon = direct_naming | demonstration | cliche_body | absent | uncertain`; `problem`, `recommendation` отдельно.
+- **Клише:** если редакторская проблема именно в шаблоне, использовать отдельный `relatedIssue=cliche`; не приписывать её категории 3 автоматически.
+- **Текущая логика:** шаблоны/словари в `src/style.js`; это эвристика, не понимание функции.
+- **Доступно:** POS/лемма/зависимости, границы речи; **недоступно** понимание иронии/функции.
+- **FP:** эмоция в речи, ирония, сюжетное называние, клише, сказочная/жанровая поэтика.
+- **FN:** имплицитное называние без лексического маркера.
+- **Объективность:** низкая; П/Р субъективны; при сомнении — abstain.
 - **Обязательно:** предупреждение:
 
 > «Категория использует шаблоны, словари и эвристики. Она не понимает художественный контекст в полной мере. Возможны пропуски и ложные срабатывания. Обнаруженные фрагменты требуют проверки автором».
@@ -208,12 +218,15 @@ Rust-парсер:
 
 ### 2.5. Ремарки (`remark`)
 
-- **Определение:** авторская атрибуция/действие при прямой речи, которая избыточна, повторна или перегружена с учётом смены говорящих и контекста.
-- **Текущая логика:** старые regex/эвристики; новых правил 5 нет.
-- **Нужные признаки:** границы абзацев, прямая речь (тире/кавычки), смена говорящего, speech verb, атрибуция, действия/обстоятельства, расстояние между ремарками.
-- **Доступно:** текст/offsets, POS, зависимости; **недоступно** надёжное определение говорящего и вложенных цитат без отдельного dialogue-слоя.
-- **FP:** каждая ремарка; необходимая атрибуция; смена говорящего; намеренный рефрен; сложная сцена.
-- **FN:** избыточность, выраженная не ремаркой, а структурой диалога; многострочные реплики.
+- **Определение категории:** авторская ремарка/атрибуция при прямой речи, которая избыточна, повторна или перегружена с учётом смены говорящих и контекста.
+- **Три уровня:**
+  1. **Наличие ремарки** (атрибуция/действие) — явление.
+  2. **Функция** — представляет говорящего, снимает неоднозначность, задаёт действие/ритм.
+  3. **Редакторская оценка** — избыточна ли она в данном диалоге.
+- **Кандидатные признаки, но не доказательства:** повтор speech verb, известность говорящего, длина, число действий/наречий.
+- **Положительные для проблемы:** повтор шаблона в окне при ясной смене; избыточное указание говорящего, когда он однозначен; перегруз несколькими действиями/обстоятельствами; дублирование манеры.
+- **Отрицательные:** первая необходимая атрибуция; смена говорящего; намеренный рефрен; сюжетное действие; сложная сцена.
+- **Доступно:** текст/offsets, POS, зависимости; **недоступно** надёжное определение говорящего/вложенных цитат без dialogue-слоя.
 - **Объективность:** низкая/средняя; П/Р требуют редакторского суждения.
 - **Abstain:** неясный говорящий/границы реплики/вложенные кавычки.
 
@@ -241,12 +254,23 @@ Rust-парсер:
 
 ### 2.8. Лишнее «свой»/«его» (`own`)
 
-- **Определение:** притяжательное местоимение, не добавляющее информации, при однозначном владельце/антецеденте.
-- **Текущая логика:** regex по телу/одежде в `src/style.js`; новых правил 8 нет.
-- **Нужные признаки:** `свой` vs `его/её/их`, possessive vs personal, `det`/`nmod:poss`, субъект, антецедент, клауза, контраст/эмфаза.
-- **Доступно:** UPOS/feats/deprel; **нет** coreference; `его` может быть личным местоимением.
-- **FP:** «его» как объект; чужая принадлежность; контраст; смена субъекта; неоднозначный антецедент; идиома.
-- **FN:** избыточность, требующая дискурсивного понимания.
+- **Определение категории:** притяжательное местоимение, не добавляющее информации, при однозначном владельце/антецеденте.
+- **Пять отдельных вопросов, которые нельзя сворачивать в один:**
+  1. грамматическое притяжательное употребление (`свой`, possessive `его`);
+  2. наличие однозначного владельца/антецедента;
+  3. информационная функция местоимения в дискурсе;
+  4. наличие стилистической избыточности;
+  5. обоснованность рекомендации удалить местоимение.
+- **Ключевое ограничение:** однозначный антецедент **не доказывает** избыточность. Местоимение может:
+  - контрастировать владельцев;
+  - создавать эмфазу/фокус;
+  - поддерживать дискурсивную связность;
+  - сигнализировать смену субъекта;
+  - быть частью идиомы.
+- **Положительные для проблемы:** `свой` при теле/одежде/предмете того же субъекта, где принадлежность уже ясна и нет контраста; possessive `его` при однозначном антецеденте и очевидной принадлежности, без фокусной функции.
+- **Отрицательные:** `его` как личное/объектное местоимение; другой владелец; контраст/эмфаза; смена субъекта; неясный антецедент; идиома.
+- **Доступно:** UPOS/feats/deprel; **нет** coreference; `его` может быть личным.
+- **Abstain:** несколько возможных антецедентов; нет надёжного possessive-признака; дискурсивная функция неясна.
 - **Объективность:** низкая/средняя; при неоднозначности — abstain, не low-confidence finding.
 
 ### 2.9. Общие ограничения категорий
@@ -297,29 +321,115 @@ Rust-парсер:
 - разные типы ремарок;
 - обычные negative paragraphs.
 
-### 3.4. Positive/negative/borderline
+### 3.4. Natural Sample и Challenge Set
 
-- Positive: явление присутствует; annotator marks Я и optionally П/Р.
-- Negative: абзац проверен по всем категориям, явления нет; это нужно для FP rate.
-- Borderline: явление есть, но П/Р спорны; отдельный status, не смешивать с negative.
-- Abstain: недостаточно контекста/компетенции; отдельный status.
+**Natural Sample** — естественная или стратифицированная выборка прозы:
 
-Нельзя строить prevalence только по positive-only выборке. Нужно аннотировать и обычные абзацы.
+- оценивает prevalence явлений;
+- оценивает Precision на репрезентативной выборке;
+- оценивает FP на 1000/10000 слов;
+- **не обогащается** положительными примерами.
 
-### 3.5. Challenge set vs prevalence set
+**Challenge Set** — целенаправленно собранные сложные/редкие случаи:
 
-- **Natural sample** — случайные/стратифицированные произведения, используется для prevalence и FP/1000 слов.
-- **Challenge set** — целенаправленно подобранные трудные явления; используется для диагностики, не для prevalence.
-- Synthetic probe (`lightweight-probe.json`) не входит ни в natural, ни в independent corpus.
+- оценивает Recall и типичные пропуски;
+- проверяет омонимию, неоднозначность, сложный синтаксис, границы spans;
+- **не используется** для прямой оценки естественного Precision/prevalence.
+
+Synthetic probe (`lightweight-probe.json`) не входит ни в один набор.
+
+### 3.5. Positive/negative/borderline/abstain
+
+- **Positive:** явление присутствует; annotator marks Я и optionally П/Р.
+- **Negative:** unit проверен по категории, явления нет.
+- **Borderline:** явление есть, но П/Р спорны; отдельный status, не negative.
+- **Abstain:** недостаточно контекста/компетенции; отдельный status.
+- **Not assessed:** категория не проверялась; **не** negative.
+
+Нельзя строить prevalence только по positive-only выборке. Нужно аннотировать обычные абзацы и явно хранить, какие категории проверены.
+
+### 3.6. Единицы независимости и статистическая мощность
+
+**Иерархия:**
+
+```text
+author
+  └── work
+        └── excerpt / chapter
+              └── paragraph / sentence
+                    └── finding span
+```
+
+Наблюдения внутри одного автора и произведения коррелированы (стиль, редактор, жанр, повторяющиеся персонажи). Нельзя считать 1000 spans от 3 авторов независимыми.
+
+**Внутрикластерная корреляция (ICC):**
+
+```text
+ρ_author = σ²_author / (σ²_author + σ²_work + σ²_excerpt)
+ρ_work   = (σ²_author + σ²_work) / (σ²_author + σ²_work + σ²_excerpt)
+```
+
+Для равных кластеров размера `m`:
+
+```text
+design effect DEFF ≈ 1 + (m - 1) * ρ
+effective n ≈ n / DEFF
+```
+
+Следствия:
+
+- при ρ=0.2 и 20 находках на автора DEFF≈4.8, эффективный n падает почти в 5 раз;
+- добавление текста внутри того же автора даёт мало для меж­авторских выводов;
+- для author-level inference нужны **авторы**, а не только слова;
+- для work-level inference нужны работы, для genre-level — авторы/работы в каждом жанре.
+
+**Почему два автора в holdout недостаточны:**
+
+- cluster bootstrap по авторам при 2 кластерах имеет лишь 3 возможных выборки (AA, AB, BB); интервал не является надёжной оценкой межавторской вариативности;
+- 2 автора не позволяют отделить author effect от work/excerpt effect;
+- выводы допустимы только описательные/work-level, не author-level.
+
+**Что можно при малом числе авторов:**
+
+| Авторов | Допустимые выводы |
+|---:|---|
+| 1–2 | описательные; нельзя оценивать author-level CI; нельзя обобщать на авторов |
+| 3–5 | work-level bootstrap возможен при достаточном числе работ; author-level — exploratory, без сильных утверждений |
+| 6–9 | author-level CI хрупкие; зависят от ICC; нужна симуляция; genre/epoch — обычно нет |
+| 10+ | возможны author-level CI, если ICC/число работ позволяют; genre/epoch всё равно требуют отдельного покрытия |
+
+Эти строки — не универсальные пороги, а правило интерпретации; окончательное число авторов определяется симуляцией мощности.
+
+**Метод моделирования мощности:**
+
+1. Задать сценарии ICC (`0, 0.1, 0.2, 0.3, 0.5`), prevalence, среднюю длину произведения, число находок на произведение.
+2. Смоделировать author/work random effects; распределение ошибок правил (FP/FN) с реалистичными вероятностями.
+3. Для каждой конфигурации (число авторов × работ × слов) сгенерировать корпус и оценки.
+4. Повторить 1000+ раз; построить cluster bootstrap CI.
+5. Оценить coverage (доля CI, накрывающих истинное значение), ширину CI и вероятность неверного решения.
+6. Выбрать минимальную конфигурацию, которая достигает заданной точности **для нужного уровня обобщения** (work/author/genre).
+7. Провести sensitivity analysis: худший ICC, редкая prevalence, разная длина.
+
+Без такой симуляции нельзя утверждать, что 6 авторов достаточно для author-level выводов. Для **work-level** выводов 8 произведений может быть достаточно, но это надо проверить симуляцией; для **genre/epoch** — только при наличии нескольких авторов/работ в каждом стратуме, иначе выводы описательные.
+
+**Bootstrap:**
+
+- author-level: resample authors with replacement, then works within author;
+- work-level: resample works, preserving author structure;
+- fragment-level bootstrap допустим только для диагностики, не для обобщения;
+- 2 автора — не bootstrap, а иллюстрация.
 
 ## 4. Data schema
 
 ### 4.1. Общие принципы
 
-- `offsetEncoding: "utf16"` — как в ProseMirror.
-- Исходный текст не нормализуется; хранится как есть; `textHash`/`sourceHash`.
-- Каждый span проверяется: `text.slice(start,end) === fragment`.
-- Один annotation unit может иметь несколько labels.
+- `schemaVersion: 2` для annotation schema (не parser contract).
+- `offsetEncoding: "utf16"`.
+- `coordinateBase: "excerpt"`; каждый excerpt имеет `excerptStartInSource`.
+- Интервалы **half-open** `[start, end)`.
+- Исходный текст не нормализуется: сохраняются исходные переводы строк, пробелы, BOM/его отсутствие, типографика; `textHash`/`sourceHash`.
+- Каждый span проверяется: `excerptText.slice(start,end) === fragment`.
+- Annotation unit может иметь несколько категорий и несколько spans.
 - Gold labels отделены от model predictions.
 - Тексты не входят в Git; в Git только manifest без текста и с hashes.
 
@@ -374,38 +484,98 @@ Rust-парсер:
 }
 ```
 
-### 4.4. Annotation
+### 4.4. Annotation unit и статус каждой категории
+
+Глобальные `noFindings`/`uncertain` запрещены. Для каждого unit хранится состояние **каждой** категории:
 
 ```json
 {
+  "schemaVersion": 2,
   "annotationId": "ann-0001",
+  "unitId": "unit-0001",
   "docId": "doc-001",
   "paragraphId": "p-001",
   "sentenceId": "s-001",
-  "category": "chain",
-  "subtype": "genitive_nominalization_chain",
-  "start": 12,
-  "end": 55,
-  "fragment": "…",
-  "phenomenon": "present",
-  "problem": "yes | no | uncertain",
-  "recommendation": "comment | optional | no_comment | abstain",
-  "clarity": "clear | borderline | unclear",
-  "context": "narrative | dialogue | authorial_remark | title",
-  "rationale": "…",
-  "alternative": "…",
-  "ambiguity": ["term", "authorial_style"],
+  "coordinateBase": "excerpt",
+  "excerptStartInSource": 12000,
+  "annotationGuideVersion": "1.0.0",
   "annotatorId": "ann-a",
-  "annotationStatus": "independent | adjudicated | gold",
-  "createdAt": "ISO-8601"
+  "independenceStatus": "independent",
+  "goldStatus": "candidate",
+  "adjudication": [],
+  "categories": {
+    "chancery": { "status": "absent", "labels": [] },
+    "chain": {
+      "status": "present",
+      "labels": [
+        {
+          "labelId": "l-001",
+          "category": "chain",
+          "subtype": "genitive_nominalization_chain",
+          "start": 12,
+          "end": 55,
+          "fragment": "…",
+          "phenomenon": "present",
+          "phenomenonKind": "genitive_chain",
+          "problem": "yes",
+          "recommendation": "comment",
+          "clarity": "clear",
+          "context": "narrative",
+          "rationale": "…",
+          "alternative": "…",
+          "relatedIssues": [],
+          "ambiguity": ["term"],
+          "abstainReason": null
+        }
+      ]
+    },
+    "own": {
+      "status": "uncertain",
+      "labels": [],
+      "abstainReason": "antecedent_ambiguous"
+    }
+  }
 }
 ```
 
-Для одной единицы:
+Статусы категории:
 
-- `noFindings: true` — проверено, ничего не найдено;
-- `uncertain: true` — проверено, но решение невозможно;
-- несколько labels — каждая со своим span/категорией.
+- `not_assessed` — категория не проверялась; **не negative**;
+- `absent` — проверена, явления нет;
+- `present` — есть минимум один label;
+- `uncertain` — проверена, но решение невозможно; обязателен `abstainReason`.
+
+В каждом label отдельно:
+
+- `phenomenon`: наличие Я;
+- `problem`: `yes/no/uncertain`;
+- `recommendation`: `comment/optional/no_comment/abstain`;
+- `rationale`, `alternative`, `relatedIssues`, `ambiguity`.
+
+### 4.4.1. Метаданные и история
+
+- `annotatorId`;
+- `annotationGuideVersion`;
+- `schemaVersion`;
+- `independenceStatus`: `independent | adjudicated | gold`;
+- `goldStatus`: `candidate | adjudicated | frozen`;
+- `adjudication`: массив `{fromLabelId,toLabelId,reason,adjudicatorId,date}`;
+- `abstainReason` для `uncertain`;
+- `createdAt`/`updatedAt`.
+
+История не перезаписывается: новое решение добавляет запись, старые labels сохраняются.
+
+### 4.4.2. Offsets и исходный текст
+
+- `start` включительно, `end` исключительно: `[start, end)`.
+- Оба — UTF-16 code units, как в ProseMirror.
+- Аннотации хранятся относительно excerpt; `excerptStartInSource` даёт позицию в исходном документе:
+  `sourceOffset = excerptStartInSource + annotationOffset`.
+- `fragment` — точная подстрока excerpt; проверка обязательна.
+- Исходный текст хранится без нормализации: не делать NFC/NFD, trim, замену CRLF/LF, кавычек, тире, пробелов, BOM.
+- `textHash` считается по исходным байтам UTF-8; hash входит в manifest.
+- Для parser gold используется тот же coordinate base; смешивать offsets из разных excerpt нельзя.
+- Если аннотация сделана на уровне документа, `coordinateBase: "document"` и `excerptStartInSource: 0`; это явно фиксируется.
 
 ### 4.5. Gold parser annotation
 
@@ -460,6 +630,21 @@ Rust-парсер:
 7. Несколько меток разрешены.  
 8. Прямая речь и нарратив размечаются раздельно.  
 9. Нельзя смотреть на вывод модели при независимой разметке.
+
+### 5.1.1. Я / П / Р для всех категорий
+
+Положительный критерий во всех категориях означает **Я**, а не автоматически П или Р.
+
+| Категория | Я (что обнаружено) | П (когда проблема) | Р (когда рекомендация) | Никогда не автоматически |
+|---|---|---|---|---|
+| 1 chancery | номинализация/пассив/лёгкая конструкция/скопление | скопление снижает ясность/действенность в контексте | есть конкретная замена без потери смысла/голоса | одиночный пассив/номинализация, термин, стилизация |
+| 2 weak | глагол с низкой нагрузкой + комплемент | смысл перенесён на комплемент, глагол не нужен | замена точным глаголом без потери оттенка | `быть/стать/оказаться/иметь` сами по себе |
+| 3 tell | прямое называние эмоции | называние снижает художественный эффект | возможен показ без потери функции | демонстрация, клише, речь, ирония |
+| 4 chain | связанная именная цепочка | перегрузка/терминологичность в нарративе | перестройка фразы | соседние существительные, имя/термин |
+| 5 remark | ремарка/атрибуция | избыточность/повтор/перегруз в диалоге | сокращение без потери ясности | каждая ремарка; известный говорящий |
+| 6 redund | повтор/корень/плеоназм | повтор не выполняет функции | удаление/замена | любой повтор; анафора/рефрен |
+| 7 which | клаузальная перегрузка | трудность чтения из-за вложенности | разбиение/упрощение | каждое `что`/длинное предложение |
+| 8 own | притяжательное местоимение | избыточность при ясной функции | удаление без потери контраста/связности | наличие антецедента/владельца |
 
 ### 5.2. Span boundaries
 
@@ -629,24 +814,34 @@ Rust-парсер:
 
 ### 6.3. Метрики согласия
 
-Не ограничиваться Cohen's kappa.
+Не ограничиваться Cohen's kappa и не использовать одну метрику для span-разметки.
 
-- **Cohen's kappa** — для бинарного наличия категории на unit; чувствителен к prevalence; report with prevalence.
-- **Krippendorff's alpha** — для multi-label, missing, ordinal (clarity/recommendation); robust to missing.
-- **Unitizing alpha / span agreement** — для непрерывных spans; учитывает boundaries.
-- **Span-level P/R/F1** — exact and IoU≥0.5; one-to-one matching.
-- **IoU distribution** — median/IQR, доля boundary errors.
-- **Agreement on abstain** — separate; kappa/alpha for `uncertain`.
-- **Recommendation agreement** — ordinal alpha for comment/optional/no_comment.
+| Метрика | Что измеряет | Где применять | Ограничение |
+|---|---|---|---|
+| Cohen's kappa | согласие по бинарному/номинальному presence на unit | `present/absent` категории | чувствительна к prevalence; не для spans |
+| Krippendorff's alpha (binary) | presence с missing | `present/absent/not_assessed` | не заменяет span agreement |
+| Krippendorff's alpha (nominal) | multi-label/номинальные категории | subtype, recommendation | требует дизайна |
+| Krippendorff's alpha (ordinal) | порядковые `clarity`/confidence | clarity high/med/low | не для произвольных строк |
+| Unitizing alpha | непрерывные spans и границы | span-разметка | требует определения unitizing |
+| Span exact P/R/F1 | точные границы | gold vs annotator | не измеряет prevalence |
+| IoU distribution | качество границ | overlap diagnostic | IoU≥0.5 — только диагностический порог |
+| Abstain agreement | согласие по отказу | `uncertain` | отдельно от positive |
 
-Report per category, not only overall. For rare categories report n and CI.
+Правила:
+
+- Cohen's kappa — только для presence; не выдавать её за agreement по spans.
+- Krippendorff's alpha считать отдельно для binary/nominal/ordinal; не смешивать типы.
+- Unitizing alpha — для spans; span exact/IoU — дополнительные.
+- Публиковать prevalence и n; при редких категориях — CI.
+- Смотреть на долю `not_assessed`; нельзя считать её `absent`.
 
 ### 6.4. Interpretation
 
 - Низкое согласие — сигнал неоднозначности категории/guide, а не автоматически «плохие аннотаторы».
-- Перед основным корпусом провести calibration; если α < ~0.67 для категории, пересмотреть guide/definition; не «подкручивать» gold под модель.
-- Не использовать kappa как единственное доказательство.
+- Ориентиры Krippendorff (α≈0.667 — tentative, ≥0.8 — good) использовать как **диагностические ориентиры**, не как автоматический pass/fail; решение принимает pilot/adjudication.
+- Не подкручивать gold под модель и не менять guide после holdout.
 - Не объединять subjective labels с объективными.
+- Adjudication history должна быть доступна для аудита.
 
 ## 7. Разбиение и holdout
 
@@ -659,11 +854,13 @@ Report per category, not only overall. For rare categories report n and CI.
 ### 7.2. Утечка
 
 - Split by work and author, not sentences.
-- Holdout authors disjoint from dev/validation where possible; at minimum holdout works.
-- No same work in two splits.
+- Holdout authors должны быть disjoint от dev/validation для author-level утверждений; если это невозможно, author-level выводы запрещены.
+- Holdout из 2 авторов недостаточен для author-level bootstrap; допустим только work-level/descriptive.
+- No same work/author in two splits.
 - No model training on corpus.
 - No few-shot examples from holdout.
 - No tuning on validation after seeing holdout.
+- Если holdout authors пересекаются с dev, помечать выводы как work-level, не author-level.
 
 ### 7.3. Фиксация
 
@@ -682,86 +879,161 @@ Report per category, not only overall. For rare categories report n and CI.
 
 ### 8.1. Matching
 
-- Один prediction ↔ один gold span.
-- Exact: same category, start, end; subtype if applicable.
-- Overlap: IoU ≥0.5 (primary relaxed) and any-overlap (diagnostic).
-- Multi-label: bipartite matching (Hungarian/greedy) to maximize TP; deterministic tie-break.
-- Duplicate predictions: one TP, remaining FP.
-- Uncertain/abstain gold: separate; not negative or positive.
-- Category mismatch: FP + FN, not partial TP.
+- Один prediction ↔ один gold span; matching bipartite, deterministic tie-break.
+- Exact: same category, start, end; subtype проверяется отдельно; exact — **основная** метрика.
+- Overlap:
+  - any-overlap — диагностический;
+  - IoU ≥ 0.5 — **диагностический** порог, не универсальная истина; обосновать через распределение IoU и ошибки границ;
+  - публиковать распределение IoU (median/IQR, доля <0.5), а не только бинарный overlap.
+- Multi-label: Hungarian/greedy matching; duplicate predictions — один TP, остальные FP.
+- Category mismatch — FP + FN, не partial TP.
+- Uncertain/abstain gold: отдельно; не negative/positive.
+- Nested spans: matching по категории/подтипу; вложенные разные labels не удалять.
 
 ### 8.2. Aggregation
 
 - Per category: TP/FP/FN, exact/overlap precision/recall/F1.
-- Micro: pool all spans; macro: mean category metrics; report both.
 - Per subtype/rule ID.
-- Per 1,000/10,000 words: `FP / words * 1000/10000`.
-- Breakdown by genre, author, dialogue/narrative, sentence length.
-- No single aggregate hides a bad category.
+- **Natural и Challenge — раздельно**; pooled — только с весами обратной вероятности и обоснованием.
+- Micro: pool all spans; macro: mean category; публиковать оба; не скрывать редкую категорию.
+- FP per 1,000/10,000 words: `FP / evaluated_words * scale`; знаменатель — реально проверенные слова, не весь корпус.
+- Breakdown by genre/author/dialogue/narrative/sentence length only where independent clusters allow; иначе descriptive.
+- Confidence/abstain/editorial recommendation — отдельные таблицы.
 
 ### 8.3. Confidence and abstain
 
-- Confidence high/medium/low are ordinal, not probabilities.
-- Report precision/recall by confidence; risk-coverage curve (coverage vs error).
-- If future numeric probabilities: Brier/ECE; not now.
-- Abstain: coverage = abstain/eligible; selective risk; report separately.
-- Editorial recommendation: `comment` vs gold; P/R/F1; separate from phenomenon detection.
+- `high/medium/low` — порядковые, не вероятности.
+- Precision/recall по уровням; risk-coverage curve.
+- Если появятся numeric probabilities — Brier/ECE отдельно.
+- Abstain: coverage = abstain / eligible; selective risk; не считать abstain ни TP, ни FP.
+- Editorial recommendation (`comment`) оценивается отдельно от обнаружения Я.
+- Для категории 3 high-confidence запрещён; это правило, пока нет калибровки.
 
 ### 8.4. Statistical uncertainty
 
-- Wilson score interval for proportions (precision/recall per category).
-- Cluster bootstrap by work/author (not sentence) for CIs; paired bootstrap for model differences.
-- Report n positives/negatives, prevalence, CI; no p-values without design.
-- Avoid treating spans from same work as independent; design effect.
-- Sample-size planning:
-  - `n ≈ z²p(1-p)/e²` for a binomial proportion; add cluster inflation.
-  - For p≈0.7–0.8 and ~100 positives, Wilson half-width ~0.08–0.10; 60 positives ~0.11–0.15.
-  - For FP/1000 words, enough evaluated words (≥50k–100k recommended) to observe stable rate.
-  - Unknown prevalence: use worst-case p=.5 for planning, then adjust after pilot; do not claim power without pilot.
-- No arbitrary precision/recall thresholds. Set acceptance criteria after pilot, before holdout, based on FP cost and CI; document.
+- **Precision и Recall имеют разные знаменатели**, поэтому отдельные Wilson intervals:
+  - precision: TP/(TP+FP), denominator — predictions;
+  - recall: TP/(TP+FN), denominator — gold positives.
+- Cluster bootstrap:
+  - author-level: resample authors, then works within author;
+  - work-level: resample works, preserve author;
+  - **не** resample spans как независимые;
+  - paired bootstrap для сравнения версий.
+- ICC/DEFF: report estimated ρ and effective n; CI ширины корректируются.
+- С 2 авторами author-level bootstrap не считать надёжным; только descriptive/work-level.
+- FP/1000:
+  - cluster bootstrap по работам/авторам;
+  - Poisson/binomial approximation только как diagnostic;
+  - при нуле FP использовать правило трёх/upper bound, не «0 ± 0».
+- Sample size:
+  - `n ≈ z²p(1-p)/e²`, затем умножить на DEFF;
+  - 100 positive при p=.8 даёт Wilson half-width ~0.08 без clustering; при DEFF 2–3 — ~0.11–0.14; 60 — шире;
+  - отрицательные: ≥50k–100k проверенных слов для стабильного FP/1000, но при высокой кластеризации нужно больше;
+  - prevalence неизвестна — планировать по worst-case и пилоту.
+- No arbitrary thresholds: acceptance criteria (CI width, precision floor, FP cost) фиксируются после пилота и до holdout; не менять после test.
 
-### 8.5. Parser metrics
+### 8.5. Parser metrics и syntactic gold
 
-Separate syntactic gold:
+Стилевые labels не годятся для UAS/LAS. Нужен отдельный gold:
 
-- sentence boundary F1;
-- token F1;
-- UPOS accuracy;
-- lemma accuracy;
-- UAS/LAS;
-- offsets exactness;
-- clause boundary agreement if clauses annotated.
+- sentence boundaries;
+- tokens/offsets;
+- UPOS/lemma;
+- head/deprel;
+- clauses (если оцениваются).
 
-Style corpus labels are not sufficient for UAS/LAS. Use 150–200 manually annotated sentences or a licensed treebank test split that was not used to train the model; ensure domain/license.
+Объём:
+
+- 150–200 предложений (~3k–4k токенов) достаточно только для **общей** оценки UAS/LAS с широким CI; при p≈0.9 Wilson half-width по токенам ~1 п.п. без кластеризации, при DEFF 2–3 — ~1,5–2 п.п.; это не позволяет делать жанровые/авторские срезы.
+- Для подгрупп/узких CI нужен больший gold; число определяется симуляцией/целевой шириной CI, а не 150–200 по умолчанию.
+- Разбиение syntactic gold — по произведениям/авторам, не по токенам.
+- Оценивать UAS/LAS отдельно от style precision/recall.
+- Если целевая ширина CI для подгруппы — 3–4 п.п., требуется существенно больше предложений/токенов и несколько авторов; это проверяется power simulation до сбора.
 
 ## 9. Сценарии корпуса
 
-Все числа — оценки планирования, не факты. Prevalence неизвестна; positive counts могут не достигаться на естественной выборке.
+Все числа ниже — **планировочные конверты**, а не доказанные достаточные объёмы. Prevalence и ICC неизвестны; окончательный объём определяется симуляцией мощности (3.6), а не таблицей. Если симуляция показывает недостаточность — сценарий понижается по выводам, а не «добирается» произвольным числом.
 
-| Параметр | Минимальный | Рекомендуемый | Расширенный |
+### 9.1. Natural Sample
+
+Natural Sample не обогащается положительными примерами.
+
+| Параметр | Минимальный (пилот) | Рекомендуемый (work-level) | Расширенный (author-level candidate) |
 |---|---:|---:|---:|
 | Произведений | 3 | 8 | 18 |
 | Авторов | 3 | 6 | 12 |
 | Слов | ~30 000 | ~100 000 | ~300 000 |
-| Holdout | 1 произведение/1 автор | 2–3 произведения/2 автора | 5–6 произведений/3–4 автора |
-| Positive spans на категорию (ожидаемо) | 20–40 | 80–120 | 200–300 |
-| Negative/borderline units | 500–1 000 | 4 000–6 000 | 12 000–18 000 |
+| Holdout | 1 произведение / 1 автор | 2–3 произведения / 2 автора | 5–6 произведений / 3–4 автора |
+| Positive spans на категорию (естественно, ожидаемо) | 20–40 | 80–120 | 200–300 |
+| Negative units | 500–1 000 | 4 000–6 000 | 12 000–18 000 |
 | Аннотаторов | 2 | 2 + adjudicator | 3 + adjudicator |
 | Double annotation | 100% holdout, 10–20% dev | 100% holdout, 25% dev | 100% holdout, 30% dev |
 | Трудозатраты (оценка) | 250–400 ч | 700–1 100 ч | 2 200–3 500 ч |
-| Что можно | пилот, проверка guide, грубая оценка | per-category P/R/F1 с широкими CI, FP/1000 | жанровые/авторские срезы, устойчивые CI |
-| Что нельзя | настраивать пороги, делать выводы о качестве | утверждать переносимость на всю прозу | утверждать универсальность/коммерческую готовность |
 
-Обоснование: 30k слов даёт мало positive для редких категорий; 100k позволяет ~80–120 positive при prevalence ~0.1–0.3% и достаточно negative; 300k нужен для подгрупп и редких явлений. Точные числа проверить пилотом.
+Допустимые выводы (при условии, что power simulation это подтверждает):
+
+- **Минимальный:** только descriptive/pilot; per-category CI будут широкими; нельзя настраивать пороги и нельзя делать author-level выводы; holdout из 1 автора — только проверка пайплайна.
+- **Рекомендуемый:** возможны **work-level** оценки и FP/1000 с cluster bootstrap по работам; 6 авторов и holdout из 2 авторов **недостаточны** для надёжной author-level вариативности; author-level — exploratory, не подтверждающий.
+- **Расширенный:** author-level CIs возможны только если симуляция при реалистичном ICC это подтверждает; 12 авторов — кандидат, не гарантия; genre/epoch-срезы остаются ограниченными (см. 9.3).
+
+### 9.2. Challenge Set
+
+Challenge Set собирается отдельно и не смешивается с Natural Sample. Числа ниже — бюджетные конверты, а не статистически утверждённые minima; окончательные per-category n определяются power simulation и стоимостью, а не таблицей. Для ориентира: 10–15 positive дают очень широкий Wilson CI для recall, 40–50 — умеренный, 100+ нужны для подтипов; это не разрешение объявлять порог.
+
+| Параметр | Минимальный | Рекомендуемый | Расширенный |
+|---|---:|---:|---:|
+| Всего кейсов | 120 | 400 | 1 000 |
+| На категорию (positive/hard) | 10–15 | 40–50 | 100–125 |
+| Negative/ambiguous кейсов | 30–50 | 120–160 | 300–400 |
+| Назначение | диагностика guide | recall/омонимия/spans | устойчивая диагностика подтипов |
+
+Challenge используется для:
+
+- Recall и типичных пропусков;
+- омонимии, сложного синтаксиса, границ spans;
+- проверки поведения на редких конструкциях.
+
+Challenge **не** используется для:
+
+- оценки естественной prevalence;
+- прямой оценки natural Precision;
+- FP/1000 слов.
+
+### 9.3. Раздельные метрики и объединение
+
+По умолчанию публиковать **раздельно**:
+
+- Natural: prevalence, Precision, FP/1000/10000 слов; Recall — только если все natural positives размечены (для редких категорий это может быть невозможно).
+- Challenge: diagnostic Recall, boundary/ambiguity breakdown; Precision на challenge не выдавать за natural Precision.
+
+Объединение допустимо только с **весами обратной вероятности включения** (inclusion probabilities) и явной моделью смещения. Без весов объединённая precision/recall запрещена. Natural и challenge имеют разные знаменатели и разные цели.
+
+### 9.4. Жанры и эпохи
+
+- При 3 произведениях нельзя делать жанровые выводы.
+- При 8 произведениях/6 авторах жанровые срезы — описательные; не сравнивать жанры статистически.
+- При 18 произведениях/12 авторах жанровые/эпохальные сравнения возможны только если в каждом стратуме достаточно независимых авторов/работ; это проверяется симуляцией, а не количеством слов.
+- Нельзя выдавать «жанровый эффект» за авторский или наоборот без иерархической модели.
+
+### 9.5. Что нельзя утверждать
+
+- нельзя называть 2 авторов holdout надёжной меж­авторской выборкой;
+- нельзя переносить 6 авторов на «авторов вообще»;
+- нельзя заменять число авторов числом слов;
+- нельзя объявлять сценарий достаточным без power simulation;
+- нельзя публиковать один micro-показатель без per-category CI и n.
 
 ## 10. Юридические ограничения
 
-### 10.1. Общественное достояние
+### 10.1. Территории и срок
 
 - В России исключительное право действует в течение жизни автора и 70 лет с 1 января следующего года; см. ст. 1281 ГК РФ: [Consultant](https://www.consultant.ru/document/cons_doc_LAW_64629/675b81f0bc9b8ecd68ea332ecfd9d1562541fb98/).
-- Переход в общественное достояние и случаи исключений регулируются законом; проверять каждое произведение, а не только год смерти.
-- Переводы, предисловия, комментарии, составные издания, OCR/сканы могут иметь отдельные права. Использовать оригинальный русский текст и проверенный источник.
-- Moral rights/attribution и право на неприкосновенность могут сохраняться; юридическая проверка.
+- Проверять статус по **каждой применимой территории** (Россия, США, ЕС и другие рынки распространения), а не только по российскому сроку.
+- Учитывать соавторство, анонимные/посмертные произведения, репрессированных/реабилитированных авторов, исключения и переходные нормы.
+- Проверять **конкретное произведение**, а не только год смерти автора.
+- Проверять права на перевод, конкретное издание, предисловие, комментарии, состав, OCR/скан, дизайн/обложку.
+- Проверять условия цифрового источника (библиотека, архив, Wikisource, агрегатор); доступ ≠ право распространения.
+- Moral rights/attribution/неприкосновенность могут сохраняться; нужна юридическая проверка.
 
 ### 10.2. Открытые лицензии
 
@@ -788,9 +1060,24 @@ Style corpus labels are not sufficient for UAS/LAS. Use 150–200 manually annot
 
 GSD-модель и её лицензия — отдельный вопрос; модель не включать в корпусный репозиторий/установщик до юридического подтверждения. См. [UD Russian-GSD](https://universaldependencies.org/treebanks/ru_gsd/index.html), [UD Russian-SynTagRus](https://universaldependencies.org/treebanks/ru_syntagrus/index.html).
 
+### 10.6. Legal approval
+
+Для каждого произведения и источника — отдельный документ/запись:
+
+- `workId`, автор(ы), год смерти, соавторы;
+- территории распространения;
+- статус произведения и источника;
+- права на издание/перевод/комментарии;
+- лицензия/общественное достояние и доказательство;
+- ограничения хранения/распространения;
+- кто и когда провёл проверку;
+- решение: approved / rejected / needs_counsel.
+
+Без документированного approval произведение не входит ни в Natural Sample, ни в Challenge Set. Юридические выводы в этом документе не делаются.
+
 ## 11. Трудозатраты
 
-Оценка при 150–250 словах/час для полной разметки 8 категорий, включая spans/П/Р, плюс 20–30% на adjudication/QA:
+Оценка при 150–250 словах/час для полной разметки 8 категорий, включая spans/П/Р, плюс 20–30% на adjudication/QA. В таблицу входят Natural + Challenge; Challenge оценивается по кейсам, а не по словам, поэтому оценка приблизительная.
 
 | Этап | Минимальный | Рекомендуемый | Расширенный |
 |---|---:|---:|---:|
@@ -817,6 +1104,10 @@ GSD-модель и её лицензия — отдельный вопрос; �
 10. **Домен** — 19th-century prose не равен современной; расширять осторожно.
 11. **Synthetic leakage** — probe/тесты не смешивать с корпусом.
 12. **Модель/license** — GSD conditional; не включать.
+13. **2 автора holdout** — недостаточны для author-level bootstrap; не выдавать их за меж­авторскую выборку.
+14. **ICC неизвестна** — при высокой ICC даже 12 авторов могут не дать узких CI; нужна power simulation.
+15. **Natural/Challenge pooling** — без весов обратной вероятности смешает prevalence и diagnostic recall.
+16. **Издание/перевод** — public domain автора не означает public domain конкретного издания/перевода.
 
 ## 13. Критерии готовности к следующему этапу
 
