@@ -85,6 +85,7 @@ function validateParseResult(text, result) {
 }
 
 function validateFinding(text, finding) {
+  if (typeof text !== 'string') return { valid: false, errors: [{ path: 'text', message: 'ожидалась строка' }] };
   const errors = [];
   const fail = (path, message) => errors.push({ path, message });
   if (typeof text !== 'string') fail('text', 'ожидалась строка');
