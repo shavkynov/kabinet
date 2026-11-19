@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const { scanStyle } = require('../src/style');
 const { analyzeBlock } = require('../src/morph');
 
-const ALL = { chancery: true, weak: true, tell: true, chain: true, remark: true };
+const ALL = { chancery: true, weak: true, tell: true, chain: true, remark: true, redund: true, which: true, own: true };
 const scan = (text, kinds = ALL) => scanStyle(text, analyzeBlock(text).words, kinds);
 const found = (text, kind) => scan(text)[kind].map((h) => text.slice(h.start, h.end));
 
