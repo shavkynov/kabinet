@@ -111,6 +111,8 @@ function toggleFocusMode(force) {
 
 function wireChrome() {
   wireToolbar();
+  wireNarrowLayout();
+  wireChromeFade();
 
   $('#btnSidebar').addEventListener('click', toggleSidebar);
   $('#btnSettings').addEventListener('click', toggleSettings);
@@ -125,6 +127,7 @@ function wireChrome() {
   bindSetting('#setTypoLayout', 'typoLayout', (el) => el.checked);
   bindSetting('#setTypoKeep', 'typoKeep', (el) => Number(el.value));
   bindSetting('#setTypeAnim', 'typeAnim', (el) => el.checked);
+  bindSetting('#setChromeFade', 'chromeFade', (el) => el.checked);
   bindSetting('#setSearchEngine', 'searchEngine', (el) => el.value);
   bindSetting('#setMarks', 'marks', (el) => el.checked);
   bindSetting('#setMarksSpaces', 'marksSpaces', (el) => el.checked);

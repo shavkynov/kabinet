@@ -166,7 +166,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- рабочий экран ---------- */
 
-#workspace { display: flex; overflow: hidden; }
+#workspace { display: flex; overflow: hidden; position: relative; }
 
 #sidebar {
   width: min(var(--sidebar-w), 30vw);
@@ -1299,3 +1299,15 @@ body.mob .bar-sep { display: none; }
 .panel .typo-sub { padding-left: 18px; }
 .panel .row:has(#setTypoLayout:not(:checked)) + .typo-sub { opacity: .45; pointer-events: none; }
 .panel #setPara { min-width: 190px; }
+
+/* ---------- узкое окно: панели выезжают поверх листа ---------- */
+body.narrow:not(.mob) #sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 5; box-shadow: 2px 0 14px rgba(0, 0, 0, .16); }
+body.narrow:not(.mob) #notesbar { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; box-shadow: -2px 0 14px rgba(0, 0, 0, .16); }
+body.narrow:not(.mob) #resizer, body.narrow:not(.mob) #notesResizer { display: none; }
+body.narrow:not(.mob) #statusDock { width: var(--dock-w); }
+body.narrow:not(.mob) #statusDock { z-index: 6; }
+body.narrow:not(.mob) #toolbar { padding-right: calc(12px + var(--dock-w)); }
+
+/* ---------- кнопки гаснут, пока печатаете ---------- */
+.chrome-btn, #chromeRight, #statusDock { transition-property: opacity, left, right; transition-duration: .25s, .15s, .15s; }
+body.typing:not(.focus-mode) .chrome-btn:not(.on), body.typing #statusDock:not(.has-err) { opacity: 0; pointer-events: none; }

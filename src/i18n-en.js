@@ -965,6 +965,8 @@ module.exports = {
   "Набор": "Typing",
   "Подчёркивать ошибки": "Underline mistakes",
   "Плавное появление букв": "Smooth letter appearance",
+  "Прятать кнопки при наборе": "Hide buttons while typing",
+  "Кнопки по краям окна гаснут, пока вы печатаете, и возвращаются, когда вы двигаете мышь.": "Buttons at the window edges fade while you type and return when you move the mouse.",
   "Автозамена при наборе": "Autocorrect while typing",
   "«Ёлочки», тире, многоточие": "Guillemets, dashes, ellipsis",
   "Неразрывный пробел после коротких слов": "Non-breaking space after short words",

@@ -11,7 +11,9 @@ let sidebarWidth = 260; // последняя «нормальная» шири�
 function applySidebarHidden(hidden) {
   if (document.body.classList.contains('m-dl')) { setDrawer('l', !hidden); return; } // Android: панель выезжает поверх листа
   document.body.classList.toggle('sidebar-hidden', hidden);
-  try { localStorage.setItem('kabinet.sidebarHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
+  if (!document.body.classList.contains('narrow')) { // в узком окне панели лишь выезжают поверх листа, выбор не запоминаем
+    try { localStorage.setItem('kabinet.sidebarHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
+  }
   setTimeout(() => { updateTwPad(); layoutGoal(); }, 0);
 }
 

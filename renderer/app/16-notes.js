@@ -162,7 +162,9 @@ function wireNotes() {
 function applyNotesHidden(hidden) {
   if (document.body.classList.contains('m-dr')) { setDrawer('r', !hidden); return; } // Android: панель выезжает поверх листа
   document.body.classList.toggle('notes-hidden', hidden);
-  try { localStorage.setItem('kabinet.notesHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
+  if (!document.body.classList.contains('narrow')) {
+    try { localStorage.setItem('kabinet.notesHidden', hidden ? '1' : '0'); } catch { /* ignore */ }
+  }
   refreshBar();
   setTimeout(() => { updateTwPad(); layoutGoal(); }, 0);
 }

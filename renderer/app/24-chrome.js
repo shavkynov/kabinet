@@ -13,10 +13,13 @@ function anyPanelOpen() {
 }
 
 function closePanels() {
+  const inside = Object.values(PANELS).some(([panel]) => $(panel).contains(document.activeElement));
   for (const [panel, btn] of Object.values(PANELS)) {
     $(panel).hidden = true;
     $(btn).classList.remove('on');
   }
+  // Фокус не должен пропасть вместе с панелью: возвращаем его в текст.
+  if (inside && editor && editor.isEditable && currentId && isTextKind(currentKind)) editor.commands.focus();
 }
 
 function openPanel(name) {
@@ -26,6 +29,11 @@ function openPanel(name) {
   $(panel).hidden = false;
   $(btn).classList.add('on');
   if (name === 'check' && checker) checker.open();
+  // Клавиатура сразу работает внутри открытой панели (Tab, стрелки, пробел). Список замечаний не трогаем: там правят текст.
+  if (name !== 'check') {
+    const first = $(panel).querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])');
+    if (first) first.focus({ preventScroll: true });
+  }
 }
 
 function togglePanel(name) {
@@ -43,6 +51,37 @@ function wireChromeLayout() {
   set();
 }
 wireChromeLayout();
+
+// Узкое окно: боковые панели не сжимают лист, а выезжают поверх него; клик по листу их убирает.
+const NARROW_W = 900;
+function wireNarrowLayout() {
+  const b = document.body;
+  const hideSides = () => {
+    b.classList.add('sidebar-hidden', 'notes-hidden');
+    refreshBar();
+  };
+  const apply = () => {
+    if (b.classList.contains('mob')) return;
+    const narrow = window.innerWidth < NARROW_W;
+    if (narrow === b.classList.contains('narrow')) return;
+    b.classList.toggle('narrow', narrow);
+    if (narrow) {
+      hideSides();
+    } else {
+      let sh = false; let nh = false;
+      try { sh = localStorage.getItem('kabinet.sidebarHidden') === '1'; nh = localStorage.getItem('kabinet.notesHidden') === '1'; } catch { /* ignore */ }
+      b.classList.toggle('sidebar-hidden', sh);
+      b.classList.toggle('notes-hidden', nh);
+      refreshBar();
+    }
+    setTimeout(() => { updateTwPad(); layoutGoal(); }, 0);
+  };
+  window.addEventListener('resize', apply);
+  apply();
+  $('#stage').addEventListener('mousedown', () => {
+    if (b.classList.contains('narrow') && (!b.classList.contains('sidebar-hidden') || !b.classList.contains('notes-hidden'))) hideSides();
+  });
+}
 
 const openSettings = () => openPanel('text');
 const closeSettings = closePanels;
@@ -67,3 +106,20 @@ function wireSheetClick() {
   });
 }
 
+
+// Пока вы печатаете, кнопки по краям окна гаснут; вернутся от движения мыши. Открытая панель не гаснет.
+function wireChromeFade() {
+  const b = document.body;
+  const show = () => b.classList.remove('typing');
+  document.addEventListener('keydown', (e) => {
+    if (!settings.chromeFade || anyPanelOpen() || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key.length !== 1 && e.key !== 'Backspace' && e.key !== 'Enter') return;
+    if (e.target.closest && e.target.closest('.ProseMirror')) b.classList.add('typing');
+  }, true);
+  let lx = -1; let ly = -1;
+  document.addEventListener('mousemove', (e) => {
+    if (Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly) > 3) show();
+    lx = e.clientX; ly = e.clientY;
+  });
+  document.addEventListener('mousedown', show);
+}

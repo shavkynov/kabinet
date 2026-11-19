@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   customIcons: [], // свои смайлы для карточек (дополняют набор из menu.js)
   searchEngine: LANG === 'en' ? 'google' : 'yandex', // «Искать в интернете» в меню правой кнопки
   typeAnim: true,   // плавное появление набираемых букв
+  chromeFade: true, // кнопки по краям окна гаснут, пока печатаете
   typoNbsp: false,  // неразрывные пробелы: по умолчанию выключены (Word и онлайн-публикации)
   typoLayout: true, // «Привести типографику в порядок» убирает пустые абзацы (красную строку выбирают отдельно, в «Абзацах»)
   exportNumbers: false,
@@ -92,6 +93,7 @@ function loadSettings() {
     if (typeof raw.spellOn === 'boolean') s.spellOn = raw.spellOn;
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
+    if (typeof raw.chromeFade === 'boolean') s.chromeFade = raw.chromeFade;
     if (isEngine(raw.searchEngine)) s.searchEngine = raw.searchEngine;
     if (Array.isArray(raw.customIcons)) s.customIcons = cleanIconList(raw.customIcons);
     if (typeof raw.marks === 'boolean') s.marks = raw.marks;
@@ -192,6 +194,8 @@ function applySettings() {
   $('#setTypoKeep').value = String(settings.typoKeep);
   $('#setTypoKeep').disabled = !settings.typoLayout;
   $('#setTypeAnim').checked = settings.typeAnim;
+  $('#setChromeFade').checked = settings.chromeFade;
+  if (!settings.chromeFade) document.body.classList.remove('typing');
   $('#setSearchEngine').value = settings.searchEngine;
   $('#setMarks').checked = settings.marks;
   $('#setMarksSpaces').checked = settings.marksSpaces;
