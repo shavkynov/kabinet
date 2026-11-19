@@ -96,7 +96,10 @@ async function openPane2(id, keepView) {
     return;
   }
   const token = ++p2.token;
-  await flushPane2();
+  if (!(await flushPane2())) { // прежняя глава не записана: не заменяем её текст другим
+    fillP2Select();
+    return false;
+  }
   if (token !== p2.token) return;
   try {
     const text = await api.readChapter(id);
@@ -126,10 +129,13 @@ async function openPane2(id, keepView) {
   }
 }
 
+// Закрывает второй лист. Если запись не удалась, лист остаётся открытым: текст на экране, повтор записи идёт.
+// Возвращает true, когда лист закрыт, и false, когда закрытие отложено из-за сбоя.
 async function closePane2() {
   p2.token += 1;
-  await flushPane2();
+  if (!(await flushPane2())) return false;
   resetPane2();
+  return true;
 }
 
 // Закрывает панель без записи (запись уже сделана или не нужна).

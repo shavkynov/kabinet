@@ -98,7 +98,7 @@ async function openDoc(kind, id, keepView) {
       if (!(await flush())) return; // пока читали, в старом документе успели напечатать
       if (token !== openToken) return;
     }
-    if (kind === 'chapter' && id === p2.id) await closePane2(); // одна глава не может быть открыта в двух местах
+    if (kind === 'chapter' && id === p2.id && !(await closePane2())) return; // одна глава не может быть открыта в двух местах; сбой записи второго листа — не открываем
     currentKind = kind;
     currentId = id;
     lastSelected[kind] = id;
