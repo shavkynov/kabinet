@@ -37,8 +37,8 @@ test('parse contract: принимает валидное дерево и сох
       tokens: [
         { id: 1, text: 'Он', lemma: 'он', upos: 'PRON', feats: { Case: 'Nom' }, head: 2, deprel: 'nsubj', start: 0, end: 2, confidence: null },
         { id: 2, text: 'открыл', lemma: 'открыть', upos: 'VERB', feats: { VerbForm: 'Fin' }, head: 0, deprel: 'root', start: 3, end: 9, confidence: null },
-        { id: 3, text: 'дверь', lemma: 'дверь', upos: 'NOUN', feats: { Case: 'Acc' }, head: 2, deprel: 'obj', start: 10, end: 14, confidence: null },
-        { id: 4, text: '.', lemma: '.', upos: 'PUNCT', feats: {}, head: 2, deprel: 'punct', start: 14, end: 15, confidence: null }
+        { id: 3, text: 'дверь', lemma: 'дверь', upos: 'NOUN', feats: { Case: 'Acc' }, head: 2, deprel: 'obj', start: 10, end: 15, confidence: null },
+        { id: 4, text: '.', lemma: '.', upos: 'PUNCT', feats: {}, head: 2, deprel: 'punct', start: 15, end: 16, confidence: null }
       ]
     }]
   };
