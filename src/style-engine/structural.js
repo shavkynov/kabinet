@@ -51,6 +51,7 @@ const KNOWN_NUMBERS = new Set(['Sing', 'Plur']);
 const KNOWN_GENDERS = new Set(['Masc', 'Fem', 'Neut', 'Com']);
 
 const DIRECTIONAL_PLEONASMS = new Map([
+
   ['вернуться', new Set(['обратно'])],
   ['возвращаться', new Set(['обратно'])],
   ['подняться', new Set(['вверх', 'наверх'])],
@@ -64,6 +65,12 @@ const DIRECTIONAL_PLEONASMS = new Map([
   ['упасть', new Set(['вниз'])],
   ['упать', new Set(['вниз'])],
   ['падать', new Set(['вниз'])],
+]);
+const SPEECH_VERB_LEMMAS = new Set([
+  'сказать', 'говорить', 'ответить', 'отвечать', 'спросить', 'спрашивать',
+  'произнести', 'проговорить', 'пробормотать', 'прошептать', 'крикнуть',
+  'воскликнуть', 'добавить', 'заметить', 'возразить', 'повторить',
+  'подтвердить', 'уточнить', 'перебить',
 ]);
 const TAUTOLOGICAL_PAIRS = [
   { head: 'сувенир', dependent: 'памятный', deprel: 'amod' },
@@ -626,6 +633,66 @@ function findRedund(text, sentence, speech = speechRanges(text)) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+function isMinimalAttribution(verb, children, text) {
+  if (!verb || verb.upos !== 'VERB' || !SPEECH_VERB_LEMMAS.has(lemmaOf(verb))) return null;
+  if (!verb.feats || Object.keys(verb.feats).length === 0) return null;
+  const kids = children.get(verb.id) || [];
+  if (kids.some((c) => !['punct', 'nsubj', 'aux'].includes(c.deprel))) return null;
+  const subject = kids.find((c) => c.deprel === 'nsubj');
+  if (!subject || !subject.feats || Object.keys(subject.feats).length === 0) return null;
+  if (!validSpan(verb, text) || !validSpan(subject, text)) return null;
+  return { start: Math.min(verb.start, subject.start), end: Math.max(verb.end, subject.end), verb, subject };
+}
+
+function findRemark(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !speech.length || !hasValidDependencyForest(tokens)) return [];
+  const children = childrenByHead(tokens);
+  const attributions = [];
+  for (const token of tokens) {
+    if (tokenInSpeech(token, speech)) continue;
+    const attribution = isMinimalAttribution(token, children, text);
+    if (!attribution || tokenInSpeech(attribution.subject, speech)) continue;
+    attributions.push(attribution);
+  }
+  if (attributions.length < 2) return [];
+  attributions.sort((a, b) => a.start - b.start || a.end - b.end);
+  const separator = /^[\s,.;:!?…—–-]*$/u;
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < attributions.length; i += 1) {
+    for (let j = i + 1; j < attributions.length; j += 1) {
+      const a = attributions[i];
+      const b = attributions[j];
+      if (lemmaOf(a.verb) !== lemmaOf(b.verb) || lemmaOf(a.subject) !== lemmaOf(b.subject)) continue;
+      if (!separator.test(text.slice(a.end, b.start))) continue;
+      const near = speech.some(([s, e]) => (e <= a.start && separator.test(text.slice(e, a.start)))
+        || (s >= b.end && separator.test(text.slice(b.end, s))));
+      if (!near) continue;
+      const key = `${a.start}:${b.end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        category: 'remark',
+        ruleId: 'remark.duplicate-attribution',
+        start: a.start,
+        end: b.end,
+        fragment: text.slice(a.start, b.end),
+        explanation: 'Две минимальные атрибуции подряд с одинаковыми речевым глаголом и субъектом при одной реплике.',
+        method: ['dependency:nsubj', 'lexicon:speech-verb', 'construction:minimal-attribution', 'direct-speech-boundary'],
+        confidence: 'low',
+        limitations: [
+          'Повтор атрибуции может быть намеренным приёмом; finding — кандидат.',
+          'Субъект сравнивается по лемме, дискурсивная кореференция не устанавливается.',
+          'Ремарка с самостоятельным действием/интонацией не считается минимальной.',
+          'Confidence не калиброван на независимом корпусе.',
+        ],
+      });
+    }
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function isSubordinateClauseRoot(token, children) {
   const dependents = children.get(token.id) || [];
   const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
@@ -773,7 +840,7 @@ function findSubordinateAvalanches(text, sentence) {
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [], remark: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
@@ -783,8 +850,9 @@ function analyzeStructural(text, parseResult, enabled = {}) {
     if (enabled.weak) result.weak.push(...findWeak(text, sentence, speech));
     if (enabled.own) result.own.push(...findOwn(text, sentence, speech));
     if (enabled.redund) result.redund.push(...findRedund(text, sentence, speech));
+    if (enabled.remark) result.remark.push(...findRemark(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn, findRedund };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn, findRedund, findRemark };

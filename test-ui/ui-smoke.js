@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку. Он вернулся обратно.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку. Он вернулся обратно. «Я не пойду», — сказал он, — сказал он.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -50,6 +50,35 @@ function fakeTauri() {
             return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
           });
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
+      if (window.__styleRemark) {
+        const phrase = '«Я не пойду», — сказал он, — сказал он.';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['«', '«', 'PUNCT', {}, 4, 'punct'],
+            ['Я', 'я', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+            ['не', 'не', 'PART', {}, 4, 'advmod'],
+            ['пойду', 'пойти', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+            ['»', '»', 'PUNCT', {}, 4, 'punct'],
+            [',', ',', 'PUNCT', {}, 8, 'punct'],
+            ['—', '—', 'PUNCT', {}, 8, 'punct'],
+            ['сказал', 'сказать', 'VERB', { VerbForm: 'Fin' }, 4, 'parataxis'],
+            ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+            [',', ',', 'PUNCT', {}, 12, 'punct'],
+            ['—', '—', 'PUNCT', {}, 12, 'punct'],
+            ['сказал', 'сказать', 'VERB', { VerbForm: 'Fin' }, 9, 'parataxis'],
+            ['он', 'он', 'PRON', { Case: 'Nom' }, 12, 'nsubj'],
+            ['.', '.', 'PUNCT', {}, 4, 'punct'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-remark', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
       if (window.__styleRedund) {
@@ -271,6 +300,13 @@ function fakeTauri() {
   ok(!!redundShadow && redundShadow.redundCount === 1 && redundShadow.redund[0].fragment === 'вернулся обратно', 'тень: redund finding доступен в diagnostics');
   ok(!!redundShadow && redundShadow.ruleErrors.length === 0, 'тень: redund не дал rule error');
   await page.evaluate(() => { window.__styleRedund = false; });
+  await page.evaluate(() => { window.__styleRemark = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const remarkShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!remarkShadow && remarkShadow.remarkCount === 1 && remarkShadow.remark[0].fragment === 'сказал он, — сказал он', 'тень: remark finding доступен в diagnostics');
+  ok(!!remarkShadow && remarkShadow.ruleErrors.length === 0, 'тень: remark не дал rule error');
+  await page.evaluate(() => { window.__styleRemark = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 
