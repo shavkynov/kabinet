@@ -93,7 +93,14 @@ jobs:
       - run: npm run build
       - run: node experiments/tauri-app/build.cjs
       - run: npm i --no-save playwright@1.49.1
-      - run: npx playwright install --with-deps chromium
+      - name: Chromium для UI-smoke (повтор при сбое зеркал apt)
+        run: |
+          for attempt in 1 2 3; do
+            if npx playwright install --with-deps chromium; then exit 0; fi
+            echo "Попытка $attempt не удалась, повтор через 20 секунд." >&2
+            sleep 20
+          done
+          exit 1
       - run: node test-ui/ui-smoke.js
 
   # Тесты Rust и компиляция оболочки на всех системах при каждом push и запросе слияния,
