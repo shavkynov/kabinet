@@ -217,3 +217,80 @@ test('tell: нейтральные существительные и чужие 
   assert.equal(all.chain.length, 0);
   assert.equal(all.which.length, 0);
 });
+
+test('tell morphology: частичные feats не дают finding', () => {
+  const text = 'Он почувствовал страх.';
+  const subjectNoNumber = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['почувствовал', 'почувствовать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['страх', 'страх', 'NOUN', { Case: 'Acc', Number: 'Sing' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, subjectNoNumber), []);
+  const nounOnlyCase = [
+    ['Он', 'он', 'PRON', { Case: 'Nom', Number: 'Sing' }, 2, 'nsubj'],
+    ['почувствовал', 'почувствовать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['страх', 'страх', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, nounOnlyCase), []);
+  const verbNoForm = [
+    ['Он', 'он', 'PRON', { Case: 'Nom', Number: 'Sing' }, 2, 'nsubj'],
+    ['почувствовал', 'почувствовать', 'VERB', { Voice: 'Act' }, 0, 'root'],
+    ['страх', 'страх', 'NOUN', { Case: 'Acc', Number: 'Sing' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, verbNoForm), []);
+});
+
+test('tell morphology: возвратный глагол требует Number у подлежащего', () => {
+  const text = 'Он испугался.';
+  const rows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['испугался', 'испугаться', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, rows), []);
+});
+
+test('tell morphology: состояние требует Loc/Number и полные признаки копулы/подлежащего', () => {
+  const text = 'Он был в ярости.';
+  const nounOnlyCase = [
+    ['Он', 'он', 'PRON', { Case: 'Nom', Number: 'Sing' }, 4, 'nsubj'],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 4, 'cop'],
+    ['в', 'в', 'ADP', {}, 4, 'case'],
+    ['ярости', 'ярость', 'NOUN', { Case: 'Loc' }, 0, 'root'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, nounOnlyCase), []);
+  const copNoForm = [
+    ['Он', 'он', 'PRON', { Case: 'Nom', Number: 'Sing' }, 4, 'nsubj'],
+    ['был', 'быть', 'AUX', { Voice: 'Act' }, 4, 'cop'],
+    ['в', 'в', 'ADP', {}, 4, 'case'],
+    ['ярости', 'ярость', 'NOUN', { Case: 'Loc', Number: 'Sing' }, 0, 'root'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, copNoForm), []);
+  const subjectNoNumber = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 4, 'cop'],
+    ['в', 'в', 'ADP', {}, 4, 'case'],
+    ['ярости', 'ярость', 'NOUN', { Case: 'Loc', Number: 'Sing' }, 0, 'root'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, subjectNoNumber), []);
+});
+
+test('tell: дополнительный case-токен у состояния отменяет finding', () => {
+  const text = 'Он был в ярости с улыбкой.';
+  const rows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom', Number: 'Sing' }, 4, 'nsubj'],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 4, 'cop'],
+    ['в', 'в', 'ADP', {}, 4, 'case'],
+    ['ярости', 'ярость', 'NOUN', { Case: 'Loc', Number: 'Sing' }, 0, 'root'],
+    ['с', 'с', 'ADP', {}, 4, 'case'],
+    ['улыбкой', 'улыбка', 'NOUN', { Case: 'Ins', Number: 'Sing' }, 4, 'nmod'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(tellHits(text, rows), []);
+});
