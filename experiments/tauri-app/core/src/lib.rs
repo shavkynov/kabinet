@@ -18,6 +18,7 @@ pub mod namematch;
 pub mod remote;
 pub mod searchreplace;
 pub mod stats;
+pub mod style_parser;
 pub mod store;
 pub mod syncguard;
 pub mod watcher;

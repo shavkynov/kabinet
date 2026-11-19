@@ -4,6 +4,7 @@
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
 use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searchreplace, store};
+use kabinet_core::style_parser::StyleParser;
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
@@ -466,6 +467,18 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
     let a = &args;
     let dav: Arc<DavApi> = dav.inner().clone();
     match channel.as_str() {
+        "style:parse" => {
+            let text = arg_str(a, 0)?;
+            let task_id = a.get(1).and_then(Value::as_u64).ok_or_else(|| "Не передан номер задачи.".to_string())?;
+            let svc = app.state::<Arc<StyleParser>>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || svc.parse(task_id, &text))
+                .await.map_err(|e| format!("Поток разбора завершился: {}", e))?
+        }
+        "style:cancel" => {
+            let task_id = a.first().and_then(Value::as_u64).ok_or_else(|| "Не передан номер задачи.".to_string())?;
+            app.state::<Arc<StyleParser>>().cancel(task_id);
+            Ok(json!(true))
+        }
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
         "log:write" => {
             let level = a.first().and_then(|v| v.as_str()).unwrap_or("info");
@@ -904,6 +917,11 @@ fn main() {
             if let Ok(Some(start)) = app.deep_link().get_current() { take(start.iter().map(|u| u.to_string()).collect()); }
             app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
             app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))));
+            // Модель стилевого анализа не входит в установщик до юридической проверки.
+            let style_model = std::env::var("KABINET_STYLE_MODEL").map(PathBuf::from).unwrap_or_else(|_| {
+                app.path().resource_dir().unwrap_or_else(|_| data.clone()).join("style-models/russian-gsd-ud-2.5-191206.udpipe")
+            });
+            app.manage(Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok())));
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.
             let h = app.handle().clone();

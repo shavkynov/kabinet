@@ -33,6 +33,8 @@ function fakeTauri() {
     'cards:index': () => [],
     'project:rename': (name) => { project.name = name; return project; },
     'spell:check': (w) => (w === 'Слизеринцы' || w === 'слизеринцы' ? { available: true, ok: false, suggestions: ['слизеринцев', 'слизерины'] } : { available: true, ok: true, suggestions: [] }),
+    'style:parse': (text, id) => ({ taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake', version: '1' }, sentences: [{ start: 0, end: 1, text: 'x', tokens: [] }] } }),
+    'style:cancel': () => true,
   };
   window.__TAURI__ = {
     core: { invoke: async (cmd, { channel, args } = {}) => { calls.push([channel, args]); const h = handlers[channel]; return h ? h(...(args || [])) : null; } },
@@ -50,6 +52,7 @@ function fakeTauri() {
   page.on('console', (m) => { if (m.type() === 'error' && !/status of 404/.test(m.text())) errors.push('console: ' + m.text()); });
   page.on('response', (r) => { if (r.status() >= 400 && !/favicon/.test(r.url())) errors.push(`${r.status()} ${r.url()}`); });
   await page.addInitScript(fakeTauri);
+  await page.addInitScript(() => { try { localStorage.setItem('kabinet.styleEngineShadow', '1'); } catch { /* нет хранилища */ } });
   await page.goto(base);
   await page.evaluate(() => { document.documentElement.setAttribute('spellcheck', 'true'); });
   await page.waitForSelector('#btnOpen', { state: 'visible', timeout: 20000 }).catch(() => {});
@@ -99,8 +102,18 @@ function fakeTauri() {
   ok(/слизеринцев/.test(spellMenu) && /Добавить «Слизеринцы» в словарь/.test(spellMenu) && /Пропустить/.test(spellMenu), 'слово с ошибкой: варианты, «Добавить в словарь», «Пропустить». Получено: ' + spellMenu.slice(0, 160).replace(/\n/g, ' / '));
   await page.keyboard.press('Escape');
 
+  // теневой режим: новый парсер вызывается, но не создаёт подсветку и не трогает старый анализ
+  await page.locator('.ProseMirror').first().click();
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1500);
+  const shadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!shadow && shadow.ok === true, 'тень: парсер ответил без ошибки');
+  ok(!!shadow && shadow.sentences === 1, 'тень: результат разобран в контракт');
+  const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
+  ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
+
   // стиль текста: галочка в отдельной панели включает подсветку и сохраняется
-  await page.click('#btnStyle');
+  await page.locator('#btnStyle').click({ force: true });
   await page.waitForSelector('#stylePanel', { state: 'visible', timeout: 3000 }).catch(() => {});
   const styleBox = page.locator('#an_chancery');
   ok(await styleBox.isVisible(), 'стиль: галочка «Канцелярит и штампы» видна');

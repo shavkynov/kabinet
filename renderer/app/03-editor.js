@@ -56,6 +56,7 @@ function initEditor() {
       scheduleTense();
       scheduleRhythm();
       scheduleCommentRefresh();
+      scheduleStyleShadow();
       if (loading || !currentId || !isTextKind(currentKind)) return;
       markDirty();
       scheduleCenter();
