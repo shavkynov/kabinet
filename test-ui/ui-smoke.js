@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -50,6 +50,25 @@ function fakeTauri() {
             return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
           });
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
+      if (window.__styleWeak) {
+        const phrase = 'Он имеет значение.';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+            ['имеет', 'иметь', 'VERB', { VerbForm: 'Fin', Voice: 'Act' }, 0, 'root'],
+            ['значение', 'значение', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+            ['.', '.', 'PUNCT', {}, 2, 'punct'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-weak', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
       if (window.__styleChancery) {
@@ -192,6 +211,13 @@ function fakeTauri() {
   ok(!!chanceryShadow && chanceryShadow.chanceryCount === 1 && chanceryShadow.chancery[0].fragment === 'осуществлял разведку', 'тень: chancery finding доступен в diagnostics');
   ok(!!chanceryShadow && chanceryShadow.ruleErrors.length === 0, 'тень: chancery не дал rule error');
   await page.evaluate(() => { window.__styleChancery = false; });
+  await page.evaluate(() => { window.__styleWeak = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const weakShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!weakShadow && weakShadow.weakCount === 1 && weakShadow.weak[0].fragment === 'имеет значение', 'тень: weak finding доступен в diagnostics');
+  ok(!!weakShadow && weakShadow.ruleErrors.length === 0, 'тень: weak не дал rule error');
+  await page.evaluate(() => { window.__styleWeak = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 

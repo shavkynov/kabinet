@@ -31,6 +31,25 @@ const OFFICIAL_PREPOSITION_NOUNS = new Set([
 ]);
 const EVENT_SUFFIX = /(?:ание|ение|яние|тие|ие|ция)$/u;
 
+const WEAK_SUPPORT_VERBS = new Set([
+  'иметь', 'делать', 'вести', 'носить', 'представлять', 'играть', 'оказывать',
+  'производить', 'давать', 'вызывать', 'проявлять', 'привлекать', 'совершать',
+]);
+const WEAK_PREPOSITION_VERBS = new Set([
+  'находиться', 'пользоваться', 'подвергаться', 'приходить', 'впадать',
+  'пребывать', 'состоять', 'заключаться',
+]);
+const WEAK_VERB_SURFACE = new Set(['ведет', 'веду', 'ведешь', 'ведем', 'ведут', 'вел', 'вела', 'вело', 'вели']);
+const ABSTRACT_NOUN_LEMMAS = new Set([
+  'значение', 'место', 'роль', 'характер', 'возможность', 'влияние', 'впечатление',
+  'сомнение', 'критика', 'популярность', 'состояние', 'восторг', 'борьба', 'ошибка',
+  'вывод', 'выбор', 'решение', 'усилие', 'попытка', 'участие', 'поддержка', 'помощь',
+  'польза', 'смысл', 'ценность', 'значимость', 'необходимость', 'важность', 'интерес',
+  'успех', 'внимание', 'ответственность', 'инициатива', 'активность', 'деятельность',
+  'развитие',
+]);
+
+
 function isEventNoun(token) {
   if (!token || token.upos !== 'NOUN' || !token.feats || Object.keys(token.feats).length === 0) return false;
   const lemma = lemmaOf(token);
@@ -314,6 +333,82 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+function weakVerbLemma(token) {
+  const lemma = lemmaOf(token);
+  if (WEAK_SUPPORT_VERBS.has(lemma) || WEAK_PREPOSITION_VERBS.has(lemma)) return lemma;
+  const surface = String(token.text || '').toLowerCase().replace(/ё/g, 'е');
+  return WEAK_VERB_SURFACE.has(surface) ? 'вести' : lemma;
+}
+
+function isAbstractNoun(token) {
+  return !!token && token.upos === 'NOUN' && token.feats && Object.keys(token.feats).length > 0
+    && ABSTRACT_NOUN_LEMMAS.has(lemmaOf(token));
+}
+
+function isChanceryLightConstruction(verb, kids) {
+  return LIGHT_VERB_LEMMAS.has(lemmaOf(verb))
+    && kids.some((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
+}
+
+function findWeak(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
+  const children = childrenByHead(tokens);
+  const out = [];
+  const seen = new Set();
+  const add = (ruleId, start, end, explanation, method, confidence) => {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length) return;
+    if (text.slice(start, end).length !== end - start) return;
+    if (speech.some(([a, b]) => start < b && end > a)) return;
+    const key = `${ruleId}:${start}:${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      category: 'weak',
+      ruleId,
+      start,
+      end,
+      fragment: text.slice(start, end),
+      explanation,
+      method,
+      confidence,
+      limitations: [
+        'Слабость глагола — структурная гипотеза, а не доказанная ошибка.',
+        'Устойчивые выражения, идиомы и авторская интонация могут быть допустимы.',
+        'Семантика и контекст жанра не анализируются; confidence не калиброван.',
+      ],
+    });
+  };
+
+  for (const token of tokens) {
+    if (!validSpan(token, text) || tokenInSpeech(token, speech)) continue;
+    if (token.upos !== 'VERB' || !token.feats || Object.keys(token.feats).length === 0) continue;
+    if (token.feats.Voice === 'Pass') continue;
+    const kids = children.get(token.id) || [];
+    if (kids.some((c) => c.deprel === 'aux:pass' || c.deprel === 'cop')) continue;
+    const lemma = weakVerbLemma(token);
+    const direct = kids.find((child) => ['obj', 'nsubj', 'iobj'].includes(child.deprel) && isAbstractNoun(child));
+    const prepared = kids.find((child) => ['obj', 'iobj', 'obl'].includes(child.deprel) && isAbstractNoun(child));
+
+    if (WEAK_SUPPORT_VERBS.has(lemma)) {
+      if (isChanceryLightConstruction(token, kids)) continue;
+      const noun = direct;
+      if (!noun) continue;
+      const hasCase = (children.get(noun.id) || []).some((c) => c.deprel === 'case');
+      add('weak.support-verb-abstract-noun', Math.min(token.start, noun.start), Math.max(token.end, noun.end),
+        `Поддерживающий глагол «${token.text}» с абстрактным существительным «${noun.text}»; точное действие выражено именем, а не глаголом.`,
+        [`dependency:${noun.deprel}`, 'lexicon:support-verb', 'lexicon:abstract-noun', ...(hasCase ? ['dependency:case'] : [])],
+        hasCase ? 'low' : 'medium');
+    } else if (WEAK_PREPOSITION_VERBS.has(lemma) && prepared) {
+      const hasCase = (children.get(prepared.id) || []).some((c) => c.deprel === 'case');
+      add('weak.prepositional-abstract-noun', Math.min(token.start, prepared.start), Math.max(token.end, prepared.end),
+        `Глагол «${token.text}» образует описательную конструкцию с абстрактным существительным «${prepared.text}».`,
+        ['dependency:obl', ...(hasCase ? ['dependency:case'] : []), 'lexicon:support-verb', 'lexicon:abstract-noun'], 'low');
+    }
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function isSubordinateClauseRoot(token, children) {
   const dependents = children.get(token.id) || [];
   const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
@@ -461,15 +556,16 @@ function findSubordinateAvalanches(text, sentence) {
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
     if (enabled.chain) result.chain.push(...findNounChains(text, sentence));
     if (enabled.which) result.which.push(...findSubordinateAvalanches(text, sentence));
     if (enabled.chancery) result.chancery.push(...findChancery(text, sentence, speech));
+    if (enabled.weak) result.weak.push(...findWeak(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak };

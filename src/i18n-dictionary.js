@@ -4,6 +4,7 @@
 module.exports = {
   ...require('./i18n-sync-en'),
   ...require('./i18n-en'),
+  'weak rule вернул не массив.': 'The weak rule returned a non-array.',
   'chancery rule вернул не массив.': 'The chancery rule returned a non-array.',
   'which rule вернул не массив.': 'The which rule returned a non-array.',
   'chain rule вернул не массив.': 'The chain rule returned a non-array.',
