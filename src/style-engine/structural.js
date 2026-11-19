@@ -66,6 +66,20 @@ const DIRECTIONAL_PLEONASMS = new Map([
   ['упать', new Set(['вниз'])],
   ['падать', new Set(['вниз'])],
 ]);
+
+const EXPERIENCE_VERBS = new Set(['почувствовать', 'чувствовать', 'ощутить', 'ощущать', 'испытывать']);
+const EMOTION_VERBS = new Set([
+  'испугаться', 'обрадоваться', 'разозлиться', 'расстроиться', 'удивиться',
+  'обидеться', 'взволноваться', 'загрустить', 'разочароваться', 'смутиться',
+  'встревожиться', 'возмутиться', 'восхититься', 'ужаснуться',
+]);
+const EMOTION_NOUNS = new Set([
+  'страх', 'гнев', 'радость', 'печаль', 'тревога', 'обида', 'стыд', 'вина',
+  'отвращение', 'зависть', 'нежность', 'восторг', 'ужас', 'паника', 'раздражение',
+  'досада', 'грусть', 'тоска', 'смущение', 'волнение', 'удивление',
+  'разочарование', 'облегчение', 'удовольствие', 'счастье', 'ярость', 'ненависть',
+  'презрение', 'опасение', 'беспокойство', 'испуг', 'отчаяние',
+]);
 const SPEECH_VERB_LEMMAS = new Set([
   'сказать', 'говорить', 'ответить', 'отвечать', 'спросить', 'спрашивать',
   'произнести', 'проговорить', 'пробормотать', 'прошептать', 'крикнуть',
@@ -633,6 +647,95 @@ function findRedund(text, sentence, speech = speechRanges(text)) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+function findTell(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
+  const children = childrenByHead(tokens);
+  const out = [];
+  const seen = new Set();
+  const add = (ruleId, start, end, explanation, method) => {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length) return;
+    if (text.slice(start, end).length !== end - start) return;
+    if (speech.some(([a, b]) => start < b && end > a)) return;
+    const key = `${ruleId}:${start}:${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      category: 'tell',
+      ruleId,
+      start,
+      end,
+      fragment: text.slice(start, end),
+      explanation,
+      method,
+      confidence: 'low',
+      limitations: [
+        'Прямое называние состояния — кандидат, а не доказанная стилистическая ошибка.',
+        'Синтаксический разбор и ограниченные лексические классы не заменяют контекст и замысел автора.',
+        'Телесные реакции, действия, метафоры и чужая речь намеренно не считаются tell.',
+        'Confidence не калиброван на независимом корпусе.',
+      ],
+    });
+  };
+
+  for (const token of tokens) {
+    if (!validSpan(token, text) || tokenInSpeech(token, speech)) continue;
+    const kids = children.get(token.id) || [];
+
+    // Прямое называние через глагол переживания + объект-эмоция.
+    if (token.upos === 'VERB' && token.deprel === 'root' && EXPERIENCE_VERBS.has(lemmaOf(token))
+      && token.feats && Object.keys(token.feats).length > 0) {
+      if (kids.some((c) => !['nsubj', 'obj', 'punct'].includes(c.deprel))) continue;
+      const subjects = kids.filter((c) => c.deprel === 'nsubj');
+      const objects = kids.filter((c) => c.deprel === 'obj');
+      if (subjects.length !== 1 || objects.length !== 1) continue;
+      const subject = subjects[0];
+      const emotion = objects[0];
+      if (!isEmotionNoun(emotion) || !subject.feats || !emotion.feats) continue;
+      if ((children.get(emotion.id) || []).some((c) => ['conj', 'acl', 'ccomp', 'xcomp'].includes(c.deprel))) continue;
+      if (!validSpan(subject, text) || !validSpan(emotion, text) || tokenInSpeech(subject, speech) || tokenInSpeech(emotion, speech)) continue;
+      add('tell.experience-emotion-object', Math.min(token.start, emotion.start), Math.max(token.end, emotion.end),
+        `Прямое называние эмоции через «${token.text}» и объект «${emotion.text}».`,
+        ['dependency:obj', 'lexicon:experience-verb', 'lexicon:emotion-noun']);
+    }
+
+    // Минимальное называние через возвратный эмоциональный глагол.
+    if (token.upos === 'VERB' && token.deprel === 'root' && EMOTION_VERBS.has(lemmaOf(token))
+      && token.feats && Object.keys(token.feats).length > 0) {
+      if (kids.some((c) => !['nsubj', 'punct'].includes(c.deprel))) continue;
+      const subjects = kids.filter((c) => c.deprel === 'nsubj');
+      if (subjects.length !== 1) continue;
+      const subject = subjects[0];
+      if (!subject.feats || !validSpan(subject, text) || tokenInSpeech(subject, speech)) continue;
+      add('tell.minimal-emotion-verb', Math.min(token.start, subject.start), Math.max(token.end, subject.end),
+        `Минимальное прямое называние состояния глаголом «${token.text}» с подлежащим «${subject.text}».`,
+        ['dependency:nsubj', 'lexicon:emotion-verb']);
+    }
+
+    // Состояние «был в ярости»: копула + предложная эмоция.
+    if (isEmotionNoun(token) && token.deprel === 'root' && token.feats) {
+      const cases = kids.filter((c) => c.deprel === 'case' && ['в', 'во'].includes(lemmaOf(c)));
+      const cops = kids.filter((c) => c.deprel === 'cop' && ['быть', 'стать', 'казаться'].includes(lemmaOf(c)));
+      const subjects = kids.filter((c) => c.deprel === 'nsubj');
+      if (cases.length !== 1 || cops.length !== 1 || subjects.length !== 1) continue;
+      if (kids.some((c) => !['case', 'cop', 'nsubj', 'punct'].includes(c.deprel))) continue;
+      if (!validSpan(cases[0], text) || !validSpan(cops[0], text) || !validSpan(subjects[0], text)) continue;
+      if (!subjects[0].feats || Object.keys(subjects[0].feats).length === 0) continue;
+      if (!cops[0].feats || Object.keys(cops[0].feats).length === 0) continue;
+      if ([cases[0], cops[0], subjects[0]].some((t) => tokenInSpeech(t, speech))) continue;
+      add('tell.emotion-state-noun', Math.min(cops[0].start, token.start), Math.max(token.end, cops[0].end),
+        `Прямое называние состояния через копулу и предложное «${token.text}».`,
+        ['dependency:cop', 'dependency:case', 'lexicon:emotion-noun']);
+    }
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+function isEmotionNoun(token) {
+  return !!token && token.upos === 'NOUN' && token.feats && Object.keys(token.feats).length > 0
+    && EMOTION_NOUNS.has(lemmaOf(token));
+}
+
 function isMinimalAttribution(verb, children, text) {
   if (!verb || verb.upos !== 'VERB' || !SPEECH_VERB_LEMMAS.has(lemmaOf(verb))) return null;
   if (!verb.feats || Object.keys(verb.feats).length === 0) return null;
@@ -842,7 +945,7 @@ function findSubordinateAvalanches(text, sentence) {
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [], remark: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [], remark: [], tell: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
@@ -853,8 +956,9 @@ function analyzeStructural(text, parseResult, enabled = {}) {
     if (enabled.own) result.own.push(...findOwn(text, sentence, speech));
     if (enabled.redund) result.redund.push(...findRedund(text, sentence, speech));
     if (enabled.remark) result.remark.push(...findRemark(text, sentence, speech));
+    if (enabled.tell) result.tell.push(...findTell(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn, findRedund, findRemark };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn, findRedund, findRemark, findTell };

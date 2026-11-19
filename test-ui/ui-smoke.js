@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку. Он вернулся обратно. «Я не пойду», — сказал он, — сказал он.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку. Он вернулся обратно. «Я не пойду», — сказал он, — сказал он. Он почувствовал страх.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -50,6 +50,25 @@ function fakeTauri() {
             return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
           });
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
+      if (window.__styleTell) {
+        const phrase = 'Он почувствовал страх.';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['Он', 'он', 'PRON', { Case: 'Nom', Gender: 'Masc', Number: 'Sing' }, 2, 'nsubj'],
+            ['почувствовал', 'почувствовать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+            ['страх', 'страх', 'NOUN', { Case: 'Acc', Gender: 'Masc', Number: 'Sing' }, 2, 'obj'],
+            ['.', '.', 'PUNCT', {}, 2, 'punct'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-tell', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
       if (window.__styleRemark) {
@@ -307,6 +326,13 @@ function fakeTauri() {
   ok(!!remarkShadow && remarkShadow.remarkCount === 1 && remarkShadow.remark[0].fragment === 'сказал он, — сказал он', 'тень: remark finding доступен в diagnostics');
   ok(!!remarkShadow && remarkShadow.ruleErrors.length === 0, 'тень: remark не дал rule error');
   await page.evaluate(() => { window.__styleRemark = false; });
+  await page.evaluate(() => { window.__styleTell = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const tellShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!tellShadow && tellShadow.tellCount === 1 && tellShadow.tell[0].fragment === 'почувствовал страх', 'тень: tell finding доступен в diagnostics');
+  ok(!!tellShadow && tellShadow.ruleErrors.length === 0, 'тень: tell не дал rule error');
+  await page.evaluate(() => { window.__styleTell = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 
