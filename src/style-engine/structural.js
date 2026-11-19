@@ -72,7 +72,22 @@ function findNounChains(text, sentence) {
     if (!old || candidate.nominalizations > old.nominalizations) unique.set(key, candidate);
   }
 
-  return [...unique.values()]
+  const ordered = [...unique.values()].sort((a, b) => {
+    const aStart = Math.min(...a.path.map((t) => t.start));
+    const bStart = Math.min(...b.path.map((t) => t.start));
+    const aEnd = Math.max(...a.path.map((t) => t.end));
+    const bEnd = Math.max(...b.path.map((t) => t.end));
+    return aStart - bStart || (bEnd - bStart) - (aEnd - aStart);
+  });
+  const nonOverlapping = [];
+  for (const candidate of ordered) {
+    const start = Math.min(...candidate.path.map((t) => t.start));
+    const end = Math.max(...candidate.path.map((t) => t.end));
+    if (nonOverlapping.some((kept) => start < Math.max(...kept.path.map((t) => t.end)) && end > Math.min(...kept.path.map((t) => t.start)))) continue;
+    nonOverlapping.push(candidate);
+  }
+
+  return nonOverlapping
     .map((candidate) => {
       const start = Math.min(...candidate.path.map((t) => t.start));
       const end = Math.max(...candidate.path.map((t) => t.end));
@@ -125,7 +140,7 @@ function findSubordinateAvalanches(text, sentence) {
     end,
     fragment: text.slice(start, end),
     explanation: `В предложении обнаружено ${clauseRoots.length} зависимых клауз; максимальная вложенность — ${maxDepth}.`,
-    method: ['dependency:acl:relcl', 'dependency:ccomp', 'dependency:advcl', 'clause-nesting'],
+    method: [...new Set(clauseRoots.map((token) => `dependency:${token.deprel}`)), 'clause-nesting'],
     confidence: 'medium',
     limitations: ['Качество зависит от сегментации и синтаксического парсера; эллиптические и бессоюзные конструкции могут быть разобраны неполно.'],
   }];
