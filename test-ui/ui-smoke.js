@@ -127,6 +127,40 @@ function fakeTauri() {
   const latestShadow = await page.evaluate(() => window.__styleShadow || null);
   ok(!!latestShadow && latestShadow.status === 'ok' && latestShadow.task > shadow.task, 'тень: новый запрос завершился, taskId обновился');
 
+  // Изменение документа во время уже выполняющегося запроса инвалидирует его сразу.
+  await page.evaluate(() => { window.__styleDelay = 1200; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(950);
+  const inFlightShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!inFlightShadow && inFlightShadow.status === 'running', 'тень: запрос действительно выполняется');
+  await page.keyboard.type(' ');
+  const invalidatedShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!invalidatedShadow && invalidatedShadow.status === 'pending' && invalidatedShadow.task > inFlightShadow.task, 'тень: изменение текста сразу инвалидирует прежний запрос');
+  await page.waitForTimeout(1500);
+  const staleAfterChange = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!staleAfterChange && staleAfterChange.status === 'running' && staleAfterChange.task > invalidatedShadow.task, 'тень: поздний ответ прежнего запроса не восстановил успешное состояние');
+  await page.waitForTimeout(1600);
+  const afterChange = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!afterChange && afterChange.status === 'ok' && afterChange.task > invalidatedShadow.task, 'тень: новый запрос завершился после инвалидации');
+  await page.evaluate(() => { window.__styleDelay = 0; });
+
+  // Отключение во время запроса: состояние очищается, поздний ответ не возвращает его.
+  await page.evaluate(() => { window.__styleDelay = 1500; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(950);
+  const beforeDisable = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!beforeDisable && beforeDisable.status === 'running', 'тень: запрос выполняется перед отключением');
+  await page.evaluate(() => window.kabinetStyleShadow.disable());
+  const disabledShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(disabledShadow === null, 'тень: disable сразу очищает состояние');
+  await page.waitForTimeout(1700);
+  const lateAfterDisable = await page.evaluate(() => window.__styleShadow || null);
+  ok(lateAfterDisable === null, 'тень: поздний ответ после disable не восстановлен');
+  await page.evaluate(() => { window.__styleDelay = 0; window.kabinetStyleShadow.enable(); });
+  await page.waitForTimeout(1400);
+  const reenabledShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!reenabledShadow && reenabledShadow.status === 'ok', 'тень: после повторного включения запрос снова работает');
+
   // Ошибка моста должна дать однозначное состояние ошибки, а затем восстановиться.
   await page.evaluate(() => { window.__styleDelay = 0; window.__styleFail = true; });
   await page.keyboard.type(' ');
@@ -197,6 +231,13 @@ function fakeTauri() {
     ok((await page.locator('#projectName').textContent()) === 'Новое имя', 'переименование: новое название в шапке');
     ok(await page.evaluate(() => window.__calls.some(([n, a]) => n === 'project:rename' && a[0] === 'Новое имя')), 'переименование: вызван project:rename');
   }
+  await page.evaluate(() => { window.__styleDelay = 0; });
+  await page.locator('.ProseMirror').first().click();
+  await page.keyboard.press((process.platform === 'darwin' ? 'Meta' : 'Control') + '+A');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(1200);
+  const emptyShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!emptyShadow && emptyShadow.status === 'empty' && emptyShadow.sentences === 0, 'тень: пустой документ явно очищает прежний результат');
   ok(errors.length === 0, 'после работы нет исключений: ' + errors.join(' | '));
 
   console.log(checks.map(([c, l]) => `${c ? 'ok  ' : 'FAIL'} ${l}`).join('\n'));
