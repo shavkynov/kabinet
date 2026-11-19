@@ -50,6 +50,34 @@ const KNOWN_CASES = new Set(['Nom', 'Gen', 'Dat', 'Acc', 'Ins', 'Loc', 'Voc']);
 const KNOWN_NUMBERS = new Set(['Sing', 'Plur']);
 const KNOWN_GENDERS = new Set(['Masc', 'Fem', 'Neut', 'Com']);
 
+const DIRECTIONAL_PLEONASMS = new Map([
+  ['вернуться', new Set(['обратно'])],
+  ['возвращаться', new Set(['обратно'])],
+  ['подняться', new Set(['вверх', 'наверх'])],
+  ['подниматься', new Set(['вверх', 'наверх'])],
+  ['спуститься', new Set(['вниз'])],
+  ['спускаться', new Set(['вниз'])],
+  ['войти', new Set(['внутрь'])],
+  ['входить', new Set(['внутрь'])],
+  ['выйти', new Set(['наружу'])],
+  ['выходить', new Set(['наружу'])],
+  ['упасть', new Set(['вниз'])],
+  ['упать', new Set(['вниз'])],
+  ['падать', new Set(['вниз'])],
+]);
+const TAUTOLOGICAL_PAIRS = [
+  { head: 'сувенир', dependent: 'памятный', deprel: 'amod' },
+  { head: 'вакансия', dependent: 'свободный', deprel: 'amod' },
+  { head: 'сотрудничество', dependent: 'взаимный', deprel: 'amod' },
+  { head: 'дебют', dependent: 'первый', deprel: 'amod' },
+  { head: 'приоритет', dependent: 'главный', deprel: 'amod' },
+  { head: 'период', dependent: 'временной', deprel: 'amod' },
+  { head: 'период', dependent: 'временный', deprel: 'amod' },
+  { head: 'период', dependent: 'время', deprel: 'nmod' },
+  { head: 'биография', dependent: 'жизнь', deprel: 'nmod' },
+];
+
+
 const WEAK_SUPPORT_VERBS = new Set([
   'иметь', 'делать', 'вести', 'носить', 'представлять', 'играть', 'оказывать',
   'производить', 'давать', 'вызывать', 'проявлять', 'привлекать', 'совершать',
@@ -524,6 +552,80 @@ function findOwn(text, sentence, speech = speechRanges(text)) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+function hasDegreeEmphasis(token, children) {
+  if (token && token.feats && ['Cmp', 'Sup'].includes(token.feats.Degree)) return true;
+  return (children.get(token.id) || []).some((c) => c.deprel === 'advmod'
+    && ['самый', 'более', 'менее', 'наиболее', 'очень', 'действительно', 'поистине', 'особенно'].includes(lemmaOf(c)));
+}
+
+function findRedund(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
+  const children = childrenByHead(tokens);
+  const out = [];
+  const seen = new Set();
+  const add = (ruleId, start, end, explanation, method) => {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length) return;
+    if (text.slice(start, end).length !== end - start) return;
+    if (speech.some(([a, b]) => start < b && end > a)) return;
+    const key = `${ruleId}:${start}:${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      category: 'redund',
+      ruleId,
+      start,
+      end,
+      fragment: text.slice(start, end),
+      explanation,
+      method,
+      confidence: 'low',
+      limitations: [
+        'Избыточность установлена по узкой лексико-синтаксической паре, а не по частоте/близости.',
+        'Устойчивое выражение, эмфаза и авторская интонация могут делать конструкцию намеренной.',
+        'Confidence не калиброван на независимом корпусе.',
+      ],
+    });
+  };
+
+  for (const token of tokens) {
+    if (!validSpan(token, text) || tokenInSpeech(token, speech)) continue;
+    const kids = children.get(token.id) || [];
+
+    // Направленный плеоназм: вернуться обратно, подняться вверх и т.п.
+    if (token.upos === 'VERB' && DIRECTIONAL_PLEONASMS.has(lemmaOf(token))) {
+      const allowed = DIRECTIONAL_PLEONASMS.get(lemmaOf(token));
+      const adverb = kids.find((child) => ['advmod', 'obj', 'nsubj'].includes(child.deprel)
+        && ['ADV', 'NOUN'].includes(child.upos)
+        && (allowed.has(lemmaOf(child)) || allowed.has(String(child.text || '').toLowerCase().replace(/ё/g, 'е')))
+        && validSpan(child, text) && !tokenInSpeech(child, speech));
+      if (adverb) {
+        add('redund.directional-pleonasm', Math.min(token.start, adverb.start), Math.max(token.end, adverb.end),
+          `Направление уже выражено глаголом «${token.text}»; «${adverb.text}» дублирует его.`,
+          [`dependency:${adverb.deprel}`, `lexicon:directional-pair:${lemmaOf(token)}+${lemmaOf(adverb)}`]);
+      }
+    }
+
+    // Узкие тавтологические пары: памятный сувенир, период времени и т.п.
+    if (token.upos === 'NOUN') {
+      for (const pair of TAUTOLOGICAL_PAIRS) {
+        if (lemmaOf(token) !== pair.head) continue;
+        const dependent = kids.find((child) => child.deprel === pair.deprel
+          && lemmaOf(child) === pair.dependent && validSpan(child, text) && !tokenInSpeech(child, speech));
+        if (!dependent || !dependent.feats || !token.feats) continue;
+        if (hasContrastNear(tokens, dependent.start, token.end)) continue;
+        if (pair.deprel === 'amod' && !hasCompletePossessiveAgreement(dependent, token)) continue;
+        if (pair.deprel === 'amod' && hasDegreeEmphasis(dependent, children)) continue;
+        if (pair.deprel === 'nmod' && dependent.feats.Case !== 'Gen') continue;
+        add('redund.tautological-pair', Math.min(token.start, dependent.start), Math.max(token.end, dependent.end),
+          `«${dependent.text}» и «${token.text}» образуют устойчивую тавтологическую пару.`,
+          [`dependency:${pair.deprel}`, 'lexicon:tautological-pair']);
+      }
+    }
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function isSubordinateClauseRoot(token, children) {
   const dependents = children.get(token.id) || [];
   const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
@@ -671,7 +773,7 @@ function findSubordinateAvalanches(text, sentence) {
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [], weak: [], own: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
@@ -680,8 +782,9 @@ function analyzeStructural(text, parseResult, enabled = {}) {
     if (enabled.chancery) result.chancery.push(...findChancery(text, sentence, speech));
     if (enabled.weak) result.weak.push(...findWeak(text, sentence, speech));
     if (enabled.own) result.own.push(...findOwn(text, sentence, speech));
+    if (enabled.redund) result.redund.push(...findRedund(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn, findRedund };

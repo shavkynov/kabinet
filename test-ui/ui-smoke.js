@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал. Он имеет значение. Он поднял свою руку. Он вернулся обратно.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -50,6 +50,25 @@ function fakeTauri() {
             return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
           });
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
+      if (window.__styleRedund) {
+        const phrase = 'Он вернулся обратно.';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+            ['вернулся', 'вернуться', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+            ['обратно', 'обратно', 'ADV', {}, 2, 'advmod'],
+            ['.', '.', 'PUNCT', {}, 2, 'punct'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-redund', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
       if (window.__styleOwn) {
@@ -245,6 +264,13 @@ function fakeTauri() {
   ok(!!ownShadow && ownShadow.ownCount === 1 && ownShadow.own[0].fragment === 'свою руку', 'тень: own finding доступен в diagnostics');
   ok(!!ownShadow && ownShadow.ruleErrors.length === 0, 'тень: own не дал rule error');
   await page.evaluate(() => { window.__styleOwn = false; });
+  await page.evaluate(() => { window.__styleRedund = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const redundShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!redundShadow && redundShadow.redundCount === 1 && redundShadow.redund[0].fragment === 'вернулся обратно', 'тень: redund finding доступен в diagnostics');
+  ok(!!redundShadow && redundShadow.ruleErrors.length === 0, 'тень: redund не дал rule error');
+  await page.evaluate(() => { window.__styleRedund = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 
