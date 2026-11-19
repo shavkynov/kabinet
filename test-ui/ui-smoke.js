@@ -33,8 +33,13 @@ function fakeTauri() {
     'cards:index': () => [],
     'project:rename': (name) => { project.name = name; return project; },
     'spell:check': (w) => (w === 'Слизеринцы' || w === 'слизеринцы' ? { available: true, ok: false, suggestions: ['слизеринцев', 'слизерины'] } : { available: true, ok: true, suggestions: [] }),
-    'style:parse': (text, id) => ({ taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake', version: '1' }, sentences: [{ start: 0, end: 1, text: 'x', tokens: [] }] } }),
-    'style:cancel': () => true,
+    'style:parse': async (text, id) => {
+      await new Promise((resolve) => setTimeout(resolve, Number(window.__styleDelay) || 0));
+      if (window.__styleFail) throw new Error('fake style:parse failure');
+      if (window.__styleBadResponse) return {};
+      return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake', version: '1' }, sentences: [{ start: 0, end: 1, text: 'x', tokens: [] }] } };
+    },
+    'style:cancel': async () => { if (window.__styleCancelFail) throw new Error('fake style:cancel failure'); return true; },
   };
   window.__TAURI__ = {
     core: { invoke: async (cmd, { channel, args } = {}) => { calls.push([channel, args]); const h = handlers[channel]; return h ? h(...(args || [])) : null; } },
@@ -111,6 +116,54 @@ function fakeTauri() {
   ok(!!shadow && shadow.sentences === 1, 'тень: результат разобран в контракт');
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
+
+  // Новый запрос сразу убирает старый успешный результат из диагностики.
+  await page.evaluate(() => { window.__styleDelay = 1800; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1050);
+  const runningShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!runningShadow && runningShadow.status === 'running' && runningShadow.sentences === 0, 'тень: старый результат не выдаётся за новый');
+  await page.waitForTimeout(2000);
+  const latestShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!latestShadow && latestShadow.status === 'ok' && latestShadow.task > shadow.task, 'тень: новый запрос завершился, taskId обновился');
+
+  // Ошибка моста должна дать однозначное состояние ошибки, а затем восстановиться.
+  await page.evaluate(() => { window.__styleDelay = 0; window.__styleFail = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const failedShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!failedShadow && failedShadow.status === 'error' && failedShadow.ok === false && /fake style:parse failure/.test(failedShadow.error || ''), 'тень: ошибка моста видна как error, без старого результата');
+  const failedMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
+  ok(failedMarks === 0, 'тень: ошибка моста не создаёт подсветку');
+  await page.evaluate(() => { window.__styleFail = false; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const recoveredShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!recoveredShadow && recoveredShadow.status === 'ok' && recoveredShadow.task > failedShadow.task, 'тень: после ошибки следующий запрос восстанавливается');
+  // Ошибка отмены не должна мешать новому разбору.
+  await page.evaluate(() => { window.__styleCancelFail = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const cancelFailShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!cancelFailShadow && cancelFailShadow.status === 'ok', 'тень: ошибка style:cancel не блокирует новый разбор');
+  await page.evaluate(() => { window.__styleCancelFail = false; });
+
+  // Недоступная Rust-команда: явная ошибка, старая подсветка не трогается.
+  await page.evaluate(() => { window.__savedStyleParse = window.kabinet.styleParse; window.kabinet.styleParse = undefined; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const unavailableShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!unavailableShadow && unavailableShadow.status === 'error' && /недоступна/.test(unavailableShadow.error || ''), 'тень: недоступная команда даёт явную ошибку');
+  await page.evaluate(() => { window.kabinet.styleParse = window.__savedStyleParse; });
+
+  // Некорректный ответ моста: ошибка, а не пустой успешный результат.
+  await page.evaluate(() => { window.__styleBadResponse = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const badResponseShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!badResponseShadow && badResponseShadow.status === 'error' && /Некорректный ответ/.test(badResponseShadow.error || ''), 'тень: некорректный ответ не считается успехом');
+  await page.evaluate(() => { window.__styleBadResponse = false; });
+
 
   // стиль текста: галочка в отдельной панели включает подсветку и сохраняется
   await page.locator('#btnStyle').click({ force: true });
