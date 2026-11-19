@@ -231,7 +231,14 @@ function findNounChains(text, sentence) {
     const key = `${candidate.start}:${candidate.end}`;
     if (!unique.has(key)) unique.set(key, candidate);
   }
-  return [...unique.values()]
+  // Вложенные ветви одной категории не должны давать дубли: оставляем
+  // внешний (максимальный) span, частичные пересечения без вложенности — оба.
+  const kept = [];
+  for (const candidate of [...unique.values()].sort((a, b) => a.start - b.start || b.end - a.end)) {
+    if (kept.some((outer) => outer.start <= candidate.start && outer.end >= candidate.end)) continue;
+    kept.push(candidate);
+  }
+  return kept
     .sort((a, b) => a.start - b.start || a.end - b.end)
     .map((candidate) => {
       const deprels = [...new Set(candidate.path.slice(1).map((token) => `dependency:${token.deprel}`))];

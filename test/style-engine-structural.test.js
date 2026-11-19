@@ -160,7 +160,7 @@ test('chain: прилагательные и служебные слова вх�
   assert.equal(hits[0].confidence, 'medium');
 });
 
-test('chain: ветвление не склеивается, пересекающиеся ветви сохраняются', () => {
+test('chain: вложенные ветви нормализуются до максимального span', () => {
   const text = 'Осуществление проверки выполнения требований и анализа результатов исследования.';
   const parsed = parse(text, [
     ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
@@ -174,10 +174,10 @@ test('chain: ветвление не склеивается, пересекаю�
     ['.', '.', 'PUNCT', {}, 1, 'punct', 79],
   ]);
   const hits = analyzeStructural(text, parsed, { chain: true }).chain;
-  assert.equal(hits.length, 2);
-  assert.deepEqual(hits.map((h) => h.end), [44, 79]);
-  assert.ok(hits.every((h) => h.start === 0));
-  assert.ok(hits.every((h) => h.fragment === text.slice(h.start, h.end)));
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].start, 0);
+  assert.equal(hits[0].end, 79);
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
 });
 
 test('chain: одна номинализация не даёт finding', () => {
