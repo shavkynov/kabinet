@@ -50,7 +50,7 @@
 
 ## Проверки
 
-- `cargo test --locked` ядра: **217 passed, 0 failed, 2 ignored** (ignored-тесты требуют локальную GSD-модель).
+- `cargo test --locked` ядра: **221 passed, 0 failed, 2 ignored** (ignored-тесты требуют локальную GSD-модель).
 - С локальной моделью (`KABINET_STYLE_MODEL=/tmp/russian-gsd-ud-2.5-191206.udpipe cargo test ... -- --ignored`): 2/2, включая реальный разбор и отмену длинного текста.
 - `cargo check --locked` оболочки: 0.
 - `npm test`: 376/376; полный JS: 580/580; `npm run check`: 0; `npm run build`: 0.

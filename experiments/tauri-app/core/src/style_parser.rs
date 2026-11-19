@@ -113,17 +113,19 @@ fn utf16_map(text: &str) -> Vec<usize> {
 /// Разбивает текст на абзацы по пустой строке, сохраняя байтовые границы.
 fn paragraph_ranges(text: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
-    let mut start = 0usize;
     let bytes = text.as_bytes();
+    let mut start = 0usize;
     let mut i = 0usize;
-    while i + 1 < bytes.len() {
-        let sep = (bytes[i] == b'\n' && bytes[i + 1] == b'\n')
-            || (bytes[i] == b'\r' && i + 3 < bytes.len() && bytes[i + 1] == b'\n' && bytes[i + 2] == b'\r' && bytes[i + 3] == b'\n');
-        if sep {
-            let end = i;
-            if text[start..end].trim().is_empty() == false { out.push((start, end)); }
-            i += if bytes[i] == b'\r' { 4 } else { 2 };
-            start = i;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' || bytes[i] == b'\r' {
+            let sep_start = i;
+            let mut j = i;
+            while j < bytes.len() && (bytes[j] == b'\n' || bytes[j] == b'\r') { j += 1; }
+            if j - i >= 2 {
+                if !text[start..sep_start].trim().is_empty() { out.push((start, sep_start)); }
+                start = j;
+            }
+            i = j;
         } else {
             i += 1;
         }
@@ -326,6 +328,57 @@ mod tests {
         let words = vec![raw(1, 0, "е\u{0301}ж", 2), raw(2, 0, "ушёл", 0), raw(3, 0, "домой", 2), raw(4, 0, ".", 2)];
         let c = build_contract(text, &words, &parser()).unwrap();
         assert_eq!(c.sentences[0].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(0, 3), (4, 8), (9, 14), (14, 15)]);
+    }
+
+    #[test]
+    fn quotes_dash_ellipsis_have_exact_utf16_ranges() {
+        let text = "Он сказал: «Привет!» — и ушёл…";
+        let words = vec![
+            raw(1, 0, "Он", 2), raw(2, 0, "сказал", 0), raw(3, 0, ":", 2),
+            raw(4, 0, "«", 5), raw(5, 0, "Привет", 6), raw(6, 0, "!", 5),
+            raw(7, 0, "»", 8), raw(8, 0, "—", 9), raw(9, 0, "и", 10),
+            raw(10, 0, "ушёл", 9), raw(11, 0, "…", 10),
+        ];
+        let c = build_contract(text, &words, &parser()).unwrap();
+        assert_eq!(c.sentences[0].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(0, 2), (3, 9), (9, 10), (11, 12), (12, 18), (18, 19), (19, 20), (21, 22), (23, 24), (25, 29), (29, 30)]);
+    }
+
+    #[test]
+    fn multiple_spaces_between_sentences_keep_offsets() {
+        let text = "Он  пришёл.  Потом   ушёл.";
+        let words = vec![
+            raw(1, 0, "Он", 2), raw(2, 0, "пришёл", 0), raw(3, 0, ".", 2),
+            raw(1, 1, "Потом", 2), raw(2, 1, "ушёл", 0), raw(3, 1, ".", 2),
+        ];
+        let c = build_contract(text, &words, &parser()).unwrap();
+        assert_eq!(c.sentences.len(), 2);
+        assert_eq!(c.sentences[0].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(0, 2), (4, 10), (10, 11)]);
+        assert_eq!(c.sentences[1].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(13, 18), (21, 25), (25, 26)]);
+    }
+
+    #[test]
+    fn abbreviations_and_repeated_forms_keep_exact_ranges() {
+        let text = "Он жил в 5 г. до н. э. Потом ушёл.";
+        let words = vec![
+            raw(1, 0, "Он", 2), raw(2, 0, "жил", 0), raw(3, 0, "в", 2),
+            raw(4, 0, "5", 2), raw(5, 0, "г", 4), raw(6, 0, ".", 5),
+            raw(7, 0, "до", 8), raw(8, 0, "н", 7), raw(9, 0, ".", 8),
+            raw(10, 0, "э", 7), raw(11, 0, ".", 10),
+            raw(1, 1, "Потом", 2), raw(2, 1, "ушёл", 0), raw(3, 1, ".", 2),
+        ];
+        let c = build_contract(text, &words, &parser()).unwrap();
+        assert_eq!(c.sentences.len(), 2);
+        assert_eq!(c.sentences[0].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(0, 2), (3, 6), (7, 8), (9, 10), (11, 12), (12, 13), (14, 16), (17, 18), (18, 19), (20, 21), (21, 22)]);
+        assert_eq!(c.sentences[1].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(23, 28), (29, 33), (33, 34)]);
+    }
+
+    #[test]
+    fn blank_lines_split_paragraphs() {
+        let text = "Первый.\n\n\nВторой.";
+        let r = paragraph_ranges(text);
+        assert_eq!(r.len(), 2);
+        assert_eq!(&text[r[0].0..r[0].1], "Первый.");
+        assert_eq!(&text[r[1].0..r[1].1], "Второй.");
     }
 
     #[test]
