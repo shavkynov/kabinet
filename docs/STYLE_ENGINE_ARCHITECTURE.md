@@ -435,4 +435,4 @@ Offsets в UI — UTF-16 code units. Adapter обязан переводить o
 
 ## Приложение D. Этап C (2026-11-19)
 
-Добавлены Rust-модуль `style_parser`, Tauri-команды `style:parse`/`style:cancel`, мост и теневой режим. Модель не входит в установщик; offsets строятся строгим выравниванием без поиска следующего вхождения. Подробности и ограничения — в `docs/STYLE_ENGINE_INTEGRATION.md`. Реальный Tauri IPC end-to-end ещё не проверен.
+Добавлены Rust-модуль `style_parser`, Tauri-команды `style:parse`/`style:cancel`, мост и теневой режим. Модель не входит в установщик; offsets строятся строгим выравниванием без поиска следующего вхождения. Подробности и ограничения — в `docs/STYLE_ENGINE_INTEGRATION.md`. Реальный Tauri IPC проверен на debug-бинарнике macOS; установленный bundle и другие платформы — нет.
