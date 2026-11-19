@@ -267,7 +267,8 @@ function wireAnalysis() {
     if (!row) return;
     gotoTense(Number(row.dataset.idx));
   });
-  document.querySelectorAll('#checkPanel input[data-an]').forEach((box) => {
+  // Категории стиля живут в отдельной панели #stylePanel, а не в #checkPanel.
+  document.querySelectorAll('input[data-an]').forEach((box) => {
     box.addEventListener('change', () => {
       settings.an = { ...settings.an, [box.dataset.an]: box.checked };
       if (!box.checked) delete settings.an[box.dataset.an];

@@ -153,17 +153,30 @@ test('слова-паразиты: «слово*» и «слово~» работ
   assert.equal(count(), 1);
 });
 
-test('стиль текста: подсветка с подсказкой, счётчик и места для «‹ ›»; реплики героев не проверяются', () => {
-  const paras = ['Отряд осуществлял разведку и начал идти. Он был зол.', '— Это является данностью, — прошипел он, скалясь.'];
-  const { result, state } = runBuild(mod, paras, { cats: { chancery: true, weak: true, tell: true, chain: true, remark: true }, longMin: 30, fillers: [], repeatWin: 25 });
+test('стиль текста: все восемь категорий доходят до подсветки и мест «‹ ›»; реплики героев не проверяются', () => {
+  const paras = [
+    'Отряд осуществлял разведку и начал идти. Он был зол.',
+    'Выяснение причины отсутствия желания затянулось.',
+    '— Это является данностью, — прошипел он, скалясь.',
+    'В феврале месяце он снял свою шляпу.',
+    'Это дом, который стоял у реки, который видел лес, который шумел.',
+  ];
+  const cats = { chancery: true, weak: true, tell: true, chain: true, remark: true, redund: true, which: true, own: true };
+  const { result, state } = runBuild(mod, paras, { cats, longMin: 30, fillers: [], repeatWin: 25 });
   const cls = (c) => byClass(result.set, c);
-  assert.equal(cls('an-chancery').length, 1);
+  const expected = { chancery: 1, weak: 1, tell: 1, chain: 1, remark: 1, redund: 1, which: 1, own: 1 };
+  for (const [cat, n] of Object.entries(expected)) {
+    assert.equal(cls(`an-${cat}`).length, n, `${cat}: подсветка`);
+    assert.equal(result.stats[cat], n, `${cat}: счётчик`);
+  }
   assert.match(cls('an-chancery')[0].attrs.title, /осуществлять/);
-  assert.equal(cls('an-weak').length, 1);
-  assert.equal(cls('an-tell').length, 1);
-  assert.equal(cls('an-remark').length, 1);
-  assert.equal(result.stats.chancery, 1); // «является» внутри реплики не считается
+  assert.match(cls('an-weak')[0].attrs.title, /фазовый глагол/);
+  assert.match(cls('an-tell')[0].attrs.title, /названо чувство/);
+  assert.match(cls('an-redund')[0].attrs.title, /лишнее уточнение/);
+  assert.match(cls('an-which')[0].attrs.title, /3 придаточных/);
+  assert.match(cls('an-own')[0].attrs.title, /«свой»/);
+  // «является» внутри реплики не считается; ремарка при этом отмечается
+  assert.equal(result.stats.chancery, 1);
   const r = mod.analysisRanges(state);
-  assert.equal(r.chancery.length, 1);
-  assert.equal(r.remark.length, 1);
+  for (const cat of Object.keys(expected)) assert.equal(r[cat].length, expected[cat], `${cat}: места для «‹ ›»`);
 });

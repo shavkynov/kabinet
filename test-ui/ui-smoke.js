@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -43,7 +43,7 @@ function fakeTauri() {
 (async () => {
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}/index.html`;
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.KABINET_CHROME ? { executablePath: process.env.KABINET_CHROME } : {});
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message + (process.env.STACK ? '\n' + e.stack : '')));
@@ -98,6 +98,24 @@ function fakeTauri() {
   const spellMenu = await page.locator('.ctx-menu, #ctxMenu, .menu').first().innerText().catch(() => '');
   ok(/слизеринцев/.test(spellMenu) && /Добавить «Слизеринцы» в словарь/.test(spellMenu) && /Пропустить/.test(spellMenu), 'слово с ошибкой: варианты, «Добавить в словарь», «Пропустить». Получено: ' + spellMenu.slice(0, 160).replace(/\n/g, ' / '));
   await page.keyboard.press('Escape');
+
+  // стиль текста: галочка в отдельной панели включает подсветку и сохраняется
+  await page.click('#btnStyle');
+  await page.waitForSelector('#stylePanel', { state: 'visible', timeout: 3000 }).catch(() => {});
+  const styleBox = page.locator('#an_chancery');
+  ok(await styleBox.isVisible(), 'стиль: галочка «Канцелярит и штампы» видна');
+  if (await styleBox.isVisible()) {
+    await styleBox.check();
+    await page.waitForTimeout(400);
+    const styleState = await page.evaluate(() => ({
+      saved: (() => { try { return JSON.parse(localStorage.getItem('kabinet.settings') || '{}').an || {}; } catch { return {}; } })(),
+      marks: document.querySelectorAll('.ProseMirror .an-chancery').length,
+      count: document.querySelector('#anCount_chancery')?.textContent || '',
+    }));
+    ok(styleState.saved.chancery === true, 'стиль: включение сохраняется в настройках');
+    ok(styleState.marks > 0, 'стиль: подсветка появилась в редакторе');
+    ok(styleState.count !== '' && styleState.count !== '0', 'стиль: счётчик категории обновился');
+  }
 
   // переименование проекта: диалог и вызов моста
   await page.locator('#projectName').click({ button: 'right' });
