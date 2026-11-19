@@ -46,6 +46,9 @@ const PHYSICAL_ACTION_VERBS = new Set([
 ]);
 const CONTRAST_LEMMAS = new Set(['а', 'но', 'однако', 'зато', 'чужой', 'собственный', 'именно', 'даже', 'же']);
 
+const KNOWN_CASES = new Set(['Nom', 'Gen', 'Dat', 'Acc', 'Ins', 'Loc', 'Voc']);
+const KNOWN_NUMBERS = new Set(['Sing', 'Plur']);
+const KNOWN_GENDERS = new Set(['Masc', 'Fem', 'Neut', 'Com']);
 
 const WEAK_SUPPORT_VERBS = new Set([
   'иметь', 'делать', 'вести', 'носить', 'представлять', 'играть', 'оказывать',
@@ -436,6 +439,21 @@ function hasContrastNear(tokens, start, end) {
     && token.start < end + 24 && token.end > start - 24);
 }
 
+function hasCompletePossessiveAgreement(pronoun, noun) {
+  if (!pronoun.feats || !noun.feats) return false;
+  if (typeof pronoun.feats !== 'object' || typeof noun.feats !== 'object') return false;
+  if (Object.keys(pronoun.feats).length === 0 || Object.keys(noun.feats).length === 0) return false;
+  if (!KNOWN_CASES.has(pronoun.feats.Case) || !KNOWN_CASES.has(noun.feats.Case)) return false;
+  if (!KNOWN_NUMBERS.has(pronoun.feats.Number) || !KNOWN_NUMBERS.has(noun.feats.Number)) return false;
+  if (pronoun.feats.Case !== noun.feats.Case || pronoun.feats.Number !== noun.feats.Number) return false;
+  const hasGender = pronoun.feats.Gender != null || noun.feats.Gender != null;
+  if (hasGender) {
+    if (!KNOWN_GENDERS.has(pronoun.feats.Gender) || !KNOWN_GENDERS.has(noun.feats.Gender)) return false;
+    if (pronoun.feats.Gender !== noun.feats.Gender) return false;
+  }
+  return true;
+}
+
 function findOwn(text, sentence, speech = speechRanges(text)) {
   const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
   if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
@@ -490,8 +508,7 @@ function findOwn(text, sentence, speech = speechRanges(text)) {
     if (!['obj', 'obl'].includes(noun.deprel)) continue;
     if (!BODY_PART_NOUNS.has(lemmaOf(noun))) continue;
     if (noun.deprel === 'obl' && (children.get(noun.id) || []).some((c) => c.deprel === 'case')) continue;
-    if (!pronoun.feats || !noun.feats || noun.feats.Case !== pronoun.feats.Case || noun.feats.Number !== pronoun.feats.Number) continue;
-    if (noun.feats.Gender && pronoun.feats.Gender && noun.feats.Gender !== pronoun.feats.Gender) continue;
+    if (!hasCompletePossessiveAgreement(pronoun, noun)) continue;
     const verb = byId.get(noun.head);
     if (!verb || verb.upos !== 'VERB' || !PHYSICAL_ACTION_VERBS.has(lemmaOf(verb))) continue;
     if (verb.deprel !== 'root') continue; // вложенные клаузы оставляем для abstain

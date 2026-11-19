@@ -224,3 +224,63 @@ test('own: цитата и повреждённое дерево не дают f
   assert.doesNotThrow(() => ownHits(damaged, dRows));
   assert.deepEqual(ownHits(damaged, dRows), []);
 });
+
+function bodyRows({ pronounFeats, nounFeats }) {
+  return [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['поднял', 'поднять', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['свою', 'свой', 'DET', pronounFeats, 4, 'det'],
+    ['руку', 'рука', 'NOUN', nounFeats, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+}
+const text = 'Он поднял свою руку.';
+
+test('own morphology: отсутствует feats у свой — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({ pronounFeats: undefined, nounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' } })), []);
+});
+
+test('own morphology: отсутствует feats у существительного — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({ pronounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' }, nounFeats: undefined })), []);
+});
+
+test('own morphology: оба feats пустые — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({ pronounFeats: {}, nounFeats: {} })), []);
+});
+
+test('own morphology: отсутствует Case у обоих — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({
+    pronounFeats: { Gender: 'Fem', Number: 'Sing' },
+    nounFeats: { Gender: 'Fem', Number: 'Sing' },
+  })), []);
+});
+
+test('own morphology: отсутствует Number у обоих — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({
+    pronounFeats: { Case: 'Acc', Gender: 'Fem' },
+    nounFeats: { Case: 'Acc', Gender: 'Fem' },
+  })), []);
+});
+
+test('own morphology: Gender есть только у свой — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({
+    pronounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' },
+    nounFeats: { Case: 'Acc', Number: 'Sing' },
+  })), []);
+});
+
+test('own morphology: Gender есть только у существительного — abstain', () => {
+  assert.deepEqual(ownHits(text, bodyRows({
+    pronounFeats: { Case: 'Acc', Number: 'Sing' },
+    nounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' },
+  })), []);
+});
+
+test('own morphology: полные признаки по-прежнему дают finding', () => {
+  const found = ownHits(text, bodyRows({
+    pronounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' },
+    nounFeats: { Case: 'Acc', Gender: 'Fem', Number: 'Sing' },
+  }));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].fragment, 'свою руку');
+});
