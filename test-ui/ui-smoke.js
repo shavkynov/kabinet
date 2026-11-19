@@ -375,7 +375,17 @@ function fakeTauri() {
   await page.waitForTimeout(1700);
   const lateAfterDisable = await page.evaluate(() => window.__styleShadow || null);
   ok(lateAfterDisable === null, 'тень: поздний ответ после disable не восстановлен');
+  const disabledCalls = await page.evaluate(() => window.__calls.filter(([n]) => n === 'style:parse').length);
+  ok(await page.evaluate(() => localStorage.getItem('kabinet.styleEngineShadow') === null), 'тень: disable удаляет настройку');
+  await page.keyboard.type(' ');
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1500);
+  const disabledCallsAfterUpdate = await page.evaluate(() => window.__calls.filter(([n]) => n === 'style:parse').length);
+  ok(disabledCallsAfterUpdate === disabledCalls, 'тень: после disable изменения документа не запускают style:parse');
+  ok(await page.evaluate(() => window.__styleShadow === null), 'тень: после disable состояние остаётся пустым');
   await page.evaluate(() => { window.__styleDelay = 0; window.kabinetStyleShadow.enable(); });
+  ok(await page.evaluate(() => localStorage.getItem('kabinet.styleEngineShadow') === '1'), 'тень: enable снова сохраняет режим');
+  await page.keyboard.type(' ');
   await page.waitForTimeout(1400);
   const reenabledShadow = await page.evaluate(() => window.__styleShadow || null);
   ok(!!reenabledShadow && reenabledShadow.status === 'ok', 'тень: после повторного включения запрос снова работает');

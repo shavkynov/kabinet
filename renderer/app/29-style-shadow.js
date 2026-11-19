@@ -172,6 +172,7 @@ async function runStyleShadow() {
 window.kabinetStyleShadow = {
   enable() { try { localStorage.setItem('kabinet.styleEngineShadow', '1'); } catch { /* нет хранилища */ } scheduleStyleShadow(); },
   disable() {
+    try { localStorage.removeItem('kabinet.styleEngineShadow'); } catch { /* нет хранилища */ }
     invalidateShadow();
     clearTimeout(shadowTimer);
     shadowSeq += 1;
