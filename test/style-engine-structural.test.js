@@ -320,3 +320,130 @@ test('chain: несколько независимых цепочек в одн�
     'проведение анализа результатов исследования',
   ]);
 });
+
+test('which: три изъяснительных клаузы образуют один кластер без главной части', () => {
+  const text = 'Он знал, что дом стоял, что сад шумел, что лес спал.';
+  const parsed = parse(text, [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
+    ['знал', 'знать', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 7],
+    ['что', 'что', 'SCONJ', {}, 6, 'mark', 9],
+    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 6, 'nsubj', 13],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 17],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 22],
+    ['что', 'что', 'SCONJ', {}, 10, 'mark', 24],
+    ['сад', 'сад', 'NOUN', { Case: 'Nom' }, 10, 'nsubj', 28],
+    ['шумел', 'шуметь', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 32],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 37],
+    ['что', 'что', 'SCONJ', {}, 14, 'mark', 39],
+    ['лес', 'лес', 'NOUN', { Case: 'Nom' }, 14, 'nsubj', 43],
+    ['спал', 'спать', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 47],
+    ['.', '.', 'PUNCT', {}, 2, 'punct', 51],
+  ]);
+  const hits = analyzeStructural(text, parsed, { which: true }).which;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fragment, 'что дом стоял, что сад шумел, что лес спал');
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
+  assert.equal(hits[0].confidence, 'medium');
+});
+
+test('which: кластеры, разделённые главным текстом, не склеиваются', () => {
+  const text = 'Дом, который стоял, был старым, сад, который шумел, был тёмным, лес, который видел, был густым.';
+  const parsed = parse(text, [
+    ['Дом', 'дом', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 3, 'nsubj', 5],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 1, 'acl:relcl', 13],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 5, 'cop', 19],
+    ['старым', 'старый', 'ADJ', { Case: 'Ins' }, 5, 'acomp', 23],
+    [',', ',', 'PUNCT', {}, 5, 'punct', 29],
+    ['сад', 'сад', 'NOUN', { Case: 'Nom' }, 0, 'root', 31],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 10, 'nsubj', 36],
+    ['шумел', 'шуметь', 'VERB', { VerbForm: 'Fin' }, 7, 'acl:relcl', 44],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 10, 'cop', 50],
+    ['тёмным', 'тёмный', 'ADJ', { Case: 'Ins' }, 10, 'acomp', 54],
+    [',', ',', 'PUNCT', {}, 10, 'punct', 60],
+    ['лес', 'лес', 'NOUN', { Case: 'Nom' }, 0, 'root', 62],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 15, 'nsubj', 67],
+    ['видел', 'видеть', 'VERB', { VerbForm: 'Fin' }, 12, 'acl:relcl', 75],
+    ['был', 'быть', 'AUX', { VerbForm: 'Fin' }, 15, 'cop', 81],
+    ['густым', 'густой', 'ADJ', { Case: 'Ins' }, 15, 'acomp', 85],
+    ['.', '.', 'PUNCT', {}, 15, 'punct', 91],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
+});
+
+test('which: acl:relcl без относительного маркера воздерживается', () => {
+  const text = 'Дом, стоявший у реки, продаётся.';
+  const parsed = parse(text, [
+    ['Дом', 'дом', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    [',', ',', 'PUNCT', {}, 4, 'punct', 3],
+    ['стоявший', 'стоять', 'VERB', { VerbForm: 'Part' }, 1, 'acl:relcl', 5],
+    ['у', 'у', 'ADP', {}, 5, 'case', 14],
+    ['реки', 'река', 'NOUN', { Case: 'Gen' }, 3, 'obl', 16],
+    [',', ',', 'PUNCT', {}, 1, 'punct', 20],
+    ['продаётся', 'продаваться', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 22],
+    ['.', '.', 'PUNCT', {}, 7, 'punct', 31],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
+});
+
+test('which: ccomp с «чтобы» не считается «что»-клаузой', () => {
+  const text = 'Он сказал, чтобы мы пришли, чтобы остались, чтобы помогли.';
+  const parsed = parse(text, [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
+    ['сказал', 'сказать', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 9],
+    ['чтобы', 'чтобы', 'SCONJ', {}, 5, 'mark', 11],
+    ['мы', 'мы', 'PRON', { Case: 'Nom' }, 5, 'nsubj', 17],
+    ['пришли', 'прийти', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 20],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 26],
+    ['чтобы', 'чтобы', 'SCONJ', {}, 9, 'mark', 28],
+    ['остались', 'остаться', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 35],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 43],
+    ['чтобы', 'чтобы', 'SCONJ', {}, 12, 'mark', 45],
+    ['помогли', 'помочь', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 52],
+    ['.', '.', 'PUNCT', {}, 2, 'punct', 59],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
+});
+
+test('which: emoji перед клаузами не сдвигает UTF-16 offsets', () => {
+  const text = '😀 Он знал, что дом стоял, что сад шумел, что лес спал.';
+  const parsed = parse(text, [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 3],
+    ['знал', 'знать', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 6],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 10],
+    ['что', 'что', 'SCONJ', {}, 6, 'mark', 12],
+    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 6, 'nsubj', 16],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 20],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 26],
+    ['что', 'что', 'SCONJ', {}, 10, 'mark', 27],
+    ['сад', 'сад', 'NOUN', { Case: 'Nom' }, 10, 'nsubj', 31],
+    ['шумел', 'шуметь', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 35],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 40],
+    ['что', 'что', 'SCONJ', {}, 14, 'mark', 42],
+    ['лес', 'лес', 'NOUN', { Case: 'Nom' }, 14, 'nsubj', 46],
+    ['спал', 'спать', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 50],
+    ['.', '.', 'PUNCT', {}, 2, 'punct', 54],
+  ]);
+  const hits = analyzeStructural(text, parsed, { which: true }).which;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].start, 12);
+  assert.equal(hits[0].fragment, 'что дом стоял, что сад шумел, что лес спал');
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
+});
+
+test('which: битые offsets/дерево не дают finding и не бросают', () => {
+  const text = 'Он знал, что дом стоял.';
+  const parsed = parse(text, [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
+    ['знал', 'знать', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
+    [',', ',', 'PUNCT', {}, 2, 'punct', 7],
+    ['что', 'что', 'SCONJ', {}, 6, 'mark', 9],
+    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 99, 'nsubj', 13],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 17],
+    ['.', '.', 'PUNCT', {}, 2, 'punct', 22],
+  ]);
+  assert.doesNotThrow(() => analyzeStructural(text, parsed, { which: true }));
+  assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
+});

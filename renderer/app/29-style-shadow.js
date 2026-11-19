@@ -33,7 +33,7 @@ function scheduleStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
   invalidateShadow();
   clearTimeout(shadowTimer);
-  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: '' });
+  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: '' });
   shadowTimer = setTimeout(runStyleShadow, 900);
 }
 
@@ -42,17 +42,17 @@ async function runStyleShadow() {
   const epoch = shadowEpoch;
   const task = ++shadowSeq;
   if (!api.styleParse) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: 'Rust-команда style:parse недоступна.' });
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: 'Rust-команда style:parse недоступна.' });
     return;
   }
   const text = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n\n', '\n');
   if (!text.trim()) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: '' });
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: '' });
     return;
   }
   if (epoch !== shadowEpoch) return;
   // Старый результат не должен выглядеть как ответ на новый запрос.
-  setShadowState(task, epoch, { status: 'running', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: '' });
+  setShadowState(task, epoch, { status: 'running', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: '' });
   if (shadowPrev && api.styleCancel) {
     try { await api.styleCancel(shadowPrev); } catch { /* ошибка отмены не должна ломать новый запрос */ }
   }
@@ -66,11 +66,12 @@ async function runStyleShadow() {
       throw new Error('Некорректный ответ style:parse.');
     }
     if (res.cancelled) {
-      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: '', ms: Math.round(performance.now() - t0) });
+      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: '', ms: Math.round(performance.now() - t0) });
       return;
     }
     const parse = res.parse;
     let chain = [];
+    let which = [];
     const ruleErrors = [];
     try {
       chain = analyzeStructural(text, parse, { chain: true }).chain;
@@ -80,6 +81,13 @@ async function runStyleShadow() {
       chain = [];
       ruleErrors.push({ category: 'chain', error: err && err.message ? err.message : String(err) });
     }
+    try {
+      which = analyzeStructural(text, parse, { which: true }).which;
+      if (!Array.isArray(which)) throw new Error('which rule вернул не массив.');
+    } catch (err) {
+      which = [];
+      ruleErrors.push({ category: 'which', error: err && err.message ? err.message : String(err) });
+    }
     setShadowState(task, epoch, {
       status: 'ok',
       ok: true,
@@ -88,13 +96,15 @@ async function runStyleShadow() {
       tokens: parse.sentences.reduce((n, s) => n + ((s.tokens && s.tokens.length) || 0), 0),
       chain,
       chainCount: chain.length,
+      which,
+      whichCount: which.length,
       ruleErrors,
       error: '',
       ms: Math.round(performance.now() - t0),
     });
   } catch (err) {
     if (task !== shadowSeq || epoch !== shadowEpoch) return;
-    setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, ruleErrors: [], error: err && err.message ? err.message : String(err), ms: Math.round(performance.now() - t0) });
+    setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, ruleErrors: [], error: err && err.message ? err.message : String(err), ms: Math.round(performance.now() - t0) });
   }
 }
 

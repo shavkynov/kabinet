@@ -24,7 +24,7 @@ function fakeTauri() {
   const handlers = {
     'recents:list': () => [],
     'project:openDialog': () => project,
-    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку.',
+    'chapter:read': () => 'Он шёл по тёмной улице. Слизеринцы получили письма. Он был зол. Отряд осуществлял разведку. Он знал, что дом стоял, что сад шумел, что лес спал.',
     'chapter:readMeta': () => ({}),
     'check:getDictionary': () => ['слизеринцы'],
     'sounds:list': () => ({}),
@@ -50,6 +50,29 @@ function fakeTauri() {
             return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
           });
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
+      if (window.__styleWhich) {
+        const phrase = 'Он знал, что дом стоял, что сад шумел, что лес спал.';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['Он', 'он', 'PRON', {}, 2, 'nsubj'], ['знал', 'знать', 'VERB', {}, 0, 'root'],
+            [',', ',', 'PUNCT', {}, 2, 'punct'], ['что', 'что', 'SCONJ', {}, 6, 'mark'],
+            ['дом', 'дом', 'NOUN', {}, 6, 'nsubj'], ['стоял', 'стоять', 'VERB', {}, 2, 'ccomp'],
+            [',', ',', 'PUNCT', {}, 2, 'punct'], ['что', 'что', 'SCONJ', {}, 10, 'mark'],
+            ['сад', 'сад', 'NOUN', {}, 10, 'nsubj'], ['шумел', 'шуметь', 'VERB', {}, 2, 'ccomp'],
+            [',', ',', 'PUNCT', {}, 2, 'punct'], ['что', 'что', 'SCONJ', {}, 14, 'mark'],
+            ['лес', 'лес', 'NOUN', {}, 14, 'nsubj'], ['спал', 'спать', 'VERB', {}, 2, 'ccomp'],
+            ['.', '.', 'PUNCT', {}, 2, 'punct'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-which', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
       return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake', version: '1' }, sentences: [{ start: 0, end: 1, text: 'x', tokens: [] }] } };
@@ -137,6 +160,13 @@ function fakeTauri() {
   ok(!!chainShadow && chainShadow.chainCount === 1 && chainShadow.chain[0].fragment === 'Отряд осуществлял разведку', 'тень: chain finding доступен в diagnostics');
   ok(!!chainShadow && chainShadow.ruleErrors.length === 0, 'тень: chain не дал rule error');
   await page.evaluate(() => { window.__styleChain = false; });
+  await page.evaluate(() => { window.__styleWhich = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const whichShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!whichShadow && whichShadow.whichCount === 1 && whichShadow.which[0].fragment === 'что дом стоял, что сад шумел, что лес спал', 'тень: which finding доступен в diagnostics');
+  ok(!!whichShadow && whichShadow.ruleErrors.length === 0, 'тень: which не дал rule error');
+  await page.evaluate(() => { window.__styleWhich = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 

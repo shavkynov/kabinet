@@ -124,43 +124,68 @@ function findNounChains(text, sentence) {
     });
 }
 
+const MARKER_LEMMAS = new Set(['который', 'что']);
+const RELATIVE_DEPRELS = new Set(['nsubj', 'obj', 'obl', 'nmod', 'det', 'iobj', 'mark']);
+
+function lemmaOf(token) {
+  return String((token && (token.lemma || token.text)) || '').toLowerCase().replace(/ё/g, 'е');
+}
+
+function isMarker(token) {
+  return MARKER_LEMMAS.has(lemmaOf(token));
+}
+
+function hasRelativeMarker(root, children) {
+  return (children.get(root.id) || []).some((child) => RELATIVE_DEPRELS.has(child.deprel) && isMarker(child));
+}
+
+function hasWhatMark(root, children) {
+  return (children.get(root.id) || []).some((child) => child.deprel === 'mark' && lemmaOf(child) === 'что');
+}
+
 function isSubordinateClauseRoot(token, children) {
   const dependents = children.get(token.id) || [];
   const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
     || (['ADJ', 'NOUN'].includes(token.upos) && dependents.some((child) => child.deprel === 'cop' || child.deprel === 'nsubj' || child.deprel === 'nsubj:pass'));
   if (!hasPredicate) return false;
-  if (token.deprel === RELATIVE_CLAUSE) return true;
+  if (token.deprel === RELATIVE_CLAUSE) return hasRelativeMarker(token, children);
   if (!WHAT_CLAUSE_RELATIONS.has(token.deprel)) return false;
-  // Для «что»-клауз нужен именно союз/местоимение «что», а не любой advcl/csubj.
-  return dependents.some((child) => child.deprel === 'mark' && ['что', 'который'].includes(String(child.lemma || child.text || '').toLowerCase()));
+  return hasWhatMark(token, children);
 }
 
-
-function clauseBounds(root, children) {
+function clauseBounds(root, children, text) {
   let start = root.start;
   let end = root.end;
-  const kids = children.get(root.id) || [];
-  const marker = kids.find((child) => (child.deprel === 'nsubj' || child.deprel === 'mark')
-    && ['который', 'что'].includes(String(child.lemma || child.text || '').toLowerCase()));
+  const marker = (children.get(root.id) || []).find((child) => (child.deprel === 'nsubj' || child.deprel === 'mark')
+    && isMarker(child));
   if (marker) start = marker.start;
   const stack = [root];
   while (stack.length) {
     const token = stack.pop();
-    if (token.deprel !== 'conj' && token.deprel !== 'punct') {
-      end = Math.max(end, token.end);
-    }
+    if (!validSpan(token, text)) continue;
+    if (token.deprel !== 'conj' && token.deprel !== 'punct') end = Math.max(end, token.end);
     for (const child of children.get(token.id) || []) stack.push(child);
   }
   return [start, end];
 }
 
 function findSubordinateAvalanches(text, sentence) {
-  const tokens = sentence.tokens || [];
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length) return [];
   const byId = tokenIndex(tokens);
   const children = childrenByHead(tokens);
-  const clauseRoots = tokens.filter((token) => isSubordinateClauseRoot(token, children));
+  const clauseIds = new Set();
+  const clauseRoots = [];
+  for (const token of tokens) {
+    if (!validSpan(token, text) || !isSubordinateClauseRoot(token, children)) continue;
+    const [start, end] = clauseBounds(token, children, text);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end > text.length) continue;
+    if (text.slice(start, end).length !== end - start) continue;
+    clauseIds.add(token.id);
+    clauseRoots.push({ token, start, end });
+  }
+  if (!clauseRoots.length) return [];
 
-  const clauseIds = new Set(clauseRoots.map((t) => t.id));
   const depthMemo = new Map();
   function clauseDepth(token, visiting = new Set()) {
     if (depthMemo.has(token.id)) return depthMemo.get(token.id);
@@ -175,22 +200,48 @@ function findSubordinateAvalanches(text, sentence) {
     return depth;
   }
 
-  const maxDepth = clauseRoots.length ? Math.max(...clauseRoots.map((t) => clauseDepth(t))) : 0;
-  if (clauseRoots.length < 3 && maxDepth < 3) return [];
+  const clauses = clauseRoots.map((clause) => ({ ...clause, depth: clauseDepth(clause.token) }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
 
-  const bounds = clauseRoots.map((root) => clauseBounds(root, children));
-  const start = Math.min(...bounds.map((b) => b[0]));
-  const end = Math.max(...bounds.map((b) => b[1]));
-  return [{
-    category: 'which',
-    start,
-    end,
-    fragment: text.slice(start, end),
-    explanation: `В предложении обнаружено ${clauseRoots.length} относительных/изъяснительных придаточных; максимальная вложенность — ${maxDepth}.`,
-    method: [...new Set(clauseRoots.map((token) => `dependency:${token.deprel}`)), 'clause-nesting'],
-    confidence: maxDepth >= 2 ? 'high' : 'medium',
-    limitations: ['Качество зависит от сегментации и синтаксического парсера; эллиптические и бессоюзные конструкции могут быть разобраны неполно.'],
-  }];
+  // Кластеры: вложенные/пересекающиеся клаузы или клаузы, разделённые только
+  // пунктуацией/пробелами. Если между клаузами есть буквы (главная часть),
+  // это отдельный кластер, чтобы не захватывать лишний текст.
+  const clusters = [];
+  for (const clause of clauses) {
+    const current = clusters[clusters.length - 1];
+    const joins = current && (clause.start < current.end || /^[\s,.;:!?…—–-]*$/u.test(text.slice(current.end, clause.start)));
+    if (joins) {
+      current.end = Math.max(current.end, clause.end);
+      current.items.push(clause);
+      current.maxDepth = Math.max(current.maxDepth, clause.depth);
+    } else {
+      clusters.push({ start: clause.start, end: clause.end, items: [clause], maxDepth: clause.depth });
+    }
+  }
+
+  const out = [];
+  for (const cluster of clusters) {
+    if (cluster.items.length < 3 && cluster.maxDepth < 3) continue;
+    if (!Number.isInteger(cluster.start) || !Number.isInteger(cluster.end) || cluster.end <= cluster.start || cluster.end > text.length) continue;
+    const fragment = text.slice(cluster.start, cluster.end);
+    if (fragment.length !== cluster.end - cluster.start) continue;
+    const deprels = [...new Set(cluster.items.map(({ token }) => `dependency:${token.deprel}`))];
+    out.push({
+      category: 'which',
+      start: cluster.start,
+      end: cluster.end,
+      fragment,
+      explanation: `Кластер из ${cluster.items.length} относительных/изъяснительных придаточных; максимальная вложенность — ${cluster.maxDepth}.`,
+      method: [...deprels, 'clause-cluster', 'sentence-boundary'],
+      confidence: cluster.maxDepth >= 3 && cluster.items.length >= 3 ? 'high' : 'medium',
+      limitations: [
+        'Зависит от UDPipe: границы и типы клауз могут быть неполными.',
+        'Смешанные/эллиптические/бессоюзные клаузы могут не распознаваться.',
+        'Наличие трёх маркеров не доказывает стилистическую проблему; confidence не калиброван.',
+      ],
+    });
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 /** Запускает структурные категории 4 и 7 по нормализованному parse contract. */
