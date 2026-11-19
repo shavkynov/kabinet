@@ -375,13 +375,6 @@ body:not(.mob) #btnSidebar {
   transition: left .15s ease;
 }
 body:not(.mob).sidebar-hidden #btnSidebar { left: var(--chrome-left, 84px); }
-/* Кнопка панели справа: у левого края правой панели; без панели или в узкой панели встаёт рядом с остальными значками. */
-body:not(.mob) #btnNotes {
-  position: fixed; top: 6px;
-  right: max(calc(var(--tools-w, 190px) + 14px), calc(min(var(--notes-w, 280px), 30vw) - 40px));
-  transition: right .15s ease;
-}
-body:not(.mob).notes-hidden #btnNotes { right: calc(var(--tools-w, 190px) + 14px); }
 #chromeRight {
   position: fixed; top: 6px; right: 12px; z-index: 6;
   display: flex; gap: 2px; -webkit-app-region: no-drag;
@@ -1311,3 +1304,50 @@ body.narrow:not(.mob) #toolbar { padding-right: calc(12px + var(--dock-w)); }
 /* ---------- кнопки гаснут, пока печатаете ---------- */
 .chrome-btn, #chromeRight, #statusDock { transition-property: opacity, left, right; transition-duration: .25s, .15s, .15s; }
 body.typing:not(.focus-mode) .chrome-btn:not(.on), body.typing #statusDock:not(.has-err) { opacity: 0; pointer-events: none; }
+
+/* ---------- панель форматирования на листе ---------- */
+/* Верхняя полоса листа свободна: текст при прокрутке уходит под её край. Кнопки без рамки и фона, чтобы лист не казался зажатым. */
+#fmtBar {
+  position: absolute; top: 0; left: 0; right: 0; height: 38px; z-index: 3;
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+  transition: opacity .25s;
+}
+#fmtBar #fmtGroup { display: flex; flex-wrap: nowrap; gap: 2px; padding: 0; pointer-events: auto; }
+#fmtBar #fmtGroup button { border: none; color: var(--muted); min-width: 30px; height: 26px; padding: 0 6px; font-size: 13px; opacity: .85; }
+#fmtBar #fmtGroup button:hover { background: var(--sel); color: var(--text); opacity: 1; }
+#fmtBar #fmtGroup button.active { background: var(--sel); color: var(--accent); border: none; opacity: 1; }
+body.card-open #fmtBar, body.focus-mode #fmtBar, body.mob #fmtBar { display: none; }
+body.typing #fmtBar { opacity: 0; }
+body.typing #fmtBar #fmtGroup { pointer-events: none; }
+#canvas { container-type: inline-size; }
+@container (max-width: 560px) { #fmtBar { display: none; } }
+
+/* ---------- нижняя панель: счётчик по центру ---------- */
+body:not(.mob) #toolbar {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 14px;
+}
+body:not(.mob) #toolbar .bar-info { grid-column: 1; grid-row: 1; justify-self: start; max-width: 100%; }
+body:not(.mob) #barStats { grid-column: 2; grid-row: 1; justify-self: center; text-align: center; white-space: nowrap; }
+body:not(.mob) #toolbar .bar-btns { grid-column: 3; grid-row: 1; justify-self: end; max-width: 100%; overflow: hidden; }
+/* счётчик стоит строго по центру, поэтому правой группе нужна ровно половина панели: лишние кнопки уходят раньше */
+@container (max-width: 800px) { .bar-btns [data-act="ambient"] { display: none; } }
+@container (max-width: 700px) { .bar-btns [data-act="typewriter"], .bar-btns [data-act="sound"] { display: none; } }
+body:not(.mob) #barStats.on { background: var(--sel); }
+body:not(.mob) #barStats.hit { animation: stats-hit 1.2s ease-out; }
+@keyframes stats-hit { 0% { transform: scale(1); } 20% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+/* ---------- цель: цветная полоса под нижней панелью ---------- */
+body:not(.mob) #goal.line { left: 0; right: 0; bottom: 0; z-index: 5; pointer-events: none; }
+body:not(.mob) #goal.line #goalBtn { pointer-events: none; }
+body:not(.mob) #goal.line #goalBar { height: 3px; }
+body:not(.mob) #goal.hit #goalBtn { animation: none; }
+body:not(.mob) #goal.line + #goalPop { left: 50%; right: auto; transform: translateX(-50%); bottom: calc(var(--foot-h) + 8px); }
+
+/* конфетти над счётчиком */
+.confetti { position: absolute; width: 0; height: 0; z-index: 8; pointer-events: none; }
+.confetti i { position: absolute; left: 0; bottom: 0; width: 7px; height: 11px; border-radius: 2px; opacity: 0; animation: confetti-fly 1.5s cubic-bezier(.2, .7, .3, 1) forwards; }
+@keyframes confetti-fly {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) * -1)) rotate(var(--rot)); }
+}

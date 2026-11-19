@@ -4,6 +4,7 @@ function showScreen(name) {
   $('#start').hidden = name !== 'start';
   $('#workspace').hidden = name !== 'workspace';
   document.title = name === 'workspace' && project ? t('{0} — Кабинет', project.name) : t('Кабинет');
+  syncWindowChrome();
 }
 
 async function showStart() {
@@ -149,6 +150,7 @@ async function renameProjectTo(name) {
     project = proj;
     $('#projectName').textContent = proj.name;
     document.title = t('{0} — Кабинет', proj.name);
+    syncWindowChrome();
     setStatus('ok', t('Проект переименован.'));
   } catch (err) {
     showError(err.message);
@@ -219,3 +221,14 @@ function enterProject(proj) {
   layoutGoal();
 }
 
+
+// Заголовок окна — название проекта, а цвет под ним (полоса заголовка в macOS, в том числе при полном экране) — цвет листа.
+function syncWindowChrome() {
+  try {
+    const w = window.__TAURI__ && window.__TAURI__.window && window.__TAURI__.window.getCurrentWindow();
+    if (!w) return;
+    w.setTitle(project && !$('#workspace').hidden ? project.name : t('Кабинет')).catch(() => {});
+    const m = /rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)/.exec(getComputedStyle($('#stage')).backgroundColor || '');
+    if (m && w.setBackgroundColor) w.setBackgroundColor([Number(m[1]), Number(m[2]), Number(m[3]), 255]).catch(() => {});
+  } catch { /* вне Tauri заголовка окна нет */ }
+}

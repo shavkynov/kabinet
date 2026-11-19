@@ -82,10 +82,43 @@ function celebrateGoal() {
   void box.offsetWidth; // перезапуск анимации
   box.classList.add('hit');
   setTimeout(() => box.classList.remove('hit'), 1400);
+  const st = $('#barStats');
+  st.classList.remove('hit');
+  void st.offsetWidth;
+  st.classList.add('hit');
+  setTimeout(() => st.classList.remove('hit'), 1300);
+  confetti();
+}
+
+// Конфетти над счётчиком: короткий дождь из цветных бумажек. Тем, кто отключил анимацию в системе, он не показывается.
+function confetti() {
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const host = $('#stage');
+  const anchor = $('#barStats');
+  if (!host || !anchor || anchor.offsetParent === null) return;
+  const h = host.getBoundingClientRect();
+  const a = anchor.getBoundingClientRect();
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  box.style.left = `${a.left - h.left + a.width / 2}px`;
+  box.style.bottom = `${h.bottom - a.top + 2}px`;
+  for (let i = 0; i < 32; i++) {
+    const p = document.createElement('i');
+    p.style.setProperty('--dx', `${Math.round((Math.random() - 0.5) * 220)}px`);
+    p.style.setProperty('--dy', `${Math.round(70 + Math.random() * 90)}px`);
+    p.style.setProperty('--rot', `${Math.round(Math.random() * 720 - 360)}deg`);
+    p.style.background = `hsl(${Math.round(Math.random() * 360)} 75% 58%)`;
+    p.style.animationDelay = `${Math.round(Math.random() * 120)}ms`;
+    box.append(p);
+  }
+  host.append(box);
+  setTimeout(() => box.remove(), 1800);
 }
 
 // Трекер слов главы убирается: его показывает и прячет щелчок по счётчику слов на нижней панели.
 let goalShown = false;
+// Плашка цели с цифрами — только на телефоне. На компьютере цифры в счётчике по центру нижней панели, а цель показывает цветная полоса внизу.
+const goalPill = () => document.body.classList.contains('mob');
 
 function setGoalShown(on) {
   goalShown = on;
@@ -96,8 +129,8 @@ function setGoalShown(on) {
 function refreshGoalUI() {
   const box = $('#goal');
   const chapterOpen = !!project && !!currentId && currentKind === 'chapter';
-  box.hidden = !(chapterOpen && goalShown);
-  if (!goalShown) closeGoalPop();
+  box.hidden = !(chapterOpen && (goalShown || !goalPill()));
+  if (!goalShown && goalPill()) closeGoalPop();
   if (!chapterOpen) {
     closeGoalPop();
     layoutGoal();
@@ -124,9 +157,9 @@ function refreshGoalUI() {
   } else {
     const p = Math.min(1, cur / goal);
     const reached = cur >= goal;
-    // красный → оранжевый → жёлтый → зелёный по мере приближения; цель взята: синий
-    const hue = reached ? 212 : Math.round(p * 125);
-    box.style.setProperty('--goal-color', `hsl(${hue} 85% 50%)`);
+    // красный → оранжевый → жёлтый → зелёный по мере приближения; цель взята: зелёный
+    const hue = Math.round(p * 125);
+    box.style.setProperty('--goal-color', `hsl(${hue} 80% 46%)`);
     $('#goalFill').style.width = `${cur > 0 ? Math.max(3, p * 100) : 0}%`;
 
     const b = document.createElement('b');
@@ -168,7 +201,10 @@ function layoutGoal() {
 
   let mode;
   let w;
-  if (avail >= 150) {
+  if (!goalPill()) {
+    mode = 'line';
+    w = 0;
+  } else if (avail >= 150) {
     mode = 'margin';
     w = Math.min(200, Math.floor(avail));
   } else if (!focus) {
@@ -199,10 +235,12 @@ function openGoalPop() {
   $('#goalPop').hidden = false;
   $('#goalInput').focus();
   $('#goalInput').select();
+  if (!goalPill()) $('#barStats').classList.add('on');
 }
 
 function closeGoalPop() {
   $('#goalPop').hidden = true;
+  if (!goalPill()) $('#barStats').classList.remove('on');
 }
 
 function fillGoalInputs() {
@@ -244,7 +282,9 @@ function wireGoal() {
   try { goalShown = localStorage.getItem('kabinet.goalShown') === '1'; } catch { /* ignore */ }
   const stats = $('#barStats');
   stats.addEventListener('click', () => {
-    if (currentKind === 'chapter' && currentId) setGoalShown(!goalShown);
+    if (currentKind !== 'chapter' || !currentId) return;
+    if (goalPill()) { setGoalShown(!goalShown); return; }
+    if ($('#goalPop').hidden) openGoalPop(); else closeGoalPop();
   });
   stats.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stats.click(); }
@@ -285,7 +325,7 @@ function wireGoal() {
 
   document.addEventListener('mousedown', (e) => {
     if ($('#goalPop').hidden) return;
-    if (e.target.closest('#goalPop') || e.target.closest('#goal')) return;
+    if (e.target.closest('#goalPop') || e.target.closest('#goal') || e.target.closest('#barStats')) return;
     closeGoalPop();
   });
 }

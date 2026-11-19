@@ -56,17 +56,23 @@ function refreshBar() {
   if (chapter) {
     const limit = project.mode === 'stories' ? project.charLimit : null;
     const charsText = limit ? `${n(stats.chars)} / ${n(limit)}` : n(stats.chars);
-    // Когда виден трекер цели, он уже показывает слова (или знаки, если цель в знаках): здесь их не повторяем.
     const parts = [];
-    if (!(goalShown && goalMetric() === 'words')) parts.push(`${n(stats.words)} ${wordsForm(stats.words)}`);
-    if (!(goalShown && goalMetric() === 'chars')) parts.push(`${charsText} ${t('зн.')}`);
+    if (goalPill()) { // телефон: слова и знаки в трекере цели не повторяем
+      if (!(goalShown && goalMetric() === 'words')) parts.push(`${n(stats.words)} ${wordsForm(stats.words)}`);
+      if (!(goalShown && goalMetric() === 'chars')) parts.push(`${charsText} ${t('зн.')}`);
+    } else { // компьютер: счётчик по центру, цель показывает полоса внизу
+      const goal = effectiveGoal();
+      const metric = goalMetric();
+      parts.push(goal && metric === 'words' ? `${n(stats.words)} / ${n(goal)} ${wordsForm(goal)}` : `${n(stats.words)} ${wordsForm(stats.words)}`);
+      parts.push(`${goal && metric === 'chars' ? `${n(stats.chars)} / ${n(goal)}` : charsText} ${t('зн.')}`);
+    }
     if (project.mode === 'stories') { // авторские листы: 40 000 знаков с пробелами
       parts.push(t('{0} а. л.', authorSheets(stats.chars).toLocaleString(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 })));
     }
     info = parts.join(' · ');
   }
   $('#barStats').textContent = info;
-  $('#barStats').classList.toggle('on', goalShown);
+  $('#barStats').classList.toggle('on', goalPill() ? goalShown : !$('#goalPop').hidden);
   $('#barStats').classList.toggle('over', chapter && project.mode === 'stories' && !!project.charLimit && stats.chars > project.charLimit);
   $('#barRead').textContent = chapter && stats.words >= 90
     ? t('чтение ≈ {0} мин', Math.max(1, Math.round(stats.words / 180))) : '';

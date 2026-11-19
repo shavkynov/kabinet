@@ -170,6 +170,7 @@ function applySettings() {
   updateTwPad();
 
   document.documentElement.setAttribute('data-theme', settings.theme); // цвета цветных тем лежат в style.css
+  setTimeout(syncWindowChrome, 50); // цвет полосы заголовка окна следует за листом
   // Тему применяет сама macOS-часть окна: так подстраиваются и меню, и полосы прокрутки
   if (settings.theme !== lastTheme) {
     lastTheme = settings.theme;

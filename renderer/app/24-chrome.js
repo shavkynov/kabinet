@@ -41,16 +41,6 @@ function togglePanel(name) {
   else closePanels();
 }
 
-// Кнопки «Панель глав» и «Панель справа» ездят вместе с краем своей панели (см. style.css). Правой кнопке нужно знать,
-// сколько места занимают остальные значки справа: меряем их и кладём ширину в --tools-w.
-function wireChromeLayout() {
-  const box = $('#chromeRight');
-  if (!box || typeof ResizeObserver === 'undefined') return;
-  const set = () => document.documentElement.style.setProperty('--tools-w', `${Math.ceil(box.getBoundingClientRect().width)}px`);
-  new ResizeObserver(set).observe(box);
-  set();
-}
-wireChromeLayout();
 
 // Узкое окно: боковые панели не сжимают лист, а выезжают поверх него; клик по листу их убирает.
 const NARROW_W = 900;

@@ -15,6 +15,11 @@ const TOOLBAR = {
 
 function wireToolbar() {
   const group = $('#fmtGroup');
+  // На компьютере форматирование живёт на самом листе, в верхней свободной полосе: текст туда не заходит. На телефоне остаётся в меню «Aa».
+  if (!document.body.classList.contains('mob')) {
+    $('#fmtBar').append(group);
+    $('#fmtHead').hidden = true;
+  }
   // не отбираем фокус у текста при нажатии на кнопки
   group.addEventListener('mousedown', (e) => e.preventDefault());
   group.addEventListener('click', (e) => {
