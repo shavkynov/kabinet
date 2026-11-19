@@ -91,6 +91,8 @@ function refreshBar() {
     split: !!p2.id,
     focus: document.body.classList.contains('focus-mode'),
   };
+  $('#btnSplit').classList.toggle('on', !!p2.id);
+  refreshSheetBar();
   document.querySelectorAll('#toolbar button[data-act]').forEach((b) => {
     b.classList.toggle('active', !!on[b.dataset.act]);
   });

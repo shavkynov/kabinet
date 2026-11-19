@@ -101,6 +101,7 @@ function toggleFocusMode(force) {
   const on = typeof force === 'boolean' ? force : !document.body.classList.contains('focus-mode');
   if (on && !project) return;
   document.body.classList.toggle('focus-mode', on);
+  if (!on && p2.id) closePane2(); // «Рядом» живёт только в режиме «Только лист»
   refreshBar();
   if (on) {
     closeSettings();
@@ -117,6 +118,9 @@ function wireChrome() {
   $('#btnSidebar').addEventListener('click', toggleSidebar);
   $('#btnSettings').addEventListener('click', toggleSettings);
   $('#btnSound').addEventListener('click', () => togglePanel('sound'));
+  $('#btnSplit').addEventListener('click', toggleSplit);
+  $('#btnFocus').addEventListener('click', () => toggleFocusMode());
+  wireSheetBar();
   wireChips();
   wireBinderTop();
 
@@ -178,7 +182,9 @@ function wireChrome() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#board').hidden) {
+    if (!$('#sheetMenu').hidden) {
+      closeSheetMenu();
+    } else if (!$('#board').hidden) {
       closeBoard();
     } else if (!$('#projPop').hidden) {
       closeProjPop();

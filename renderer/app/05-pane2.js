@@ -82,6 +82,7 @@ function fillP2Select() {
 function showPane2(on) {
   $('#canvas').classList.toggle('split', on);
   $('#pane2').hidden = !on;
+  refreshSheetBar();
   setTimeout(() => { updateTwPad(); layoutGoal(); }, 0);
   refreshBar();
 }
@@ -149,10 +150,12 @@ function resetPane2() {
   showPane2(false);
 }
 
+// «Рядом» сразу включает и «Только лист»: экран делится между двумя листами, а выбор глав живёт в меню вверху.
 function toggleSplit() {
   if (!project) return;
   if (p2.id) {
-    closePane2();
+    if (document.body.classList.contains('focus-mode')) toggleFocusMode(false); // выход из «Только лист» закрывает и второй лист
+    else closePane2();
     return;
   }
   const list = itemsOf('chapter');
@@ -162,6 +165,104 @@ function toggleSplit() {
     setStatus('ok', 'Для второй панели нужна ещё одна глава');
     return;
   }
+  if (!document.body.classList.contains('focus-mode')) toggleFocusMode(true);
   openPane2(other.id);
+}
+
+// ---------- меню выбора листов вверху ----------
+
+function refreshSheetBar() {
+  const bar = $('#sheetBar');
+  if (!bar) return;
+  bar.hidden = !p2.id;
+  if (!p2.id) { closeSheetMenu(); return; }
+  const list = itemsOf('chapter');
+  const label = (id) => {
+    const i = list.findIndex((c) => c.id === id);
+    return i < 0 ? t('Выбрать главу') : `${i + 1}. ${list[i].title}`;
+  };
+  for (const [sel, id] of [['#sheetL', currentKind === 'chapter' ? currentId : null], ['#sheetR', p2.id]]) {
+    const b = $(sel);
+    b.setAttribute('translate', 'no');
+    b.textContent = '';
+    const tx = document.createElement('span');
+    tx.className = 'sp-t';
+    tx.textContent = label(id);
+    b.append(tx, Object.assign(document.createElement('span'), { className: 'sp-c', textContent: '▾' }));
+  }
+}
+
+function closeSheetMenu() {
+  const m = $('#sheetMenu');
+  if (m.hidden) return;
+  m.hidden = true;
+  m.textContent = '';
+  document.querySelectorAll('.sheet-pick.open').forEach((b) => b.classList.remove('open'));
+}
+
+function openSheetMenu(side) {
+  if (!project || !p2.id) return;
+  const menu = $('#sheetMenu');
+  const btn = $(side === 'L' ? '#sheetL' : '#sheetR');
+  if (!menu.hidden && btn.classList.contains('open')) { closeSheetMenu(); return; }
+  closeSheetMenu();
+  const mine = side === 'L' ? (currentKind === 'chapter' ? currentId : null) : p2.id;
+  const other = side === 'L' ? p2.id : (currentKind === 'chapter' ? currentId : null);
+  menu.setAttribute('translate', 'no');
+  itemsOf('chapter').forEach((c, i) => {
+    const it = document.createElement('button');
+    it.type = 'button';
+    it.className = 'sm-item';
+    it.setAttribute('role', 'option');
+    it.dataset.id = c.id;
+    it.classList.toggle('cur', c.id === mine);
+    it.disabled = c.id === other; // эта глава уже на соседнем листе
+    it.append(Object.assign(document.createElement('span'), { className: 'sm-n', textContent: String(i + 1) }), Object.assign(document.createElement('span'), { className: 'sm-t', textContent: c.title }));
+    menu.append(it);
+  });
+  menu.hidden = false;
+  btn.classList.add('open');
+  const cv = $('#canvas').getBoundingClientRect();
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(320, cv.width / 2 - 16);
+  menu.style.width = `${w}px`;
+  menu.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - cv.left - w / 2, cv.width - w - 8))}px`;
+  menu.style.top = `${r.bottom - cv.top + 2}px`;
+  const cur = menu.querySelector('.cur') || menu.querySelector('.sm-item:not(:disabled)');
+  if (cur) { cur.scrollIntoView({ block: 'center' }); cur.focus({ preventScroll: true }); }
+  menu.dataset.side = side;
+}
+
+function wireSheetBar() {
+  $('#sheetL').addEventListener('click', () => openSheetMenu('L'));
+  $('#sheetR').addEventListener('click', () => openSheetMenu('R'));
+  $('#sheetX').addEventListener('click', toggleSplit);
+  const menu = $('#sheetMenu');
+  menu.addEventListener('click', async (e) => {
+    const it = e.target.closest('.sm-item');
+    if (!it || it.disabled) return;
+    const side = menu.dataset.side;
+    closeSheetMenu();
+    if (side === 'L') {
+      if (currentKind === 'chapter' && currentId === it.dataset.id) return;
+      await openDoc('chapter', it.dataset.id);
+    } else if (it.dataset.id !== p2.id) {
+      await openPane2(it.dataset.id);
+    }
+    refreshSheetBar();
+  });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); const side = menu.dataset.side; closeSheetMenu(); $(side === 'L' ? '#sheetL' : '#sheetR').focus(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const items = [...menu.querySelectorAll('.sm-item:not(:disabled)')];
+    const i = items.indexOf(document.activeElement);
+    const next = items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+    if (next) next.focus();
+  });
+  document.addEventListener('mousedown', (e) => {
+    if (menu.hidden || e.target.closest('#sheetMenu') || e.target.closest('.sheet-pick')) return;
+    closeSheetMenu();
+  });
 }
 

@@ -56,6 +56,8 @@ function toggleTypewriter() {
   applySettings();
   saveSettings();
   if (settings.typewriter) recenterNow();
+  const b = $('#btnTypewriter'); // короткая анимация включения
+  if (b) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); setTimeout(() => b.classList.remove('pop'), 600); }
 }
 
 // Пустое место сверху и снизу листа равно половине высоты окна: так любая строка может встать по центру.
