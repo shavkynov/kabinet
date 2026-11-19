@@ -1,10 +1,52 @@
 'use strict';
 
+const { speechRanges } = require('../speech');
+
 const RELATIVE_CLAUSE = 'acl:relcl';
 const WHAT_CLAUSE_RELATIONS = new Set(['ccomp', 'acl']);
 const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция)$/u;
 // Лексикализованные существительные с «отглагольным» суффиксом, но без процессного значения.
 const NOMINALIZATION_STOP = new Set(['здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление', 'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение', 'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие']);
+
+const LIGHT_VERB_LEMMAS = new Set([
+  'осуществлять', 'осуществить', 'проводить', 'провести', 'производить', 'произвести',
+  'выполнять', 'выполнить', 'вести', 'оказывать', 'оказать', 'принимать', 'принять',
+  'делать', 'сделать', 'совершать', 'совершить', 'давать', 'дать', 'издавать', 'издать',
+]);
+const EVENT_NOUN_LEMMAS = new Set([
+  'проверка', 'анализ', 'контроль', 'помощь', 'оценка', 'подготовка', 'обработка',
+  'поддержка', 'разработка', 'мероприятие', 'совещание', 'заседание', 'переговоры',
+  'встреча', 'поездка', 'разведка', 'осмотр', 'обыск', 'ремонт', 'арест', 'доклад', 'отчет',
+  'приказ', 'указание', 'распоряжение', 'согласование', 'исполнение', 'проведение',
+  'осуществление', 'выполнение', 'формирование', 'создание', 'использование',
+  'применение', 'обеспечение', 'предоставление', 'получение', 'рассмотрение',
+  'утверждение', 'подписание', 'заключение', 'финансирование', 'управление',
+  'координация', 'взаимодействие', 'решение', 'заявление', 'предложение',
+]);
+const NON_EVENT_NOUNS = new Set(['безопасность', 'документ', 'информация', 'оборудование', 'здание', 'мнение']);
+const NON_PROCESS_NOUNS = new Set([...NON_EVENT_NOUNS, 'требование']);
+const OFFICIAL_PREPOSITION_NOUNS = new Set([
+  'цель', 'связь', 'соответствие', 'отношение', 'рамка', 'порядок', 'область',
+  'процесс', 'ход', 'основание', 'результат', 'течение', 'сила', 'адрес',
+]);
+const EVENT_SUFFIX = /(?:ание|ение|яние|тие|ие|ция)$/u;
+
+function isEventNoun(token) {
+  if (!token || token.upos !== 'NOUN' || !token.feats || Object.keys(token.feats).length === 0) return false;
+  const lemma = lemmaOf(token);
+  if (NON_EVENT_NOUNS.has(lemma)) return false;
+  if (EVENT_NOUN_LEMMAS.has(lemma)) return true;
+  return EVENT_SUFFIX.test(lemma) && !NOMINALIZATION_STOP.has(lemma);
+}
+
+function isProcessNoun(token) {
+  return isEventNoun(token) && !NON_PROCESS_NOUNS.has(lemmaOf(token));
+}
+
+function tokenInSpeech(token, speech) {
+  return speech.some(([a, b]) => token.start < b && token.end > a);
+}
+
 
 function tokenIndex(tokens) {
   const byId = new Map();
@@ -141,6 +183,135 @@ function hasRelativeMarker(root, children) {
 
 function hasWhatMark(root, children) {
   return (children.get(root.id) || []).some((child) => child.deprel === 'mark' && lemmaOf(child) === 'что');
+}
+
+function possibleChancerySpan(text, start, end, speech) {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length) return false;
+  if (text.slice(start, end).length !== end - start) return false;
+  return !speech.some(([a, b]) => start < b && end > a);
+}
+
+function bestEventPath(root, children) {
+  let best = [root];
+  function walk(node, path, seen) {
+    const next = (children.get(node.id) || []).filter((child) => isEventNoun(child)
+      && (child.deprel === 'nmod' || child.deprel === 'nmod:poss')
+      && child.feats && child.feats.Case === 'Gen'
+      && !seen.has(child.id));
+    if (!next.length) {
+      if (path.length > best.length) best = path;
+      return;
+    }
+    for (const child of next) {
+      const nextSeen = new Set(seen);
+      nextSeen.add(child.id);
+      walk(child, [...path, child], nextSeen);
+    }
+  }
+  walk(root, [root], new Set([root.id]));
+  return best;
+}
+
+function findChancery(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
+  const byId = tokenIndex(tokens);
+  const children = childrenByHead(tokens);
+  const out = [];
+  const seen = new Set();
+  const add = (ruleId, start, end, explanation, method, confidence) => {
+    if (!possibleChancerySpan(text, start, end, speech)) return;
+    const key = `${ruleId}:${start}:${end}`;
+    if (seen.has(key)) return;
+    const finding = {
+      category: 'chancery',
+      ruleId,
+      start,
+      end,
+      fragment: text.slice(start, end),
+      explanation,
+      method,
+      confidence,
+      limitations: [
+        'Лексические классы/суффиксы — эвристика; контекст жанра и авторского замысла не анализируется.',
+        'Термины, официальная речь персонажа и намеренная стилизация могут быть допустимы.',
+        'Confidence не калиброван на независимом корпусе.',
+      ],
+    };
+    // Для одного правила вложенный span заменяется максимальным, а не дублируется.
+    const nested = out.findIndex((x) => x.ruleId === ruleId
+      && ((start <= x.start && end >= x.end) || (x.start <= start && x.end >= end)));
+    if (nested >= 0) {
+      if (start <= out[nested].start && end >= out[nested].end) out[nested] = finding;
+      return;
+    }
+    seen.add(key);
+    out.push(finding);
+  };
+
+  for (const token of tokens) {
+    if (!validSpan(token, text) || tokenInSpeech(token, speech)) continue;
+    const kids = children.get(token.id) || [];
+
+    // 1. Событийная номинализация в роли подлежащего при сказуемом.
+    if (isEventNoun(token) && (token.deprel === 'nsubj' || token.deprel === 'nsubj:pass')) {
+      const parent = byId.get(token.head);
+      if (parent && (parent.upos === 'VERB' || parent.upos === 'AUX')) {
+        const path = bestEventPath(token, children);
+        if (path.length >= 2 && path.every((t) => validSpan(t, text) && !tokenInSpeech(t, speech))) {
+          add('chancery.nominal-subject-cluster', path[0].start, path[path.length - 1].end,
+            `Отглагольное существительное в роли подлежащего с зависимой событийной цепочкой (${path.length} элементов).`,
+            ['dependency:nsubj', 'dependency:nmod', 'morphology:Case=Gen', 'derivational-or-lexical:event-noun'], 'medium');
+        }
+      }
+    }
+
+    // 2. Лёгкий глагол + событийное существительное.
+    if (token.upos === 'VERB' && LIGHT_VERB_LEMMAS.has(lemmaOf(token))
+      && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass')) {
+      const event = kids.find((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
+      if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
+        add('chancery.light-verb-event-noun', Math.min(token.start, event.start), Math.max(token.end, event.end),
+          `Действие выражено сочетанием лёгкого глагола «${token.text}» с событийным существительным «${event.text}».`,
+          [`dependency:${event.deprel}`, 'lexicon:light-verb', 'lexicon-or-suffix:event-noun'], 'medium');
+      }
+    }
+
+    // 3. Пассив без агенса + событийное существительное.
+    const passive = token.upos === 'VERB' && ((token.feats && token.feats.Voice === 'Pass') || kids.some((c) => c.deprel === 'aux:pass'));
+    if (passive && !kids.some((c) => c.deprel === 'obl:agent')) {
+      const event = kids.find((child) => (child.deprel === 'nsubj:pass' || child.deprel === 'nsubj') && isEventNoun(child));
+      if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
+        const aux = kids.find((c) => c.deprel === 'aux:pass');
+        const start = Math.min(token.start, event.start, aux ? aux.start : token.start);
+        const end = Math.max(token.end, event.end, aux ? aux.end : token.end);
+        add('chancery.passive-event-nominal', start, end,
+          `Пассивная конструкция без агенса с событийным существительным «${event.text}».`,
+          ['dependency:aux:pass', 'morphology:Voice=Pass', 'dependency:nsubj:pass', 'lexicon-or-suffix:event-noun'], 'medium');
+      }
+    }
+
+    // 4. Официальная предложная формула + процессное существительное.
+    if (isProcessNoun(token)) {
+      let ancestor = byId.get(token.head);
+      const guard = new Set([token.id]);
+      while (ancestor && !guard.has(ancestor.id)) {
+        guard.add(ancestor.id);
+        if (ancestor.upos === 'NOUN' && OFFICIAL_PREPOSITION_NOUNS.has(lemmaOf(ancestor))) {
+          const caseChild = (children.get(ancestor.id) || []).find((c) => c.deprel === 'case'
+            && ['в', 'во', 'с', 'со', 'на', 'по', 'при', 'из', 'от'].includes(lemmaOf(c)));
+          if (caseChild && validSpan(caseChild, text) && !tokenInSpeech(caseChild, speech)) {
+            add('chancery.official-preposition', caseChild.start, token.end,
+              `Официальная предложная формула «${text.slice(caseChild.start, ancestor.end)}» с процессным существительным.`,
+              ['dependency:case', 'lexicon:official-preposition', 'lexicon-or-suffix:event-noun'], 'low');
+          }
+          break;
+        }
+        ancestor = byId.get(ancestor.head);
+      }
+    }
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 function isSubordinateClauseRoot(token, children) {
@@ -288,15 +459,17 @@ function findSubordinateAvalanches(text, sentence) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
-/** Запускает структурные категории 4 и 7 по нормализованному parse contract. */
+/** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [] };
+  const result = { chain: [], which: [], chancery: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
+  const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
     if (enabled.chain) result.chain.push(...findNounChains(text, sentence));
     if (enabled.which) result.which.push(...findSubordinateAvalanches(text, sentence));
+    if (enabled.chancery) result.chancery.push(...findChancery(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery };

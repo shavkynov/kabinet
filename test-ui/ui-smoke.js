@@ -52,6 +52,24 @@ function fakeTauri() {
           return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
         }
       }
+      if (window.__styleChancery) {
+        const phrase = 'Отряд осуществлял разведку';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const rows = [
+            ['Отряд', 'отряд', 'NOUN', { Case: 'Nom' }, 2, 'nsubj'],
+            ['осуществлял', 'осуществлять', 'VERB', { VerbForm: 'Fin', Voice: 'Act' }, 0, 'root'],
+            ['разведку', 'разведка', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+          ];
+          let at = base;
+          const tokens = rows.map(([word, lemma, upos, feats, head, deprel], i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma, upos, feats, head, deprel, start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chancery', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
       if (window.__styleWhich) {
         const phrase = 'Он знал, что дом стоял, что сад шумел, что лес спал.';
         const base = text.indexOf(phrase);
@@ -167,6 +185,13 @@ function fakeTauri() {
   ok(!!whichShadow && whichShadow.whichCount === 1 && whichShadow.which[0].fragment === 'что дом стоял, что сад шумел, что лес спал', 'тень: which finding доступен в diagnostics');
   ok(!!whichShadow && whichShadow.ruleErrors.length === 0, 'тень: which не дал rule error');
   await page.evaluate(() => { window.__styleWhich = false; });
+  await page.evaluate(() => { window.__styleChancery = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const chanceryShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!chanceryShadow && chanceryShadow.chanceryCount === 1 && chanceryShadow.chancery[0].fragment === 'осуществлял разведку', 'тень: chancery finding доступен в diagnostics');
+  ok(!!chanceryShadow && chanceryShadow.ruleErrors.length === 0, 'тень: chancery не дал rule error');
+  await page.evaluate(() => { window.__styleChancery = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 
