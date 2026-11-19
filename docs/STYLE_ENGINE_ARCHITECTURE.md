@@ -426,3 +426,9 @@ Offsets в UI — UTF-16 code units. Adapter обязан переводить o
 - parser/runtime в приложение не подключён; лицензия SynTagRus не решена.
 
 Проверки после исправлений: `npm test` 376/376, полный JS 580/580, `npm run check` 0, `npm run build` 0.
+
+## Приложение C. Решение этапа B (2026-11-19)
+
+Выбран условный production-путь: **Rust backend `udpipe-rs` + модель UD Russian-GSD 2.5** (CC BY-SA 4.0). Подробный аудит, лицензионная таблица и результаты прототипа — в `docs/STYLE_ENGINE_RUNTIME_AUDIT.md`.
+
+Ключевые причины: нет патча Emscripten и неизвестности WASM в WKWebView/WebView2; нативный разбор ~3 мс/абзац и 198 МБ RSS на контрольной главе; GSD 14 МБ и без NC-ограничения SynTagRus. WASM Worker остаётся fallback. Модель пока не добавлена в репозиторий/установщик; юридическая проверка производной модели GSD обязательна. Старый `src/style.js` не изменяется.
