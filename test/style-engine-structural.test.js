@@ -22,9 +22,9 @@ test('chain: dependency-based genitive chain with two nominalizations is found',
   const parsed = parse(text, [
     ['Причина', 'причина', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
     ['отсутствия', 'отсутствие', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 8],
-    ['желания', 'желание', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 20],
-    ['возвращаться', 'возвращаться', 'VERB', { VerbForm: 'Inf' }, 3, 'xcomp', 28],
-    ['.', '.', 'PUNCT', {}, 1, 'punct', 41],
+    ['желания', 'желание', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 19],
+    ['возвращаться', 'возвращаться', 'VERB', { VerbForm: 'Inf' }, 3, 'xcomp', 27],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 40],
   ]);
   const hits = analyzeStructural(text, parsed, { chain: true }).chain;
   assert.equal(hits.length, 1);
@@ -67,10 +67,10 @@ test('which: три реальные зависимые клаузы отмеч�
     ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj', 0],
     ['понял', 'понять', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 3],
     ['что', 'что', 'SCONJ', {}, 4, 'mark', 10],
-    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 2, 'ccomp', 14],
-    ['который', 'который', 'PRON', { Case: 'Nom' }, 6, 'nsubj', 19],
-    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 4, 'acl:relcl', 27],
-    ['продаётся', 'продаваться', 'VERB', { VerbForm: 'Fin' }, 4, 'conj', 34],
+    ['дом', 'дом', 'NOUN', { Case: 'Nom' }, 7, 'nsubj', 13],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 6, 'nsubj', 18],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 4, 'acl:relcl', 26],
+    ['продаётся', 'продаваться', 'VERB', { VerbForm: 'Fin' }, 2, 'ccomp', 33],
     ['когда', 'когда', 'SCONJ', {}, 9, 'mark', 44],
     ['стемнело', 'стемнеть', 'VERB', { VerbForm: 'Fin' }, 7, 'advcl', 50],
     ['.', '.', 'PUNCT', {}, 8, 'punct', 58],
@@ -88,10 +88,10 @@ test('which: омонимичное «что» и обычное предлож�
     ['лежало', 'лежать', 'VERB', { VerbForm: 'Fin' }, 0, 'root', 4],
     ['на', 'на', 'ADP', {}, 4, 'case', 11],
     ['столе', 'стол', 'NOUN', { Case: 'Loc' }, 2, 'obl', 13],
-    ['никто', 'никто', 'PRON', { Case: 'Nom' }, 6, 'nsubj', 19],
-    ['не', 'не', 'PART', {}, 6, 'advmod', 25],
-    ['заметил', 'заметить', 'VERB', { VerbForm: 'Fin' }, 2, 'conj', 28],
-    ['.', '.', 'PUNCT', {}, 7, 'punct', 35],
+    ['никто', 'никто', 'PRON', { Case: 'Nom' }, 7, 'nsubj', 21],
+    ['не', 'не', 'PART', {}, 7, 'advmod', 27],
+    ['заметил', 'заметить', 'VERB', { VerbForm: 'Fin' }, 2, 'conj', 30],
+    ['.', '.', 'PUNCT', {}, 7, 'punct', 37],
   ]);
   assert.deepEqual(analyzeStructural(text, parsed, { which: true }).which, []);
 });
