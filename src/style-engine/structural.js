@@ -21,8 +21,12 @@ function childrenByHead(tokens) {
   return children;
 }
 
+function isNominalToken(token) {
+  return !!token && (token.upos === 'NOUN' || token.upos === 'PROPN');
+}
+
 function isGenitiveNoun(token) {
-  return (token.upos === 'NOUN' || token.upos === 'PROPN')
+  return isNominalToken(token)
     && token.feats && token.feats.Case === 'Gen'
     && (token.deprel === 'nmod' || token.deprel === 'nmod:poss');
 }
@@ -32,26 +36,52 @@ function isNominalization(token) {
   return token.upos === 'NOUN' && NOMINALIZATION_ENDINGS.test(lemma) && !NOMINALIZATION_STOP.has(lemma);
 }
 
+function validSpan(token, text) {
+  return Number.isInteger(token.start) && Number.isInteger(token.end)
+    && token.start >= 0 && token.end > token.start && token.end <= text.length
+    && text.slice(token.start, token.end) === token.text;
+}
+
 /**
- * Структурный поиск цепочек: требует dependency-цепь минимум из трёх существительных,
- * минимум двух генитивных связей и минимум двух морфологически/словообразовательно
- * распознаваемых отглагольных существительных. Соседство слов не используется.
+ * Цепочка — максимальный путь по рёбрам nmod/nmod:poss + Gen между именными
+ * головами. Ветвление не склеивается: каждая ветвь даёт отдельный путь.
+ * Стартуем только с головы без входящего генитивного ребра, поэтому
+ * вложенные подцепочки не выдаются как отдельные findings.
  */
 function findNounChains(text, sentence) {
-  const tokens = sentence.tokens || [];
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length) return [];
+  const byId = new Map(tokens.map((token) => [token.id, token]));
   const children = childrenByHead(tokens);
+  const incoming = new Set();
+  for (const token of tokens) {
+    if (!isGenitiveNoun(token)) continue;
+    const parent = byId.get(token.head);
+    if (isNominalToken(parent)) incoming.add(token.id);
+  }
+  const roots = tokens.filter((token) => isNominalToken(token) && !incoming.has(token.id));
   const found = [];
 
-  function walk(parent, path, seen) {
-    const next = (children.get(parent.id) || [])
+  function evaluate(path) {
+    if (path.length < 3) return;
+    if (path.some((token) => token.upos === 'PROPN')) return; // имена/названия не считаем стилевой цепочкой
+    if (path.some((token) => token.upos === 'NOUN' && NOMINALIZATION_STOP.has(String(token.lemma || '').toLowerCase().replace(/ё/g, 'е')))) return;
+    const nominalizations = path.filter(isNominalization).length;
+    if (nominalizations < 2) return;
+    const start = Math.min(...path.map((token) => token.start));
+    const end = Math.max(...path.map((token) => token.end));
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start || end > text.length) return;
+    if (text.slice(start, end).length !== end - start) return;
+    found.push({ path, nominalizations, start, end });
+  }
+
+  function walk(node, path, seen) {
+    const next = (children.get(node.id) || [])
       .filter(isGenitiveNoun)
-      .filter((child) => !seen.has(child.id));
+      .filter((child) => !seen.has(child.id))
+      .filter((child) => validSpan(child, text));
     if (!next.length) {
-      if (path.length >= 3) {
-        const nominalizations = path.filter(isNominalization).length;
-        const genitiveEdges = path.length - 1;
-        if (genitiveEdges >= 2 && nominalizations >= 2) found.push({ path, nominalizations, genitiveEdges });
-      }
+      evaluate(path);
       return;
     }
     for (const child of next) {
@@ -61,51 +91,37 @@ function findNounChains(text, sentence) {
     }
   }
 
-  for (const token of tokens) {
-    if (token.upos !== 'NOUN' && token.upos !== 'PROPN') continue;
-    walk(token, [token], new Set([token.id]));
+  for (const root of roots) {
+    if (!validSpan(root, text)) continue;
+    walk(root, [root], new Set([root.id]));
   }
 
+  // Только точные дубли; пересекающиеся ветви не удаляем.
   const unique = new Map();
   for (const candidate of found) {
-    const start = Math.min(...candidate.path.map((t) => t.start));
-    const end = Math.max(...candidate.path.map((t) => t.end));
-    const key = `${start}:${end}`;
-    const old = unique.get(key);
-    if (!old || candidate.nominalizations > old.nominalizations) unique.set(key, candidate);
+    const key = `${candidate.start}:${candidate.end}`;
+    if (!unique.has(key)) unique.set(key, candidate);
   }
-
-  const ordered = [...unique.values()].sort((a, b) => {
-    const aStart = Math.min(...a.path.map((t) => t.start));
-    const bStart = Math.min(...b.path.map((t) => t.start));
-    const aEnd = Math.max(...a.path.map((t) => t.end));
-    const bEnd = Math.max(...b.path.map((t) => t.end));
-    return aStart - bStart || (bEnd - bStart) - (aEnd - aStart);
-  });
-  const nonOverlapping = [];
-  for (const candidate of ordered) {
-    const start = Math.min(...candidate.path.map((t) => t.start));
-    const end = Math.max(...candidate.path.map((t) => t.end));
-    if (nonOverlapping.some((kept) => start < Math.max(...kept.path.map((t) => t.end)) && end > Math.min(...kept.path.map((t) => t.start)))) continue;
-    nonOverlapping.push(candidate);
-  }
-
-  return nonOverlapping
+  return [...unique.values()]
+    .sort((a, b) => a.start - b.start || a.end - b.end)
     .map((candidate) => {
-      const start = Math.min(...candidate.path.map((t) => t.start));
-      const end = Math.max(...candidate.path.map((t) => t.end));
+      const deprels = [...new Set(candidate.path.slice(1).map((token) => `dependency:${token.deprel}`))];
       return {
         category: 'chain',
-        start,
-        end,
-        fragment: text.slice(start, end),
-        explanation: `Вложенная именная группа содержит ${candidate.path.length} существительных, ${candidate.genitiveEdges} генитивные связи и ${candidate.nominalizations} отглагольных существительных.`,
-        method: ['dependency:nmod', 'morphology:Case=Gen', 'derivational-suffix:nominalization'],
-        confidence: candidate.nominalizations >= 3 ? 'high' : 'medium',
-        limitations: ['Словообразовательный суффикс — приближение; терминологические и авторские именные группы требуют проверки.'],
+        start: candidate.start,
+        end: candidate.end,
+        fragment: text.slice(candidate.start, candidate.end),
+        explanation: `Потенциально тяжёлая именная цепь: ${candidate.path.length} именные головы, ${candidate.path.length - 1} генитивные связи, ${candidate.nominalizations} кандидата в отглагольные существительные.`,
+        method: [...deprels, 'morphology:Case=Gen', 'derivational-suffix:nominalization'],
+        // Суффикс — эвристика; без словаря/семантики high не выдаём.
+        confidence: 'medium',
+        limitations: [
+          'Отглагольность определяется суффиксом/стоп-листом, а не словарём.',
+          'Цепочка может быть термином, именем или авторской конструкцией; confidence не калиброван.',
+          'Правило не доказывает стилистическую проблему, только показывает кандидата.',
+        ],
       };
-    })
-    .sort((a, b) => a.start - b.start || b.end - a.end);
+    });
 }
 
 function isSubordinateClauseRoot(token, children) {

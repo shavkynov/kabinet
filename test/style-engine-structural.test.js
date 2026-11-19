@@ -139,3 +139,184 @@ test('структурные правила не запускаются для �
   assert.deepEqual(analyzeStructural(text, parsed, {}).chain, []);
   assert.deepEqual(analyzeStructural(text, parsed, {}).which, []);
 });
+
+test('chain: прилагательные и служебные слова входят в непрерывный span', () => {
+  const text = 'Осуществление важной проверки выполнения строгих требований.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['важной', 'важный', 'ADJ', { Case: 'Gen' }, 3, 'amod', 14],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 21],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 30],
+    ['строгих', 'строгий', 'ADJ', { Case: 'Gen' }, 6, 'amod', 41],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 4, 'nmod', 49],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 59],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fragment, 'Осуществление важной проверки выполнения строгих требований');
+  assert.equal(hits[0].start, 0);
+  assert.equal(hits[0].end, 59);
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
+  assert.equal(hits[0].confidence, 'medium');
+});
+
+test('chain: ветвление не склеивается, пересекающиеся ветви сохраняются', () => {
+  const text = 'Осуществление проверки выполнения требований и анализа результатов исследования.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 23],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 34],
+    ['и', 'и', 'CCONJ', {}, 1, 'cc', 45],
+    ['анализа', 'анализ', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 47],
+    ['результатов', 'результат', 'NOUN', { Case: 'Gen' }, 6, 'nmod', 55],
+    ['исследования', 'исследование', 'NOUN', { Case: 'Gen' }, 7, 'nmod', 67],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 79],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 2);
+  assert.deepEqual(hits.map((h) => h.end), [44, 79]);
+  assert.ok(hits.every((h) => h.start === 0));
+  assert.ok(hits.every((h) => h.fragment === text.slice(h.start, h.end)));
+});
+
+test('chain: одна номинализация не даёт finding', () => {
+  const text = 'Проверка качества выполнения.';
+  const parsed = parse(text, [
+    ['Проверка', 'проверка', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['качества', 'качество', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 9],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 18],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 28],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
+test('chain: лексикализованное слово отменяет finding', () => {
+  const text = 'Осуществление проверки выполнения здания.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 23],
+    ['здания', 'здание', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 34],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 40],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
+test('chain: имена собственные не считаются стилевой цепочкой', () => {
+  const text = 'Осуществление проверки дома Малфоев.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['дома', 'дом', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 22],
+    ['Малфоев', 'Малфой', 'PROPN', { Case: 'Gen' }, 3, 'nmod', 27],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 34],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
+test('chain: emoji перед finding не сдвигает UTF-16 offsets', () => {
+  const text = '😀 Осуществление проверки выполнения требований.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 3],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 17],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 26],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 37],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 47],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].start, 3);
+  assert.equal(hits[0].end, 47);
+  assert.equal(hits[0].fragment, 'Осуществление проверки выполнения требований');
+  assert.equal(hits[0].fragment, text.slice(3, 47));
+});
+
+test('chain: повторяющиеся формы сохраняют порядок и offsets', () => {
+  const text = 'Осуществление проверки проверки выполнения требований.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 23],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 32],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 4, 'nmod', 43],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 53],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fragment, 'Осуществление проверки проверки выполнения требований');
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
+});
+
+test('chain: пустой текст, отсутствие существительных и битое дерево не падают', () => {
+  assert.deepEqual(analyzeStructural('', { sentences: [] }, { chain: true }).chain, []);
+  assert.deepEqual(analyzeStructural('Он пришёл.', {
+    sentences: [{ start: 0, end: 9, text: 'Он пришёл.', tokens: [
+      { id: 1, text: 'Он', lemma: 'он', upos: 'PRON', feats: {}, head: 2, deprel: 'nsubj', start: 0, end: 2 },
+      { id: 2, text: 'пришёл', lemma: 'прийти', upos: 'VERB', feats: {}, head: 0, deprel: 'root', start: 3, end: 9 },
+    ] }],
+  }, { chain: true }).chain, []);
+  assert.doesNotThrow(() => analyzeStructural('Битое дерево.', {
+    sentences: [{ start: 0, end: 12, text: 'Битое дерево.', tokens: [
+      { id: 1, text: 'Битое', lemma: 'битый', upos: 'ADJ', feats: {}, head: 99, deprel: 'nmod', start: 0, end: 5 },
+    ] }],
+  }, { chain: true }));
+});
+
+test('chain: отсутствующие feats не дают finding', () => {
+  const text = 'Осуществление проверки выполнения.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', {}, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', {}, 1, 'nmod', 14],
+    ['выполнения', 'выполнение', 'NOUN', {}, 2, 'nmod', 23],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 33],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
+test('chain: продуктивная модель -ание/-ение находится', () => {
+  const text = 'Осуществление формирования согласования требований.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['формирования', 'формирование', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['согласования', 'согласование', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 27],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 3, 'nmod:poss', 40],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 50],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fragment, 'Осуществление формирования согласования требований');
+});
+
+test('chain: лексикализованное «мнение» не считается продуктивной номинализацией', () => {
+  const text = 'Осуществление формирования мнения.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['формирования', 'формирование', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['мнения', 'мнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 28],
+    ['.', '.', 'PUNCT', {}, 1, 'punct', 35],
+  ]);
+  assert.deepEqual(analyzeStructural(text, parsed, { chain: true }).chain, []);
+});
+
+test('chain: несколько независимых цепочек в одном предложении', () => {
+  const text = 'Осуществление проверки выполнения требований, проведение анализа результатов исследования.';
+  const parsed = parse(text, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root', 0],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod', 14],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod', 23],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 3, 'nmod', 34],
+    [',', ',', 'PUNCT', {}, 1, 'punct', 44],
+    ['проведение', 'проведение', 'NOUN', { Case: 'Nom' }, 0, 'root', 46],
+    ['анализа', 'анализ', 'NOUN', { Case: 'Gen' }, 6, 'nmod', 57],
+    ['результатов', 'результат', 'NOUN', { Case: 'Gen' }, 7, 'nmod', 65],
+    ['исследования', 'исследование', 'NOUN', { Case: 'Gen' }, 8, 'nmod', 77],
+    ['.', '.', 'PUNCT', {}, 6, 'punct', 89],
+  ]);
+  const hits = analyzeStructural(text, parsed, { chain: true }).chain;
+  assert.equal(hits.length, 2);
+  assert.deepEqual(hits.map((h) => h.fragment), [
+    'Осуществление проверки выполнения требований',
+    'проведение анализа результатов исследования',
+  ]);
+});

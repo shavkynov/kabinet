@@ -37,6 +37,21 @@ function fakeTauri() {
       await new Promise((resolve) => setTimeout(resolve, Number(window.__styleDelay) || 0));
       if (window.__styleFail) throw new Error('fake style:parse failure');
       if (window.__styleBadResponse) return {};
+      if (window.__styleChain) {
+        const phrase = 'Отряд осуществлял разведку';
+        const base = text.indexOf(phrase);
+        if (base >= 0) {
+          const words = ['Отряд', 'осуществлял', 'разведку'];
+          const lemmas = ['проверка', 'осуществление', 'выполнение'];
+          let at = base;
+          const tokens = words.map((word, i) => {
+            const start = text.indexOf(word, at);
+            at = start + word.length;
+            return { id: i + 1, text: word, lemma: lemmas[i], upos: 'NOUN', feats: { Case: 'Gen' }, head: i === 0 ? 0 : i, deprel: i === 0 ? 'root' : 'nmod', start, end: start + word.length, confidence: null };
+          });
+          return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake-chain', version: '1' }, sentences: [{ start: base, end: base + phrase.length, text: phrase, tokens }] } };
+        }
+      }
       return { taskId: id, cancelled: false, ms: 1, parse: { schemaVersion: 1, parser: { name: 'fake', version: '1' }, sentences: [{ start: 0, end: 1, text: 'x', tokens: [] }] } };
     },
     'style:cancel': async () => { if (window.__styleCancelFail) throw new Error('fake style:cancel failure'); return true; },
@@ -114,6 +129,14 @@ function fakeTauri() {
   const shadow = await page.evaluate(() => window.__styleShadow || null);
   ok(!!shadow && shadow.ok === true, 'тень: парсер ответил без ошибки');
   ok(!!shadow && shadow.sentences === 1, 'тень: результат разобран в контракт');
+  ok(!!shadow && Array.isArray(shadow.chain) && shadow.chainCount === 0 && Array.isArray(shadow.ruleErrors), 'тень: chain diagnostics доступны без ошибок правила');
+  await page.evaluate(() => { window.__styleChain = true; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const chainShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!chainShadow && chainShadow.chainCount === 1 && chainShadow.chain[0].fragment === 'Отряд осуществлял разведку', 'тень: chain finding доступен в diagnostics');
+  ok(!!chainShadow && chainShadow.ruleErrors.length === 0, 'тень: chain не дал rule error');
+  await page.evaluate(() => { window.__styleChain = false; });
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
 
