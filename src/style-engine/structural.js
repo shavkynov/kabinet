@@ -31,6 +31,22 @@ const OFFICIAL_PREPOSITION_NOUNS = new Set([
 ]);
 const EVENT_SUFFIX = /(?:ание|ение|яние|тие|ие|ция)$/u;
 
+const POSSESSIVE_DET_LEMMAS = new Set(['свой', 'его', 'ее', 'их']);
+const BODY_PART_NOUNS = new Set([
+  'рука', 'нога', 'голова', 'глаз', 'лицо', 'волосы', 'спина', 'плечо', 'палец',
+  'ладонь', 'кулак', 'шея', 'ухо', 'рот', 'нос', 'зуб', 'живот', 'колено', 'локоть',
+  'бедро', 'стопа', 'запястье', 'бровь', 'ресница', 'щека', 'подбородок', 'сердце', 'кожа',
+]);
+const PHYSICAL_ACTION_VERBS = new Set([
+  'поднимать', 'поднять', 'опускать', 'опустить', 'протягивать', 'протянуть',
+  'покачивать', 'покачать', 'чесать', 'почесать', 'мыть', 'помыть', 'вытирать', 'вытереть',
+  'закрывать', 'закрыть', 'открывать', 'открыть', 'поворачивать', 'повернуть',
+  'наклонять', 'наклонить', 'поглаживать', 'погладить', 'ломать', 'сломать',
+  'резать', 'порезать', 'бить', 'ударить', 'трогать', 'тронуть',
+]);
+const CONTRAST_LEMMAS = new Set(['а', 'но', 'однако', 'зато', 'чужой', 'собственный', 'именно', 'даже', 'же']);
+
+
 const WEAK_SUPPORT_VERBS = new Set([
   'иметь', 'делать', 'вести', 'носить', 'представлять', 'играть', 'оказывать',
   'производить', 'давать', 'вызывать', 'проявлять', 'привлекать', 'совершать',
@@ -409,6 +425,88 @@ function findWeak(text, sentence, speech = speechRanges(text)) {
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
+function isPossessiveDet(token) {
+  return !!token && token.upos === 'DET'
+    && POSSESSIVE_DET_LEMMAS.has(lemmaOf(token))
+    && (token.deprel === 'det' || token.deprel === 'nmod');
+}
+
+function hasContrastNear(tokens, start, end) {
+  return tokens.some((token) => CONTRAST_LEMMAS.has(lemmaOf(token))
+    && token.start < end + 24 && token.end > start - 24);
+}
+
+function findOwn(text, sentence, speech = speechRanges(text)) {
+  const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
+  if (!tokens.length || !hasValidDependencyForest(tokens)) return [];
+  const byId = tokenIndex(tokens);
+  const children = childrenByHead(tokens);
+  const out = [];
+  const seen = new Set();
+  const add = (ruleId, start, end, explanation, method) => {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > text.length) return;
+    if (text.slice(start, end).length !== end - start) return;
+    if (speech.some(([a, b]) => start < b && end > a)) return;
+    const key = `${ruleId}:${start}:${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      category: 'own',
+      ruleId,
+      start,
+      end,
+      fragment: text.slice(start, end),
+      explanation,
+      method,
+      confidence: 'low',
+      limitations: [
+        'Избыточность притяжательного местоимения — семантическая гипотеза; дискурсивная кореференция не устанавливается.',
+        'Контраст, эмфаза, идиома и авторская интонация могут делать местоимение обязательным.',
+        'Confidence не калиброван на независимом корпусе.',
+      ],
+    });
+  };
+
+  // 1. Два притяжательных детерминатива в одной именной группе.
+  for (const noun of tokens) {
+    if (!validSpan(noun, text) || noun.upos !== 'NOUN') continue;
+    const possessive = (children.get(noun.id) || []).filter(isPossessiveDet);
+    if (possessive.length < 2) continue;
+    if (!possessive.some((t) => lemmaOf(t) === 'его')) continue;
+    if (possessive.some((t) => !validSpan(t, text) || tokenInSpeech(t, speech))) continue;
+    const start = Math.min(...possessive.map((t) => t.start));
+    add('own.duplicate-possessive', start, noun.end,
+      `В одной именной группе стоят два притяжательных определителя: «${possessive.map((t) => t.text).join('», «')}».`,
+      ['dependency:det', 'morphology:possessive', 'construction:duplicate-possessive']);
+  }
+
+  // 2. Узкий случай: «свой» + телесное существительное при физическом действии
+  // с локальным подлежащим-обладателем, без контраста/эмфазы/координации.
+  for (const pronoun of tokens) {
+    if (!validSpan(pronoun, text) || lemmaOf(pronoun) !== 'свой' || !isPossessiveDet(pronoun)) continue;
+    if (tokenInSpeech(pronoun, speech)) continue;
+    const noun = byId.get(pronoun.head);
+    if (!noun || noun.upos !== 'NOUN' || !validSpan(noun, text) || tokenInSpeech(noun, speech)) continue;
+    if (!['obj', 'obl'].includes(noun.deprel)) continue;
+    if (!BODY_PART_NOUNS.has(lemmaOf(noun))) continue;
+    if (noun.deprel === 'obl' && (children.get(noun.id) || []).some((c) => c.deprel === 'case')) continue;
+    if (!pronoun.feats || !noun.feats || noun.feats.Case !== pronoun.feats.Case || noun.feats.Number !== pronoun.feats.Number) continue;
+    if (noun.feats.Gender && pronoun.feats.Gender && noun.feats.Gender !== pronoun.feats.Gender) continue;
+    const verb = byId.get(noun.head);
+    if (!verb || verb.upos !== 'VERB' || !PHYSICAL_ACTION_VERBS.has(lemmaOf(verb))) continue;
+    if (verb.deprel !== 'root') continue; // вложенные клаузы оставляем для abstain
+    const subjects = (children.get(verb.id) || []).filter((c) => c.deprel === 'nsubj' || c.deprel === 'nsubj:pass');
+    if (subjects.length !== 1 || !validSpan(subjects[0], text) || tokenInSpeech(subjects[0], speech)) continue;
+    if ((children.get(noun.id) || []).some((c) => c.deprel === 'conj' || c.deprel === 'amod')) continue;
+    if ((children.get(noun.id) || []).some((c) => isPossessiveDet(c) && c.id !== pronoun.id)) continue;
+    if (hasContrastNear(tokens, pronoun.start, noun.end)) continue;
+    add('own.reflexive-body-part', pronoun.start, noun.end,
+      `Возвратно-притяжательное «${pronoun.text}» при телесном существительном «${noun.text}» дублирует очевидного обладателя-подлежащее.`,
+      ['dependency:det', 'dependency:nsubj', `dependency:${noun.deprel}`, 'morphology:Case', 'lexicon:body-part']);
+  }
+  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
 function isSubordinateClauseRoot(token, children) {
   const dependents = children.get(token.id) || [];
   const hasPredicate = token.upos === 'VERB' || token.upos === 'AUX'
@@ -556,7 +654,7 @@ function findSubordinateAvalanches(text, sentence) {
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [], weak: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [], own: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
   for (const sentence of parseResult.sentences) {
@@ -564,8 +662,9 @@ function analyzeStructural(text, parseResult, enabled = {}) {
     if (enabled.which) result.which.push(...findSubordinateAvalanches(text, sentence));
     if (enabled.chancery) result.chancery.push(...findChancery(text, sentence, speech));
     if (enabled.weak) result.weak.push(...findWeak(text, sentence, speech));
+    if (enabled.own) result.own.push(...findOwn(text, sentence, speech));
   }
   return result;
 }
 
-module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak };
+module.exports = { analyzeStructural, findNounChains, findSubordinateAvalanches, findChancery, findWeak, findOwn };

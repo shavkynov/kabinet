@@ -33,7 +33,7 @@ function scheduleStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
   invalidateShadow();
   clearTimeout(shadowTimer);
-  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: '' });
+  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: '' });
   shadowTimer = setTimeout(runStyleShadow, 900);
 }
 
@@ -42,17 +42,17 @@ async function runStyleShadow() {
   const epoch = shadowEpoch;
   const task = ++shadowSeq;
   if (!api.styleParse) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: 'Rust-команда style:parse недоступна.' });
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: 'Rust-команда style:parse недоступна.' });
     return;
   }
   const text = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n\n', '\n');
   if (!text.trim()) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: '' });
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: '' });
     return;
   }
   if (epoch !== shadowEpoch) return;
   // Старый результат не должен выглядеть как ответ на новый запрос.
-  setShadowState(task, epoch, { status: 'running', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: '' });
+  setShadowState(task, epoch, { status: 'running', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: '' });
   if (shadowPrev && api.styleCancel) {
     try { await api.styleCancel(shadowPrev); } catch { /* ошибка отмены не должна ломать новый запрос */ }
   }
@@ -66,7 +66,7 @@ async function runStyleShadow() {
       throw new Error('Некорректный ответ style:parse.');
     }
     if (res.cancelled) {
-      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: '', ms: Math.round(performance.now() - t0) });
+      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: '', ms: Math.round(performance.now() - t0) });
       return;
     }
     const parse = res.parse;
@@ -74,6 +74,7 @@ async function runStyleShadow() {
     let which = [];
     let chancery = [];
     let weak = [];
+    let own = [];
     const ruleErrors = [];
     try {
       chain = analyzeStructural(text, parse, { chain: true }).chain;
@@ -104,6 +105,13 @@ async function runStyleShadow() {
       weak = [];
       ruleErrors.push({ category: 'weak', error: err && err.message ? err.message : String(err) });
     }
+    try {
+      own = analyzeStructural(text, parse, { own: true }).own;
+      if (!Array.isArray(own)) throw new Error('own rule вернул не массив.');
+    } catch (err) {
+      own = [];
+      ruleErrors.push({ category: 'own', error: err && err.message ? err.message : String(err) });
+    }
     setShadowState(task, epoch, {
       status: 'ok',
       ok: true,
@@ -118,13 +126,15 @@ async function runStyleShadow() {
       chanceryCount: chancery.length,
       weak,
       weakCount: weak.length,
+      own,
+      ownCount: own.length,
       ruleErrors,
       error: '',
       ms: Math.round(performance.now() - t0),
     });
   } catch (err) {
     if (task !== shadowSeq || epoch !== shadowEpoch) return;
-    setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, ruleErrors: [], error: err && err.message ? err.message : String(err), ms: Math.round(performance.now() - t0) });
+    setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, ruleErrors: [], error: err && err.message ? err.message : String(err), ms: Math.round(performance.now() - t0) });
   }
 }
 
