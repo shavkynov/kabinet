@@ -61,21 +61,27 @@ test('speech: несколько последовательных абзацев
   assert.deepEqual(analyzeStructural(text, parsed, { tell: true }).tell, []);
 });
 
-test('speech: remark не ломается в тире-диалоге после авторского абзаца', () => {
-  const text = 'Он вошёл.\n\n— Я не пойду, — сказал он.';
+test('speech: remark получает непустые диапазоны в тире-диалоге после авторского абзаца', () => {
+  const text = 'Он вошёл.\n\n— Я не пойду, — сказал он, сказал он.';
   const dash = text.indexOf('—') + 2;
+  assert.equal(speechRanges(text).length, 1);
   const parsed = { sentences: [authorEntry(text, 0), sentence(text, dash, [
     ['Я', 'я', 'PRON', { Case: 'Nom' }, 3, 'nsubj'],
     ['не', 'не', 'PART', {}, 3, 'advmod'],
     ['пойду', 'пойти', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
-    [',', ',', 'PUNCT', {}, 7, 'punct'],
-    ['—', '—', 'PUNCT', {}, 7, 'punct'],
+    [',', ',', 'PUNCT', {}, 6, 'punct'],
+    ['—', '—', 'PUNCT', {}, 6, 'punct'],
     ['сказал', 'сказать', 'VERB', { VerbForm: 'Fin' }, 3, 'parataxis'],
-    ['он', 'он', 'PRON', { Case: 'Nom' }, 7, 'nsubj'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 6, 'nsubj'],
+    [',', ',', 'PUNCT', {}, 9, 'punct'],
+    ['сказал', 'сказать', 'VERB', { VerbForm: 'Fin' }, 7, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 9, 'nsubj'],
     ['.', '.', 'PUNCT', {}, 3, 'punct'],
   ])] };
-  assert.doesNotThrow(() => analyzeStructural(text, parsed, { remark: true }));
-  assert.deepEqual(analyzeStructural(text, parsed, { remark: true }).remark, []);
+  const hits = analyzeStructural(text, parsed, { remark: true }).remark;
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].fragment, 'сказал он, сказал он');
+  assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
 });
 
 test('speech: кавычки сохраняются и исключают finding', () => {
