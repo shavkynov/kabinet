@@ -193,3 +193,91 @@ test('remark: неполная морфология отменяет finding', (
   const rows = duplicateRows().map((row, i) => (i === 7 ? [...row.slice(0, 3), {}, row[4], row[5]] : row));
   assert.deepEqual(remarkHits(text, rows), []);
 });
+
+test('remark: aux у первой атрибуции отменяет минимальность', () => {
+  const text = '«Я не пойду», — сказал же он, — сказал он.';
+  const rows = [
+    ['«', '«', 'PUNCT', {}, 4, 'punct'],
+    ['Я', 'я', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['не', 'не', 'PART', {}, 4, 'advmod'],
+    ['пойду', 'пойти', 'VERB', {}, 0, 'root'],
+    ['»', '»', 'PUNCT', {}, 4, 'punct'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 4, 'parataxis'],
+    ['же', 'же', 'PART', {}, 8, 'aux'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+    [',', ',', 'PUNCT', {}, 13, 'punct'],
+    ['—', '—', 'PUNCT', {}, 13, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 10, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 13, 'nsubj'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(remarkHits(text, rows), []);
+});
+
+test('remark: aux у второй атрибуции отменяет минимальность', () => {
+  const text = '«Я не пойду», — сказал он, — сказал же он.';
+  const rows = [
+    ['«', '«', 'PUNCT', {}, 4, 'punct'],
+    ['Я', 'я', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['не', 'не', 'PART', {}, 4, 'advmod'],
+    ['пойду', 'пойти', 'VERB', {}, 0, 'root'],
+    ['»', '»', 'PUNCT', {}, 4, 'punct'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 4, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 9, 'parataxis'],
+    ['же', 'же', 'PART', {}, 12, 'aux'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 12, 'nsubj'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(remarkHits(text, rows), []);
+});
+
+test('remark: два nsubj у первой атрибуции отменяют минимальность', () => {
+  const text = '«Я не пойду», — сказал он он, — сказал он.';
+  const rows = [
+    ['«', '«', 'PUNCT', {}, 4, 'punct'],
+    ['Я', 'я', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['не', 'не', 'PART', {}, 4, 'advmod'],
+    ['пойду', 'пойти', 'VERB', {}, 0, 'root'],
+    ['»', '»', 'PUNCT', {}, 4, 'punct'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 4, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+    [',', ',', 'PUNCT', {}, 13, 'punct'],
+    ['—', '—', 'PUNCT', {}, 13, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 9, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 13, 'nsubj'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(remarkHits(text, rows), []);
+});
+
+test('remark: два nsubj у второй атрибуции отменяют минимальность', () => {
+  const text = '«Я не пойду», — сказал он, — сказал он он.';
+  const rows = [
+    ['«', '«', 'PUNCT', {}, 4, 'punct'],
+    ['Я', 'я', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['не', 'не', 'PART', {}, 4, 'advmod'],
+    ['пойду', 'пойти', 'VERB', {}, 0, 'root'],
+    ['»', '»', 'PUNCT', {}, 4, 'punct'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 4, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 8, 'nsubj'],
+    [',', ',', 'PUNCT', {}, 8, 'punct'],
+    ['—', '—', 'PUNCT', {}, 8, 'punct'],
+    ['сказал', 'сказать', 'VERB', {}, 9, 'parataxis'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 12, 'nsubj'],
+    ['он', 'он', 'PRON', { Case: 'Nom' }, 12, 'nsubj'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(remarkHits(text, rows), []);
+});

@@ -637,9 +637,11 @@ function isMinimalAttribution(verb, children, text) {
   if (!verb || verb.upos !== 'VERB' || !SPEECH_VERB_LEMMAS.has(lemmaOf(verb))) return null;
   if (!verb.feats || Object.keys(verb.feats).length === 0) return null;
   const kids = children.get(verb.id) || [];
-  if (kids.some((c) => !['punct', 'nsubj', 'aux'].includes(c.deprel))) return null;
-  const subject = kids.find((c) => c.deprel === 'nsubj');
-  if (!subject || !subject.feats || Object.keys(subject.feats).length === 0) return null;
+  if (kids.some((c) => !['punct', 'nsubj'].includes(c.deprel))) return null;
+  const subjects = kids.filter((c) => c.deprel === 'nsubj');
+  if (subjects.length !== 1) return null;
+  const subject = subjects[0];
+  if (!subject.feats || Object.keys(subject.feats).length === 0) return null;
   if (!validSpan(verb, text) || !validSpan(subject, text)) return null;
   return { start: Math.min(verb.start, subject.start), end: Math.max(verb.end, subject.end), verb, subject };
 }
