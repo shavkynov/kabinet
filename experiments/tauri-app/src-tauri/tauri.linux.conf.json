@@ -1,0 +1,10 @@
+{
+  "productName": "kabinet",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "desktopTemplate": "./linux/kabinet.desktop"
+      }
+    }
+  }
+}

@@ -918,9 +918,8 @@ fn main() {
             app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
             app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))));
             // Модель стилевого анализа не входит в установщик до юридической проверки.
-            let style_model = std::env::var("KABINET_STYLE_MODEL").map(PathBuf::from).unwrap_or_else(|_| {
-                app.path().resource_dir().unwrap_or_else(|_| data.clone()).join("style-models/russian-gsd-ud-2.5-191206.udpipe")
-            });
+            let resource_dir = app.path().resource_dir().ok();
+            let style_model = kabinet_core::style_parser::resolve_model_path(std::env::var("KABINET_STYLE_MODEL").ok().map(PathBuf::from), &data, resource_dir.as_deref());
             app.manage(Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok())));
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.

@@ -1,7 +1,9 @@
 'use strict';
 // Реальный Tauri IPC: настоящее окно (WebKitGTK под Xvfb) через tauri-driver. Моста-заглушки нет.
 // Linux: apt install libwebkit2gtk-4.1-dev xvfb webkit2gtk-driver; cargo install tauri-driver --locked.
-//   node real-ipc.js <nomodel|badmodel|badpath|toymodel|edge>
+//   node real-ipc.js <nomodel|badmodel|badpath|userdir|toymodel|edge>
+// userdir: файл лежит в <данные приложения>/style-models/ под именем GSD-модели, переменных окружения нет;
+//   игрушечная модель не проходит SHA-256, и это доказывает, что файл найден во внешнем каталоге и контрольная сумма проверяется.
 // toymodel/edge требуют игрушечную модель: make-toy-model.sh (не GSD, в репозиторий не входит).
 // Переменные: KABINET_BIN (путь к установленному бинарнику), KABINET_E2E_TMP (рабочий каталог, по умолчанию /tmp/f2),
 // KABINET_TOY_MODEL, TAURI_DRIVER.
@@ -30,6 +32,11 @@ fs.writeFileSync(`${XDG}/ru.kabinet.writer.tauri/recents.json`, JSON.stringify([
 const env = { ...process.env, DISPLAY: ':99', HOME: `${ROOT}/home`, XDG_DATA_HOME: XDG, XDG_CONFIG_HOME: `${ROOT}/home/.config`, XDG_CACHE_HOME: `${ROOT}/home/.cache`, WEBKIT_DISABLE_COMPOSITING_MODE: '1' };
 delete env.KABINET_STYLE_MODEL; delete env.KABINET_STYLE_MODEL_SHA256; delete env.KABINET_STYLE_MODEL_VERSION;
 if (scenario === 'badmodel') { fs.writeFileSync(`${TMP}/bad.udpipe`, Buffer.alloc(1024, 7)); env.KABINET_STYLE_MODEL = `${TMP}/bad.udpipe`; }
+if (scenario === 'userdir') {
+  const dir = `${XDG}/ru.kabinet.writer.tauri/style-models`;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(process.env.KABINET_TOY_MODEL || `${TMP}/toy.udpipe`, `${dir}/russian-gsd-ud-2.5-191206.udpipe`);
+}
 if (scenario === 'badpath') env.KABINET_STYLE_MODEL = `${TMP}/does-not-exist.udpipe`;
 if (scenario === 'toymodel' || scenario === 'edge') { env.KABINET_STYLE_MODEL = process.env.KABINET_TOY_MODEL || `${TMP}/toy.udpipe`; env.KABINET_STYLE_MODEL_SHA256 = ''; env.KABINET_STYLE_MODEL_VERSION = 'toy-synthetic'; }
 
@@ -103,7 +110,7 @@ async function wd(method, p, body) {
     ok(st && st.ruleErrors && st.ruleErrors.length === 0, 'успех: правила без ошибок', st && st.ruleErrors);
     ok(st && st.acceptedRanges === afterTotal, 'успех: число принятых ranges равно числу подсветок в редакторе', [st && st.acceptedRanges, afterTotal]);
   } else if (scenario !== 'edge') {
-    const want = scenario === 'badmodel' ? /SHA-256/ : /не найдена/;
+    const want = (scenario === 'badmodel' || scenario === 'userdir') ? /SHA-256/ : /не найдена/;
     ok(st && st.status === 'error' && st.ok === false && want.test(st.error || ''), 'ошибка модели видна как status=error с понятным сообщением', st && st.error);
     ok(afterTotal === baseTotal, 'откат: при ошибке парсера подсветка старого анализатора сохранена', [baseTotal, afterTotal]);
   }

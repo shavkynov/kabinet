@@ -8,13 +8,33 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use udpipe_rs::{Model, Word};
 
 const DEFAULT_MODEL_VERSION: &str = "russian-gsd-ud-2.5-191206";
 const DEFAULT_MODEL_SHA256: &str = "ba63e42f79f525cbcb78c8bc98dd126c2960cbada91b964a741285c15504f06a";
+
+/// Имя файла модели во внешнем локальном каталоге.
+pub const MODEL_FILE_NAME: &str = "russian-gsd-ud-2.5-191206.udpipe";
+
+/// Где искать модель. Модель не входит в установщик (лицензионный статус CONDITIONAL).
+///
+/// Порядок: явный путь `KABINET_STYLE_MODEL`; затем `<каталог данных приложения>/style-models/` — внешний локальный
+/// ресурс пользователя; затем `<каталог ресурсов>/style-models/` — для сборок, где поставка модели разрешена.
+/// Берётся первый существующий файл. Если файла нет нигде, возвращается путь из каталога данных, и сообщение
+/// об ошибке покажет, куда его положить. Явный путь не подменяется: ошибка будет именно про него.
+pub fn resolve_model_path(explicit: Option<PathBuf>, data_dir: &Path, resource_dir: Option<&Path>) -> PathBuf {
+    if let Some(p) = explicit { return p; }
+    let user = data_dir.join("style-models").join(MODEL_FILE_NAME);
+    if user.is_file() { return user; }
+    if let Some(r) = resource_dir {
+        let bundled = r.join("style-models").join(MODEL_FILE_NAME);
+        if bundled.is_file() { return bundled; }
+    }
+    user
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ParserInfo {
@@ -243,7 +263,7 @@ impl StyleParser {
     fn model(&self) -> Result<Arc<Mutex<Model>>, String> {
         let mut guard = self.loaded.lock().map_err(|_| "Внутренний замок парсера недоступен.".to_string())?;
         if let Some(model) = guard.as_ref() { return Ok(model.clone()); }
-        let bytes = fs::read(&self.model_path).map_err(|e| format!("Модель стилевого анализа не найдена ({}): {}", self.model_path.display(), e))?;
+        let bytes = fs::read(&self.model_path).map_err(|e| format!("Модель стилевого анализа не найдена ({}): {}. Положите файл {} в этот каталог или задайте путь в KABINET_STYLE_MODEL.", self.model_path.display(), e, MODEL_FILE_NAME))?;
         let actual = format!("{:x}", Sha256::digest(&bytes));
         if !self.model_sha256.is_empty() && actual != self.model_sha256 {
             return Err(format!("Модель стилевого анализа повреждена или не та: SHA-256 {} вместо {}.", actual, self.model_sha256));
@@ -539,6 +559,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn model_path_prefers_explicit_then_user_dir_then_resources() {
+        let tmp = std::env::temp_dir().join(format!("kabinet-model-path-{}", std::process::id()));
+        let (data, res) = (tmp.join("data"), tmp.join("res"));
+        for d in [&data, &res] { std::fs::create_dir_all(d.join("style-models")).unwrap(); }
+        let user = data.join("style-models").join(MODEL_FILE_NAME);
+        let bundled = res.join("style-models").join(MODEL_FILE_NAME);
+        // ничего нет: путь пользователя, чтобы ошибка сказала, куда положить файл
+        assert_eq!(resolve_model_path(None, &data, Some(&res)), user);
+        std::fs::write(&bundled, b"x").unwrap();
+        assert_eq!(resolve_model_path(None, &data, Some(&res)), bundled);
+        std::fs::write(&user, b"x").unwrap();
+        assert_eq!(resolve_model_path(None, &data, Some(&res)), user);
+        // явный путь не подменяется, даже если его нет
+        let explicit = tmp.join("nope.udpipe");
+        assert_eq!(resolve_model_path(Some(explicit.clone()), &data, Some(&res)), explicit);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn missing_model_message_says_where_to_put_it() {
+        let p = StyleParser::new(PathBuf::from("/tmp/kabinet-no-model-x/m.udpipe"), None, None);
+        let err = p.parse(1, "Он пришёл.").unwrap_err();
+        assert!(err.contains("не найдена") && err.contains(MODEL_FILE_NAME) && err.contains("KABINET_STYLE_MODEL"), "{}", err);
     }
 
     #[test]
