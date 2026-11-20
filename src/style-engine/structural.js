@@ -8,6 +8,12 @@ const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция
 // Лексикализованные существительные с «отглагольным» суффиксом, но без процессного значения.
 const NOMINALIZATION_STOP = new Set(['здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление', 'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение', 'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие']);
 
+
+const PASSIVE_OFFICIAL_VERBS = new Set([
+  'принять', 'провести', 'осуществить', 'выполнить', 'произвести', 'совершить',
+  'издать', 'утвердить', 'подписать', 'рассмотреть', 'согласовать', 'предоставить',
+  'обеспечить', 'признать', 'установить', 'определить', 'заключить',
+]);
 const LIGHT_VERB_LEMMAS = new Set([
   'осуществлять', 'осуществить', 'проводить', 'провести', 'производить', 'произвести',
   'выполнять', 'выполнить', 'вести', 'оказывать', 'оказать', 'принимать', 'принять',
@@ -100,7 +106,7 @@ const TAUTOLOGICAL_PAIRS = [
 
 
 const WEAK_SUPPORT_VERBS = new Set([
-  'иметь', 'делать', 'вести', 'носить', 'представлять', 'играть', 'оказывать',
+  'иметь', 'делать', 'вести', 'носить', 'представлять', 'оказывать',
   'производить', 'давать', 'вызывать', 'проявлять', 'привлекать', 'совершать',
 ]);
 const WEAK_PREPOSITION_VERBS = new Set([
@@ -363,7 +369,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
 
     // 2. Лёгкий глагол + событийное существительное.
     if (token.upos === 'VERB' && LIGHT_VERB_LEMMAS.has(lemmaOf(token))
-      && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass')) {
+      && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass' || c.deprel === 'iobj')) {
       const event = kids.find((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
       if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
         add('chancery.light-verb-event-noun', Math.min(token.start, event.start), Math.max(token.end, event.end),
@@ -374,7 +380,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
 
     // 3. Пассив без агенса + событийное существительное.
     const passive = token.upos === 'VERB' && ((token.feats && token.feats.Voice === 'Pass') || kids.some((c) => c.deprel === 'aux:pass'));
-    if (passive && !kids.some((c) => c.deprel === 'obl:agent')) {
+    if (passive && PASSIVE_OFFICIAL_VERBS.has(lemmaOf(token)) && !kids.some((c) => c.deprel === 'obl:agent')) {
       const event = kids.find((child) => (child.deprel === 'nsubj:pass' || child.deprel === 'nsubj') && isEventNoun(child));
       if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
         const aux = kids.find((c) => c.deprel === 'aux:pass');

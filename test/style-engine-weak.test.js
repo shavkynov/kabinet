@@ -112,7 +112,7 @@ test('weak: пользоваться популярностью и подвер�
   assert.equal(weakHits(t2, r2).length, 1);
 });
 
-test('weak: играть роль и играть на скрипке', () => {
+test('weak: устойчивое «играть роль» и играть на скрипке не срабатывают', () => {
   const t1 = 'Он играет роль.';
   const r1 = [
     ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
@@ -120,7 +120,7 @@ test('weak: играть роль и играть на скрипке', () => {
     ['роль', 'роль', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
     ['.', '.', 'PUNCT', {}, 2, 'punct'],
   ];
-  assert.equal(weakHits(t1, r1).length, 1);
+  assert.deepEqual(weakHits(t1, r1), []);
   const t2 = 'Он играет на скрипке.';
   const r2 = [
     ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],

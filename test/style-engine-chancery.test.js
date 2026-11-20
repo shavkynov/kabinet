@@ -85,6 +85,28 @@ test('chancery: пассив без агенса + событийное суще
   assert.equal(found[0].ruleId, 'chancery.passive-event-nominal');
 });
 
+test('chancery: бытовое «дал сведения» и «решение будет найдено» не считаются канцеляритом', () => {
+  const information = 'Швейцар дал ему нужные сведения.';
+  const infoRows = [
+    ['Швейцар', 'швейцар', 'PROPN', { Case: 'Nom' }, 2, 'nsubj'],
+    ['дал', 'дать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['ему', 'он', 'PRON', { Case: 'Dat' }, 2, 'iobj'],
+    ['нужные', 'нужный', 'ADJ', { Case: 'Acc', Number: 'Plur' }, 5, 'amod'],
+    ['сведения', 'сведение', 'NOUN', { Case: 'Acc', Number: 'Plur' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(hits(information, infoRows), []);
+  const decision = 'И решение будет найдено.';
+  const decisionRows = [
+    ['И', 'и', 'CCONJ', {}, 2, 'cc'],
+    ['решение', 'решение', 'NOUN', { Case: 'Nom', Gender: 'Neut', Number: 'Sing' }, 4, 'nsubj:pass'],
+    ['будет', 'быть', 'AUX', { VerbForm: 'Fin' }, 4, 'aux:pass'],
+    ['найдено', 'найти', 'VERB', { VerbForm: 'Part', Voice: 'Pass' }, 0, 'root'],
+    ['.', '.', 'PUNCT', {}, 4, 'punct'],
+  ];
+  assert.deepEqual(hits(decision, decisionRows), []);
+});
+
 test('chancery: пассив с агенсом и пассив без событийного существительного не срабатывают', () => {
   const withAgent = 'Проверка была проведена комиссией.';
   const rows1 = [
