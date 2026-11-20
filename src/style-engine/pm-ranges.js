@@ -97,7 +97,9 @@ function segmentFor(snapshot, start, end) {
 /**
  * findings: [{ category, start, end, fragment, ... }].
  * currentDoc: обязательный актуальный doc; если не передан или не равен snapshot.doc — результат отбрасывается.
- * Возвращает { ranges, diagnostics, droppedNested }.
+ * Возвращает { ranges, diagnostics, droppedNested, mergedOverlaps }.
+ * droppedNested — только полностью вложенные источники; mergedOverlaps — все
+ * объединённые пересечения (включая частичные).
  */
 function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
   const snapshot = snapshotOrDoc && Array.isArray(snapshotOrDoc.segments)
@@ -165,13 +167,14 @@ function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
 
   // Внутри одной категории диапазоны должны быть непересекающимися:
   // вложенные и частично пересекающиеся findings сливаются в детерминированный
-  // внешний диапазон. Разные категории не смешиваются.
+  // внешний диапазон. Соседние [a,b) и [b,c) не пересекаются и остаются раздельными.
+  // Разные категории не смешиваются.
   const kept = [];
   let droppedNested = 0;
   let mergedOverlaps = 0;
   for (const range of mapped.sort((a, b) => a.from - b.from || b.to - a.to)) {
     const overlapping = kept.filter((other) => other.category === range.category
-      && range.from <= other.to && range.to >= other.from);
+      && range.from < other.to && range.to > other.from);
     if (!overlapping.length) {
       kept.push({ ...range, sources: [range] });
       continue;
@@ -188,7 +191,10 @@ function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
       fragment: snapshot.doc.textBetween(from, to, '', ''),
       sources: group.flatMap((item) => item.sources || [item]),
     });
-    droppedNested += group.length - 1;
+    const nested = group.filter((item) => group.some((other) => other !== item
+      && other.from <= item.from && other.to >= item.to
+      && (other.from < item.from || other.to > item.to))).length;
+    droppedNested += nested;
     mergedOverlaps += group.length - 1;
   }
   return { ranges: kept.sort((a, b) => a.from - b.from || a.to - b.to), diagnostics, droppedNested, mergedOverlaps };

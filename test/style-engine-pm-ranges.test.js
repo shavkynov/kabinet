@@ -190,3 +190,16 @@ test('pm-ranges: вложенные дубли одной категории у�
   assert.equal(res.ranges.filter((r) => r.category === 'tell').length, 1);
   assert.ok(res.droppedNested >= 1);
 });
+
+test('pm-ranges: соседние полуоткрытые диапазоны не объединяются', () => {
+  const doc = makeDoc();
+  const snapshot = createDocumentSnapshot(doc);
+  const base = finding(snapshot, 'Первый абзац.');
+  const left = { ...base, end: base.start + 6, fragment: snapshot.text.slice(base.start, base.start + 6) };
+  const right = { ...base, start: base.start + 6, fragment: snapshot.text.slice(base.start + 6, base.end) };
+  const res = map(snapshot, [left, right]);
+  assert.equal(res.ranges.filter((r) => r.category === 'chain').length, 2);
+  assert.equal(res.mergedOverlaps, 0);
+  assert.equal(res.droppedNested, 0);
+  for (const range of res.ranges) assert.equal(snapshot.doc.textBetween(range.from, range.to, '', ''), range.fragment);
+});
