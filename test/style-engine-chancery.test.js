@@ -85,6 +85,44 @@ test('chancery: пассив без агенса + событийное суще
   assert.equal(found[0].ruleId, 'chancery.passive-event-nominal');
 });
 
+test('chancery: iobj не подавляет поддерживающие глаголы «оказать»', () => {
+  const withIobj = 'Он оказал ему помощь.';
+  const iobjRows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['оказал', 'оказать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['ему', 'он', 'PRON', { Case: 'Dat' }, 2, 'iobj'],
+    ['помощь', 'помощь', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  const withIobjHits = hits(withIobj, iobjRows);
+  assert.equal(withIobjHits.length, 1);
+  assert.equal(withIobjHits[0].fragment, 'оказал ему помощь');
+  assert.equal(withIobjHits[0].fragment, withIobj.slice(withIobjHits[0].start, withIobjHits[0].end));
+
+  const withoutIobj = 'Он оказал помощь.';
+  const plainRows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['оказал', 'оказать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['помощь', 'помощь', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  const plainHits = hits(withoutIobj, plainRows);
+  assert.equal(plainHits.length, 1);
+  assert.equal(plainHits[0].fragment, 'оказал помощь');
+});
+
+test('chancery: дательный падеж у «дать» остаётся literal transfer', () => {
+  const text = 'Он дал ему обещание.';
+  const rows = [
+    ['Он', 'он', 'PRON', { Case: 'Nom' }, 2, 'nsubj'],
+    ['дал', 'дать', 'VERB', { VerbForm: 'Fin' }, 0, 'root'],
+    ['ему', 'он', 'PRON', { Case: 'Dat' }, 2, 'iobj'],
+    ['обещание', 'обещание', 'NOUN', { Case: 'Acc' }, 2, 'obj'],
+    ['.', '.', 'PUNCT', {}, 2, 'punct'],
+  ];
+  assert.deepEqual(hits(text, rows), []);
+});
+
 test('chancery: бытовое «дал сведения» и «решение будет найдено» не считаются канцеляритом', () => {
   const information = 'Швейцар дал ему нужные сведения.';
   const infoRows = [

@@ -8,7 +8,9 @@ const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция
 // Лексикализованные существительные с «отглагольным» суффиксом, но без процессного значения.
 const NOMINALIZATION_STOP = new Set(['здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление', 'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение', 'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие']);
 
-
+// Только эти лёгкие глаголы сохраняют канцелярское значение при iobj:
+// «оказал ему помощь» — да, «дал ему сведения» — literal transfer.
+const LIGHT_VERBS_ALLOWING_IOBJ = new Set(['оказать', 'оказывать']);
 const PASSIVE_OFFICIAL_VERBS = new Set([
   'принять', 'провести', 'осуществить', 'выполнить', 'произвести', 'совершить',
   'издать', 'утвердить', 'подписать', 'рассмотреть', 'согласовать', 'предоставить',
@@ -29,7 +31,7 @@ const EVENT_NOUN_LEMMAS = new Set([
   'утверждение', 'подписание', 'заключение', 'финансирование', 'управление',
   'координация', 'взаимодействие', 'решение', 'заявление', 'предложение',
 ]);
-const NON_EVENT_NOUNS = new Set(['безопасность', 'документ', 'информация', 'оборудование', 'здание', 'мнение']);
+const NON_EVENT_NOUNS = new Set(['безопасность', 'документ', 'информация', 'сведения', 'оборудование', 'здание', 'мнение']);
 const NON_PROCESS_NOUNS = new Set([...NON_EVENT_NOUNS, 'требование']);
 const OFFICIAL_PREPOSITION_NOUNS = new Set([
   'цель', 'связь', 'соответствие', 'отношение', 'рамка', 'порядок', 'область',
@@ -368,8 +370,10 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
     }
 
     // 2. Лёгкий глагол + событийное существительное.
+    const hasIobj = kids.some((c) => c.deprel === 'iobj');
     if (token.upos === 'VERB' && LIGHT_VERB_LEMMAS.has(lemmaOf(token))
-      && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass' || c.deprel === 'iobj')) {
+      && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass')
+      && !(hasIobj && !LIGHT_VERBS_ALLOWING_IOBJ.has(lemmaOf(token)))) {
       const event = kids.find((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
       if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
         add('chancery.light-verb-event-noun', Math.min(token.start, event.start), Math.max(token.end, event.end),
