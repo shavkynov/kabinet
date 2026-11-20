@@ -1,12 +1,14 @@
 'use strict';
 // Реальный Tauri IPC: настоящее окно (WebKitGTK под Xvfb) через tauri-driver. Моста-заглушки нет.
 // Linux: apt install libwebkit2gtk-4.1-dev xvfb webkit2gtk-driver; cargo install tauri-driver --locked.
-//   node real-ipc.js <nomodel|badmodel|badpath|userdir|toymodel|edge>
+//   node real-ipc.js <nomodel|badmodel|badpath|userdir|toymodel|gsdmodel|edge>
 // userdir: файл лежит в <данные приложения>/style-models/ под именем GSD-модели, переменных окружения нет;
 //   игрушечная модель не проходит SHA-256, и это доказывает, что файл найден во внешнем каталоге и контрольная сумма проверяется.
 // toymodel/edge требуют игрушечную модель: make-toy-model.sh (не GSD, в репозиторий не входит).
+// gsdmodel: настоящая Russian-GSD из KABINET_GSD_MODEL (по умолчанию ~/.local/share/ru.kabinet.writer.tauri/style-models/…), кладётся
+//   в <данные приложения>/style-models/ без переменных окружения; SHA-256 проверяет само приложение. В репозиторий модель не входит.
 // Переменные: KABINET_BIN (путь к установленному бинарнику), KABINET_E2E_TMP (рабочий каталог, по умолчанию /tmp/f2),
-// KABINET_TOY_MODEL, TAURI_DRIVER.
+// KABINET_TOY_MODEL, KABINET_GSD_MODEL, TAURI_DRIVER.
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 
@@ -37,6 +39,14 @@ if (scenario === 'userdir') {
   fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(process.env.KABINET_TOY_MODEL || `${TMP}/toy.udpipe`, `${dir}/russian-gsd-ud-2.5-191206.udpipe`);
 }
+if (scenario === 'gsdmodel') {
+  const src = process.env.KABINET_GSD_MODEL || `${process.env.HOME}/.local/share/ru.kabinet.writer.tauri/style-models/russian-gsd-ud-2.5-191206.udpipe`;
+  if (!fs.existsSync(src)) { console.error(`gsdmodel: нет файла модели ${src}`); process.exit(3); }
+  const dir = `${XDG}/ru.kabinet.writer.tauri/style-models`;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(src, `${dir}/russian-gsd-ud-2.5-191206.udpipe`);
+}
+const withModel = scenario === 'toymodel' || scenario === 'gsdmodel';
 if (scenario === 'badpath') env.KABINET_STYLE_MODEL = `${TMP}/does-not-exist.udpipe`;
 if (scenario === 'toymodel' || scenario === 'edge') { env.KABINET_STYLE_MODEL = process.env.KABINET_TOY_MODEL || `${TMP}/toy.udpipe`; env.KABINET_STYLE_MODEL_SHA256 = ''; env.KABINET_STYLE_MODEL_VERSION = 'toy-synthetic'; }
 
@@ -103,7 +113,7 @@ async function wd(method, p, body) {
   const afterTotal = Object.values(afterShadow).reduce((a, b) => a + b, 0);
   console.log('marks после тени:', JSON.stringify(afterShadow));
 
-  if (scenario === 'toymodel') {
+  if (withModel) {
     ok(st && st.status === 'ok' && st.ok === true, 'успех: status=ok через реальный IPC', st && (st.status + ' ' + (st.error || '')));
     ok(st && st.sentences >= 4 && st.tokens >= 20, 'успех: контракт содержит предложения и токены', st && [st.sentences, st.tokens]);
     ok(st && (st.diagnostics || []).every((d) => !['fragment-mismatch', 'invalid-finding', 'invalid-prosemirror-range', 'leaf-boundary'].includes(d.code)), 'успех: адаптер не отклонил ни одного finding из-за смещения offsets', st && (st.diagnostics || []).map((d) => d.code));
@@ -140,7 +150,8 @@ async function wd(method, p, body) {
   ok(direct.cancelNoTask && /номер задачи/.test(direct.cancelNoTask.err || ''), 'style:cancel без taskId: понятная ошибка');
   ok(direct.parseBadTask && /номер задачи/.test(direct.parseBadTask.err || ''), 'style:parse с нечисловым taskId: ошибка');
 
-  if (scenario === 'toymodel') {
+  let deepData = null;
+  if (withModel) {
     const deep = await async_(`const done = arguments[arguments.length - 1]; const out = {};
       (async () => {
         const text = ${JSON.stringify(CHAPTER.trim().replace(/\n\n/g, '\n\n'))};
@@ -153,7 +164,13 @@ async function wd(method, p, body) {
         for (const s of b.parse.sentences) { for (const k of s.tokens) { n += 1; if (text.slice(k.start, k.end) !== k.text) bad += 1; } if (text.slice(s.start, s.end) !== s.text) bad += 1; }
         out.tokens = n; out.badOffsets = bad; out.parser = b.parse.parser; out.cancelledFlag = b.cancelled; out.schema = b.parse.schemaVersion;
         // длинный текст + отмена
-        const long = 'Он пришёл домой.\\n\\n'.repeat(1500);
+        // Длина «долгого» запроса подбирается по скорости ЭТОЙ модели и сборки: разбор обязан идти заведомо дольше головы старта (60 мс),
+        // иначе проверка отмены зависит от скорости машины, а не от приложения. Проверки отмены при этом не ослаблены.
+        const mk = (n) => 'Он пришёл домой.\\n\\n'.repeat(n);
+        const tc = performance.now(); await window.kabinet.styleParse(mk(200), 150); const per = Math.max((performance.now() - tc) / 200, 0.001);
+        const N = Math.min(300000, Math.max(1500, Math.ceil(3000 / per)));
+        out.longParas = N; out.perParaMs = Math.round(per * 1000) / 1000;
+        const long = mk(N);
         const pl = window.kabinet.styleParse(long, 201);
         await new Promise((r) => setTimeout(r, 60));
         const c = await window.kabinet.styleCancel(201);
@@ -167,14 +184,92 @@ async function wd(method, p, body) {
         out.replace = { first: r1.cancelled, second: r2.cancelled, secondSentences: r2.parse && r2.parse.sentences.length };
         done(out);
       })().catch((e) => done({ fatal: String(e && e.message || e) }));`);
+    deepData = deep;
     console.log('deep ->', JSON.stringify(deep));
     fs.writeFileSync(`${ROOT}/deep.json`, JSON.stringify(deep, null, 2));
     ok(!deep.fatal, 'прямые вызовы style:parse без исключений', deep.fatal);
     ok(deep.badOffsets === 0 && deep.tokens > 20, 'offsets Rust = UTF-16 в реальном WebKit (emoji, кириллица): text.slice(start,end) === token.text', [deep.tokens, deep.badOffsets]);
-    ok(deep.schema === 1 && deep.parser && deep.parser.modelVersion === 'toy-synthetic', 'parser/modelVersion в ответе', deep.parser);
+    ok(deep.schema === 1 && deep.parser && deep.parser.modelVersion === (scenario === 'gsdmodel' ? 'russian-gsd-ud-2.5-191206' : 'toy-synthetic') && (scenario !== 'gsdmodel' || deep.parser.modelSha256 === 'ba63e42f79f525cbcb78c8bc98dd126c2960cbada91b964a741285c15504f06a'), 'parser/modelVersion (и SHA-256 для GSD) в ответе', deep.parser);
     ok(deep.cancel && deep.cancel.cancelled === true && deep.cancel.ack === true, 'style:cancel останавливает длинный разбор через IPC', deep.cancel);
     ok(deep.afterCancel && deep.afterCancel.cancelled === false && deep.afterCancel.sentences === 1, 'после отмены следующий разбор работает', deep.afterCancel);
     ok(deep.replace && deep.replace.first === true && deep.replace.second === false, 'новый запрос вытесняет предыдущий (cancelled у первого)', deep.replace);
+  }
+
+  if (withModel) {
+    // 6. Вытеснение запросов тени в настоящем приложении (F.3.1-B2). Реальный IPC; подменяется только момент доставки ответа первого запроса.
+    const STYLE_CATS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
+    const total = (m) => Object.values(m).reduce((a, b) => a + b, 0);
+    const counters = () => sync(`const o = {}; for (const c of ${JSON.stringify(STYLE_CATS)}) { const el = document.getElementById('anCount_' + c); const nav = document.querySelector('[data-an-nav="' + c + '"][data-dir="1"]'); o[c] = { n: el ? parseInt(el.textContent, 10) || 0 : null, navDisabled: nav ? nav.disabled : null }; } return o;`);
+    const shadowNow = () => sync(`const s = window.__styleShadow || null; return s && { task: s.task, epoch: s.epoch, at: s.at, status: s.status, ok: s.ok, accepted: s.acceptedRanges, findings: s.findingsCount, cancelled: s.cancelled };`);
+    const refocus = async () => { await wd('POST', `/session/${sid}/element/${pmId}/click`, {}); await key(''); };
+    await sync(`window.kabinetStyleShadow.enable(); return true;`);
+    await refocus();
+    await shadowFinal();
+
+    // A. Ответ старого запроса приходит ПОСЛЕ завершения нового: он не должен перезаписать ни состояние, ни подсветку.
+    await sync(`const orig = window.kabinet.styleParse; window.__origParse = orig; window.__spLog = []; let n = 0;
+      window.kabinet.styleParse = function (text, id) { const k = ++n; window.__spLog.push({ k, id }); const p = orig.call(window.kabinet, text, id);
+        return k === 1 ? p.then((r) => new Promise((res) => setTimeout(() => { window.__spLog.push({ k, late: true }); res(r); }, 4000))) : p; }; return true;`);
+    await key(' ');
+    ok(await wait('() => window.__spLog.some((e) => e.k === 1 && !e.late)', 8000), 'A: первый запрос тени ушёл в IPC (ответ придержан 4 с)');
+    await key('а'); await sleep(200);
+    const stA = await shadowFinal();
+    const log2 = await sync(`return window.__spLog`);
+    ok(log2.some((e) => e.k === 2), 'A: второй запрос ушёл, пока ответ первого ещё не доставлен', log2);
+    const nowA = await shadowNow(); const marksA = await marks(); const cntA = await counters();
+    ok(nowA && nowA.status === 'ok' && nowA.ok === true && nowA.task === stA.task, 'A: итоговое состояние — успех второго запроса', nowA);
+    ok(await wait('() => window.__spLog.some((e) => e.k === 1 && e.late)', 8000), 'A: поздний ответ первого запроса доставлен в приложение');
+    await sleep(600);
+    const nowA2 = await shadowNow(); const marksA2 = await marks(); const cntA2 = await counters();
+    ok(nowA2 && nowA2.task === nowA.task && nowA2.at === nowA.at && nowA2.status === 'ok', 'A: поздний ответ не перезаписал состояние тени (task/at не изменились)', [nowA, nowA2]);
+    ok(JSON.stringify(marksA2) === JSON.stringify(marksA) && total(marksA2) === nowA2.accepted, 'A: подсветка в редакторе не изменилась и равна числу принятых ranges (старых Decorations нет)', [marksA, marksA2, nowA2.accepted]);
+    ok(JSON.stringify(cntA2) === JSON.stringify(cntA), 'A: счётчики не изменились после позднего ответа', [cntA, cntA2]);
+    const sumCnt = Object.values(cntA2).reduce((a, c) => a + (c.n || 0), 0);
+    ok(sumCnt === nowA2.accepted && Object.values(cntA2).every((c) => c.navDisabled === !(c.n > 0)), 'A: счётчики и доступность «‹ ›» соответствуют последнему запросу', [cntA2, nowA2.accepted]);
+    const navCat = STYLE_CATS.find((c) => cntA2[c].n > 0);
+    if (navCat) {
+      await sync(`const b = document.getElementById('btnStyle'); if (b && document.getElementById('stylePanel').hidden) b.click(); return true;`);
+      await sleep(300);
+      const sel0 = await sync(`return editor ? editor.state.selection.from : -1`).catch(() => -1);
+      await sync(`document.querySelector('[data-an-nav="${navCat}"][data-dir="1"]').click(); return true;`);
+      await sleep(400);
+      const sb = await sync(`return document.body.innerText`);
+      const sel1 = await sync(`return editor ? editor.state.selection.from : -1`).catch(() => -1);
+      ok(new RegExp(`\\d+ из ${cntA2[navCat].n}\\b`).test(sb), `A: навигация «›» (${navCat}) показывает «k из ${cntA2[navCat].n}» по последнему запросу`, [sel0, sel1]);
+    }
+
+    // C. Устаревший ответ не возвращает подсветку, снятую при отключении категорий (старые Decorations не воскресают).
+    await sync(`window.__spLog.length = 0; window.kabinet.styleParse = window.__origParse; const orig = window.__origParse; let n = 0;
+      window.kabinet.styleParse = function (text, id) { const k = ++n; window.__spLog.push({ k, id }); const p = orig.call(window.kabinet, text, id);
+        return k === 1 ? p.then((r) => new Promise((res) => setTimeout(() => { window.__spLog.push({ k, late: true }); res(r); }, 3500))) : p; }; return true;`);
+    await refocus(); await key('б');
+    ok(await wait('() => window.__spLog.some((e) => e.k === 1 && !e.late)', 8000), 'C: запрос тени в полёте (ответ придержан)');
+    await sync(`for (const c of ['chancery','weak','tell','chain','remark','redund','which','own']) { const b = document.getElementById('an_' + c); if (b && b.checked) b.click(); } return true;`);
+    await sleep(600);
+    const marksC1 = await marks(); const nowC1 = await shadowNow();
+    ok(total(marksC1) === 0 && nowC1 && nowC1.status === 'unavailable', 'C: после отключения категорий подсветка снята, состояние unavailable', [marksC1, nowC1]);
+    ok(await wait('() => window.__spLog.some((e) => e.k === 1 && e.late)', 8000), 'C: поздний ответ доставлен в приложение');
+    await sleep(600);
+    const marksC2 = await marks(); const nowC2 = await shadowNow();
+    ok(total(marksC2) === 0 && nowC2 && nowC2.status === 'unavailable' && nowC2.task === nowC1.task, 'C: поздний ответ не вернул подсветку и не изменил состояние', [marksC2, nowC2]);
+    await sync(`window.kabinet.styleParse = window.__origParse; for (const c of ['chancery','weak','tell','chain','remark','redund','which','own']) { const b = document.getElementById('an_' + c); if (b && !b.checked) b.click(); } return true;`);
+    await refocus(); await key('в');
+    const stC = await shadowFinal();
+    ok(stC && stC.status === 'ok' && stC.ok === true, 'C: после отмены и возврата категорий следующий запрос тени успешен (отмена ничего не блокирует)', stC && [stC.status, stC.error]);
+    ok(total(await marks()) === stC.acceptedRanges, 'C: подсветка равна ranges последнего запроса', [await marks(), stC.acceptedRanges]);
+
+    // B. Настоящее вытеснение в Rust: долгий разбор занят, приходит запрос тени — долгий прерывается, тень завершается успехом.
+    await sync(`window.kabinet.styleParse = window.__origParse; return true;`);
+    await async_(`const done = arguments[arguments.length - 1]; window.__longB = window.kabinet.styleParse('Он пришёл домой.\\n\\n'.repeat(${Math.max((deepData && deepData.longParas) || 1500, 3000)}), 9001).then((r) => ({ cancelled: r.cancelled, ms: r.ms }), (e) => ({ err: String(e && e.message || e) })); done(true);`);
+    await sleep(100);
+    await refocus(); await key('г');
+    const stB = await shadowFinal();
+    const longB = await async_(`const done = arguments[arguments.length - 1]; window.__longB.then(done);`);
+    ok(longB && longB.cancelled === true, 'B: долгий разбор вытеснен запросом тени (cancelled=true) в реальном Rust', longB);
+    ok(stB && stB.status === 'ok' && stB.ok === true && total(await marks()) === stB.acceptedRanges, 'B: запрос тени, вытеснивший долгий, завершён успехом; подсветка = ranges', stB && [stB.status, stB.error, stB.acceptedRanges]);
+    const after = await async_(`const done = arguments[arguments.length - 1]; window.kabinet.styleParse('Он пришёл.', 9002).then((r) => done({ cancelled: r.cancelled, sentences: r.parse.sentences.length }), (e) => done({ err: String(e) }));`);
+    ok(after && after.cancelled === false && after.sentences === 1, 'B: после вытеснения следующий прямой разбор работает', after);
+    await sync(`window.kabinetStyleShadow.disable(); return true;`);
   }
 
   if (scenario === 'edge') {

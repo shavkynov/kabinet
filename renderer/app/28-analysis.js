@@ -77,7 +77,8 @@ function showAnalysisStats(st, active) {
   }
   $('#anTotal').textContent = active ? t('Слов в разборе: {0}', st.words || 0) : '';
   // «‹ ›» нужны только там, где есть что листать
-  document.querySelectorAll('#viewAnalysis [data-an-nav]').forEach((b) => {
+  // кнопки «‹ ›» есть и в «Подсветке» (#viewAnalysis), и в панели «Стиль текста» (#stylePanel)
+  document.querySelectorAll('[data-an-nav]').forEach((b) => {
     const k = b.dataset.anNav;
     b.disabled = !(active && settings.an[k] && (st[k] || 0) > 0);
   });
@@ -243,12 +244,14 @@ function gotoTense(idx) {
 }
 
 function wireAnalysis() {
-  $('#viewAnalysis').addEventListener('click', (e) => {
+  const onNavClick = (e) => {
     const b = e.target.closest('button[data-an-nav]');
     if (!b || b.disabled) return;
     e.preventDefault();
     stepAnalysis(b.dataset.anNav, Number(b.dataset.dir));
-  });
+  };
+  $('#viewAnalysis').addEventListener('click', onNavClick);
+  $('#stylePanel').addEventListener('click', onNavClick);
   document.querySelectorAll('#viewAnalysis input[data-anshow]').forEach((box) => box.addEventListener('change', () => {
     settings.anShow = { ...settings.anShow, [box.dataset.anshow]: box.checked };
     if (!box.checked) delete settings.anShow[box.dataset.anshow];
