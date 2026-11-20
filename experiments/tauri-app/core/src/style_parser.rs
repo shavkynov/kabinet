@@ -135,27 +135,48 @@ fn paragraph_ranges(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// Точное выравнивание форм парсера по исходнику: пропускаем только whitespace,
+/// Точное выравнивание форм парсера по исходнику: между токенами допускаем только whitespace,
 /// затем требуем посимвольного совпадения. Никакого поиска «следующего вхождения».
+///
+/// UDPipe не считает пробелами U+0085, U+2028, U+2029, U+000B (перенос строки из Word) и U+000C
+/// и оставляет их внутри формы токена, а `char::is_whitespace` их пропускает. Поэтому началом
+/// токена может быть любая граница символа внутри непрерывной пробельной серии перед ним
+/// (берётся первое совпадение), а ведущие и замыкающие пробельные символы формы в span не входят.
+/// Токен из одних пробельных символов сохраняет свой точный span, чтобы не сбить `head`/`id`.
 fn align_block(source: &str, block_start: usize, block_end: usize, words: &[RawToken]) -> Result<Vec<(usize, usize)>, String> {
     let mut spans = Vec::with_capacity(words.len());
     let mut at = block_start;
     for word in words {
-        while at < block_end {
-            let ch = source[at..].chars().next().ok_or("Некорректная граница UTF-8.")?;
+        let mut run_end = at;
+        while run_end < block_end {
+            let ch = source[run_end..].chars().next().ok_or("Некорректная граница UTF-8.")?;
             if !ch.is_whitespace() { break; }
-            at += ch.len_utf8();
+            run_end += ch.len_utf8();
         }
-        if !source[at..block_end].starts_with(&word.form) {
-            let saw = source[at..block_end].chars().take(24).collect::<String>();
+        let mut found = None;
+        let mut p = at;
+        loop {
+            if source[p..block_end].starts_with(&word.form) { found = Some(p); break; }
+            if p >= run_end { break; }
+            p += source[p..].chars().next().ok_or("Некорректная граница UTF-8.")?.len_utf8();
+        }
+        let Some(p) = found else {
+            let saw = source[run_end..block_end].chars().take(24).collect::<String>();
             return Err(format!(
                 "Токен «{}» не совпадает с исходником в позиции {} (там «{}»). Разбор остановлен, offsets не публикуются.",
-                word.form, at, saw
+                word.form, run_end, saw
             ));
-        }
-        let end = at + word.form.len();
-        spans.push((at, end));
-        at = end;
+        };
+        let form_end = p + word.form.len();
+        let trimmed = word.form.trim_matches(char::is_whitespace);
+        let (start, end) = if trimmed.is_empty() {
+            (p, form_end)
+        } else {
+            let lead = word.form.len() - word.form.trim_start_matches(char::is_whitespace).len();
+            (p + lead, p + lead + trimmed.len())
+        };
+        spans.push((start, end));
+        at = form_end;
     }
     let tail = &source[at..block_end];
     if !tail.trim().is_empty() {
@@ -181,7 +202,8 @@ fn build_contract(source: &str, raw_words: &[RawToken], parser: &ParserInfo) -> 
             let (s, e) = spans[k];
             ContractToken {
                 id: w.id,
-                text: w.form.clone(),
+                // Подстрока исходника: инвариант text === source.slice(start, end) выполняется по построению.
+                text: source[s..e].to_string(),
                 lemma: w.lemma.clone(),
                 upos: w.upos.clone(),
                 feats: parse_feats(&w.feats),
@@ -389,6 +411,66 @@ mod tests {
         assert_eq!(c.sentences[0].tokens.iter().map(|t| (t.start, t.end)).collect::<Vec<_>>(), vec![(0, 3), (4, 7), (7, 8)]);
     }
 
+    fn utf16_slice(text: &str, start: usize, end: usize) -> String {
+        String::from_utf16(&text.encode_utf16().skip(start).take(end - start).collect::<Vec<u16>>()).unwrap()
+    }
+
+    /// UDPipe оставляет эти символы внутри формы токена, а Rust считает их пробелами.
+    const NON_SPACE_SEPARATORS: [char; 5] = ['\u{85}', '\u{2028}', '\u{2029}', '\u{b}', '\u{c}'];
+
+    #[test]
+    fn separator_inside_token_form_is_aligned_and_trimmed() {
+        for sep in NON_SPACE_SEPARATORS {
+            let text = format!("Он пришёл.{sep}Потом ушёл.");
+            let form = format!("{sep}Потом");
+            let words = vec![
+                raw(1, 0, "Он", 2), raw(2, 0, "пришёл", 0), raw(3, 0, ".", 2),
+                raw(1, 1, &form, 2), raw(2, 1, "ушёл", 0), raw(3, 1, ".", 2),
+            ];
+            let c = build_contract(&text, &words, &parser()).unwrap_or_else(|e| panic!("U+{:04X}: {}", sep as u32, e));
+            let s2 = &c.sentences[1];
+            assert_eq!(s2.tokens[0].text, "Потом", "U+{:04X}", sep as u32);
+            assert_eq!((s2.tokens[0].start, s2.tokens[0].end), (11, 16), "U+{:04X}", sep as u32);
+            assert_eq!((s2.start, s2.end), (11, 22), "U+{:04X}", sep as u32);
+            for t in c.sentences.iter().flat_map(|s| s.tokens.iter()) {
+                assert_eq!(utf16_slice(&text, t.start, t.end), t.text, "U+{:04X}", sep as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn leading_double_and_whitespace_only_separator_tokens_keep_exact_ranges() {
+        let sep = '\u{b}';
+        // ведущий
+        let text = format!("{sep}Он пришёл.");
+        let words = vec![raw(1, 0, &format!("{sep}Он"), 2), raw(2, 0, "пришёл", 0), raw(3, 0, ".", 2)];
+        let c = build_contract(&text, &words, &parser()).unwrap();
+        assert_eq!((c.sentences[0].tokens[0].start, c.sentences[0].tokens[0].end), (1, 3));
+        assert_eq!(c.sentences[0].tokens[0].text, "Он");
+        // двойной
+        let text = format!("Он пришёл.{sep}{sep}Потом ушёл.");
+        let words = vec![
+            raw(1, 0, "Он", 2), raw(2, 0, "пришёл", 0), raw(3, 0, ".", 2),
+            raw(1, 1, &format!("{sep}{sep}Потом"), 2), raw(2, 1, "ушёл", 0), raw(3, 1, ".", 2),
+        ];
+        let c = build_contract(&text, &words, &parser()).unwrap();
+        assert_eq!((c.sentences[1].tokens[0].start, c.sentences[1].tokens[0].end), (12, 17));
+        // токен только из такого символа: span точный, текст — сам символ
+        let text = format!("Он пришёл.{sep}");
+        let words = vec![raw(1, 0, "Он", 2), raw(2, 0, "пришёл", 0), raw(3, 0, ".", 2), raw(4, 0, &sep.to_string(), 2)];
+        let c = build_contract(&text, &words, &parser()).unwrap();
+        let last = c.sentences[0].tokens.last().unwrap();
+        assert_eq!((last.start, last.end, last.text.as_str()), (10, 11, "\u{b}"));
+    }
+
+    #[test]
+    fn separator_does_not_allow_skipping_a_different_token() {
+        // Пробельная серия допускает только совпадение формы, а не пропуск чужого текста.
+        let text = "Он\u{2028}пришёл.";
+        let words = vec![raw(1, 0, "Он", 2), raw(2, 0, "ушёл", 0)];
+        assert!(build_contract(text, &words, &parser()).is_err());
+    }
+
     #[test]
     fn mismatch_and_leftover_fail_closed() {
         let text = "Он пришёл.";
@@ -432,6 +514,30 @@ mod tests {
             let end = sentence["end"].as_u64().unwrap() as usize;
             let stext = sentence["text"].as_str().unwrap();
             assert_eq!(text.encode_utf16().skip(start).take(end - start).collect::<Vec<_>>(), stext.encode_utf16().collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    #[ignore = "нужна локальная GSD-модель: KABINET_STYLE_MODEL=... cargo test -- --ignored"]
+    fn real_model_survives_non_space_separators() {
+        let path = std::env::var("KABINET_STYLE_MODEL").expect("KABINET_STYLE_MODEL");
+        let parser = StyleParser::new(PathBuf::from(path), None, std::env::var("KABINET_STYLE_MODEL_SHA256").ok());
+        for sep in NON_SPACE_SEPARATORS {
+            for text in [
+                format!("Он пришёл.{sep}Потом ушёл."),
+                format!("{sep}Он пришёл домой."),
+                format!("Он пришёл домой.{sep}"),
+                format!("Он пришёл.{sep}{sep}Потом ушёл."),
+            ] {
+                let value = parser.parse(1, &text).unwrap_or_else(|e| panic!("U+{:04X} в «{}»: {}", sep as u32, text.escape_unicode(), e));
+                assert_eq!(value["cancelled"], json!(false));
+                for sentence in value["parse"]["sentences"].as_array().unwrap() {
+                    for token in sentence["tokens"].as_array().unwrap() {
+                        let (s, e) = (token["start"].as_u64().unwrap() as usize, token["end"].as_u64().unwrap() as usize);
+                        assert_eq!(utf16_slice(&text, s, e), token["text"].as_str().unwrap());
+                    }
+                }
+            }
         }
     }
 
