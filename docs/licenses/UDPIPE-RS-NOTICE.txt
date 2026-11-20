@@ -1,0 +1,10 @@
+udpipe-rs 0.2.0
+===============
+
+Copyright (c) 2025 Christopher Costello.
+Licensed under MIT OR Apache-2.0.
+
+Source: https://github.com/ccostello97/udpipe-rs
+Crate: https://crates.io/crates/udpipe-rs/0.2.0
+License texts: LICENSES/udpipe-rs-MIT.txt and
+LICENSES/udpipe-rs-APACHE-2.0.txt

@@ -1,0 +1,23 @@
+UDPipe Russian-GSD 2.5
+======================
+
+Model: russian-gsd-ud-2.5-191206.udpipe
+Model release: Universal Dependencies 2.5 Models for UDPipe (2019-12-06)
+Publisher: Institute of Formal and Applied Linguistics (UFAL),
+Faculty of Mathematics and Physics, Charles University
+Authors: Milan Straka, Jana Strakova
+Source: https://lindat.mff.cuni.cz/repository/items/41f05304-629f-4313-b9cf-9eeb0a2ca7c6
+Persistent identifier: hdl:11234/1-3131
+License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International
+License URI: https://creativecommons.org/licenses/by-nc-sa/4.0/
+License text: LICENSES/CC-BY-NC-SA-4.0.txt
+
+Changes: none. The model file is distributed unchanged.
+
+The model was trained on Universal Dependencies 2.5 treebanks, including
+UD Russian-GSD r2.5. The treebank annotations are attributed to Ryan McDonald,
+Vitaly Nikolaev and Olga Lyashevskaya; UD Russian-GSD was annotated and
+converted by Google and is licensed CC BY-SA 4.0:
+https://github.com/UniversalDependencies/UD_Russian-GSD/blob/r2.5/LICENSE.txt
+
+This notice does not grant rights beyond the applicable licenses.

@@ -1,0 +1,20 @@
+UDPipe 1
+========
+
+Copyright 2016 Institute of Formal and Applied Linguistics,
+Faculty of Mathematics and Physics, Charles University in Prague,
+Czech Republic.
+
+UDPipe is licensed under the Mozilla Public License, v. 2.0.
+License text: LICENSES/MPL-2.0.txt
+
+Vendored version in udpipe-rs 0.2.0: 1.4.1-dev.
+Source Code Form for the vendored version:
+https://crates.io/api/v1/crates/udpipe-rs/0.2.0/download
+The source archive contains vendor/udpipe/, including LICENSE and copyright
+headers. No modifications were made by Kabinet.
+
+The application statically links the compiled UDPipe library. The complete
+source code for the Covered Software is available from the source archive
+above; recipients may also request it from the Kabinet distribution channel.
+MPL 2.0 does not require the entire application to be licensed under MPL.
