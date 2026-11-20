@@ -19,6 +19,7 @@ import { analyzeRhythm, isDialogueText, dialogueFlags, sentenceTraits } from '..
 const CONJ = LANG === 'en' ? new Set(['and', 'but', 'or']) : undefined;
 
 export const analysisKey = new PluginKey('textAnalysis');
+const ENGINE_META = 'styleEngineRanges';
 
 export const AN_CATS = ['verb', 'noun', 'adj', 'adv', 'part', 'pron', 'passive', 'long', 'filler', 'repeat', 'tense', 'rhythm', 'chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 // Категории с подсказкой, переходом «‹ ›» и исключением «Не отмечать здесь».
@@ -163,11 +164,12 @@ export function scanRhythm(doc) {
   return { sentences, items: res.items, stats: res.stats };
 }
 
-function build(doc, cfg) {
+function build(doc, cfg, engine = null) {
   const cats = cfg.cats || {};
+  const engineActive = !!(engine && engine.active);
   const any = AN_CATS.some((k) => cats[k]);
   const stats = { words: 0, verb: 0, noun: 0, adj: 0, adv: 0, part: 0, pron: 0, passive: 0, long: 0, filler: 0, repeat: 0, tense: 0, rhythm: 0, chancery: 0, weak: 0, tell: 0, chain: 0, remark: 0, redund: 0, which: 0, own: 0 };
-  if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges() };
+  if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges(), engine: null };
   const decos = [];
   const T = tpl();
   const ranges = emptyRanges(); // места по категориям, в порядке текста: для «‹ ›» и меню «Не отмечать здесь»
@@ -250,7 +252,7 @@ function build(doc, cfg) {
         }
       }
     }
-    if (LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
+    if (!engineActive && LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
       const st = styleOf(node, blockText, r.words, cats, r.sentences);
       for (const cat of STYLE_CATS) {
         if (!cats[cat]) continue;
@@ -264,6 +266,17 @@ function build(doc, cfg) {
     }
     return false;
   });
+  if (engineActive) {
+    for (const range of (Array.isArray(engine.ranges) ? engine.ranges : [])) {
+      const cat = range.category;
+      if (!STYLE_CATS.includes(cat) || !cats[cat]) continue;
+      const fragment = range.fragment || doc.textBetween(range.from, range.to, '', '￼');
+      if (skip[cat].size && skip[cat].has(skipKey(fragment))) continue;
+      stats[cat] += 1;
+      decos.push(Decoration.inline(range.from, range.to, { class: `an an-${cat}` }));
+      ranges[cat].push({ from: range.from, to: range.to });
+    }
+  }
   if (cats.repeat) {
     const prev = new Map(); // слово -> предыдущее такое же (индекс и расстояние)
     const next = new Map();
@@ -283,7 +296,7 @@ function build(doc, cfg) {
     }
   }
   for (const cat of AN_NAV_CATS) ranges[cat].sort((a, b) => a.from - b.from);
-  return { set: DecorationSet.create(doc, decos), stats, active: true, ranges };
+  return { set: DecorationSet.create(doc, decos), stats, active: true, ranges, engine };
 }
 
 export const TextAnalysis = Extension.create({
@@ -298,11 +311,14 @@ export const TextAnalysis = Extension.create({
       state: {
         init: (_, state) => build(state.doc, opts.getConfig()),
         apply: (tr, old, _o, state) => {
-          if (tr.getMeta(analysisKey)) return build(state.doc, opts.getConfig());
+          const engine = tr.getMeta(ENGINE_META);
+          if (engine !== undefined) return build(state.doc, opts.getConfig(), engine);
+          if (tr.getMeta(analysisKey)) return build(state.doc, opts.getConfig(), old.engine || null);
           if (!tr.docChanged) return old;
-          // большая глава: пока идёт ввод, разметка только сдвигается, полный пересчёт — когда ввод затих (lazy.js)
-          if (old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), stale: true };
-          return build(state.doc, opts.getConfig());
+          // большая глава: пока идёт ввод, только старую разметку можно сдвигать.
+          // Результат нового движка относится к прежнему снимку и не переносится.
+          if (!old.engine && old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), stale: true };
+          return build(state.doc, opts.getConfig(), null);
         },
       },
       props: { decorations(state) { return analysisKey.getState(state).set; } },
@@ -321,7 +337,15 @@ export const TextAnalysis = Extension.create({
   },
 });
 
-/** Места, отмеченные подсветкой, по категориям: { adv: [{ from, to }], passive, long, repeat, filler }. */
+/** Передать результаты нового движка в существующий analysis plugin. */
+export function applyEngineAnalysis(editor, payload) {
+  if (!editor || !editor.view) return;
+  editor.view.dispatch(editor.state.tr.setMeta(ENGINE_META, payload || null).setMeta('addToHistory', false));
+}
+
+/**
+ * Места, отмеченные подсветкой, по категориям: { adv: [{ from, to }], passive, long, repeat, filler }.
+ */
 export function analysisRanges(state) {
   const s = analysisKey.getState(state);
   return s && s.ranges ? s.ranges : emptyRanges();

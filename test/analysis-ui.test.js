@@ -180,3 +180,36 @@ test('стиль текста: все восемь категорий доход
   const r = mod.analysisRanges(state);
   for (const cat of Object.keys(expected)) assert.equal(r[cat].length, expected[cat], `${cat}: места для «‹ ›»`);
 });
+
+test('движок: ranges заменяют старые стилевые категории, счётчики и навигация совпадают', () => {
+  const text = 'Осуществление проверки выполнения требований.';
+  const cfgEngine = { cats: { chain: true, chancery: true }, longMin: 30, fillers: [], repeatWin: 25 };
+  const engine = { active: true, ranges: [{ category: 'chain', from: 1, to: 1 + text.length, fragment: text }] };
+  const { result, state } = runBuild(mod, [text], cfgEngine, engine);
+  assert.equal(result.stats.chain, 1);
+  assert.equal(result.stats.chancery, 0);
+  assert.equal(result.ranges.chain.length, 1);
+  assert.equal(mod.analysisRanges(state).chain.length, 1);
+  assert.deepEqual(byClass(result.set, 'an-chain').map((d) => [d.from, d.to]), [[1, 1 + text.length]]);
+  assert.equal(byClass(result.set, 'an-chancery').length, 0);
+});
+
+test('движок: project.analysisSkip применяется к новым ranges', () => {
+  const text = 'Осуществление проверки выполнения требований.';
+  const cfgEngine = { cats: { chain: true }, longMin: 30, fillers: [], repeatWin: 25, skip: { chain: [skipKey(text)] } };
+  const engine = { active: true, ranges: [{ category: 'chain', from: 1, to: 1 + text.length, fragment: text }] };
+  const { result, state } = runBuild(mod, [text], cfgEngine, engine);
+  assert.equal(result.stats.chain, 0);
+  assert.equal(result.ranges.chain.length, 0);
+  assert.equal(mod.analysisRanges(state).chain.length, 0);
+  assert.equal(byClass(result.set, 'an-chain').length, 0);
+});
+
+test('движок: при inactive ranges возвращается старый fallback', () => {
+  const text = 'Отряд осуществлял разведку.';
+  const cfgEngine = { cats: { chancery: true }, longMin: 30, fillers: [], repeatWin: 25 };
+  const oldFallback = runBuild(mod, [text], cfgEngine).result;
+  const { result } = runBuild(mod, [text], cfgEngine, { active: false, ranges: [] });
+  assert.equal(result.stats.chancery, oldFallback.stats.chancery);
+  assert.equal(byClass(result.set, 'an-chancery').length, byClass(oldFallback.set, 'an-chancery').length);
+});

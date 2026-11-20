@@ -472,8 +472,9 @@ function fakeTauri() {
   const styleBox = page.locator('#an_chancery');
   ok(await styleBox.isVisible(), 'стиль: галочка «Канцелярит и штампы» видна');
   if (await styleBox.isVisible()) {
+    await page.evaluate(() => { window.__styleChancery = true; });
     await styleBox.check();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(1700);
     const styleState = await page.evaluate(() => ({
       saved: (() => { try { return JSON.parse(localStorage.getItem('kabinet.settings') || '{}').an || {}; } catch { return {}; } })(),
       marks: document.querySelectorAll('.ProseMirror .an-chancery').length,

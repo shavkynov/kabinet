@@ -68,12 +68,16 @@ function makeDoc(paragraphs) {
 }
 
 /** Строит подсветку: { set, stats, active, ranges } для текста и настроек cfg. */
-function runBuild(mod, paragraphs, cfg) {
+function runBuild(mod, paragraphs, cfg, engine = null) {
   const ext = mod.TextAnalysis;
   const [plugin] = ext.plugins({ getConfig: () => cfg });
   const doc = makeDoc(paragraphs);
   const state = { doc };
-  const result = plugin.spec.state.init(null, state);
+  let result = plugin.spec.state.init(null, state);
+  if (engine) {
+    const tr = { docChanged: false, getMeta: (key) => key === 'styleEngineRanges' ? engine : undefined };
+    result = plugin.spec.state.apply(tr, result, null, state);
+  }
   state.__an = result;
   return { result, state, doc };
 }

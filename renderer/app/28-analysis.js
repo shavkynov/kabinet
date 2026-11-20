@@ -23,7 +23,7 @@ function applyAnalysisSettings() {
   const sig = JSON.stringify([settings.an, settings.tenseMode, settings.anLongMin, settings.anRepeatWin, settings.fillers, settings.fillerSkipSpeech]);
   if (sig !== lastAn) {
     lastAn = sig;
-    if (editor) refreshAnalysis(editor);
+    if (editor) { refreshAnalysis(editor); if (window.__styleShadowReady) scheduleStyleShadow(); }
     else if (!AN_CATS.some((k) => settings.an[k])) showAnalysisStats({}, false);
     renderTense();
     renderRhythm();

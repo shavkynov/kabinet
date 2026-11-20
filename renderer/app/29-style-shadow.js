@@ -48,6 +48,22 @@ function setShadowState(task, epoch, state) {
   window.__styleShadow = { task, epoch, at: Date.now(), ...emptyShadowState(), ...state };
 }
 
+function fallbackStyleAnalysis() {
+  if (!editor) return;
+  try { applyEngineAnalysis(editor, { active: false, ranges: [] }); } catch { /* старый анализ должен остаться рабочим */ }
+}
+
+function applyStyleAnalysis(ranges) {
+  if (!editor) return false;
+  try {
+    applyEngineAnalysis(editor, { active: true, ranges: Array.isArray(ranges) ? ranges : [] });
+    return true;
+  } catch {
+    fallbackStyleAnalysis();
+    return false;
+  }
+}
+
 // Любое изменение документа/отключение режима делает текущий запрос устаревшим
 // сразу, не дожидаясь debounce и следующего runStyleShadow.
 function invalidateShadow() {
@@ -69,6 +85,7 @@ function scheduleStyleShadow() {
     invalidateShadow();
     clearTimeout(shadowTimer);
     shadowSeq += 1;
+    fallbackStyleAnalysis();
     setShadowState(shadowSeq, shadowEpoch, { status: 'unavailable', ok: false, reason: 'no-categories', error: '' });
     return;
   }
@@ -92,7 +109,7 @@ async function runStyleShadow() {
     return;
   }
   if (!api.styleParse) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'unavailable', ok: false, categories, reason: 'ipc-unavailable', error: 'Rust-команда style:parse недоступна.' });
+    if (epoch === shadowEpoch) { fallbackStyleAnalysis(); setShadowState(task, epoch, { status: 'unavailable', ok: false, categories, reason: 'ipc-unavailable', error: 'Rust-команда style:parse недоступна.' }); }
     return;
   }
 
@@ -136,6 +153,7 @@ async function runStyleShadow() {
       throw new Error('Некорректный ответ style:parse.');
     }
     if (res.cancelled) {
+      fallbackStyleAnalysis();
       setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, categories, ms: Math.round(performance.now() - t0) });
       return;
     }
@@ -160,6 +178,7 @@ async function runStyleShadow() {
 
     if (rangeResult.diagnostics.some((d) => d.code === 'document-changed')) {
       shadowPrev = 0;
+      fallbackStyleAnalysis();
       setShadowState(task, epoch, {
         status: 'stale', ok: false, categories, reason: 'document-changed',
         diagnostics: rangeResult.diagnostics, analysisMs: Math.round(performance.now() - t0),
@@ -169,6 +188,11 @@ async function runStyleShadow() {
     }
 
     const ruleErrors = [...(analysis.ruleErrors || []), ...adapterErrors];
+    if (adapterErrors.length) {
+      fallbackStyleAnalysis();
+    } else if (!applyStyleAnalysis(rangeResult.ranges)) {
+      ruleErrors.push({ category: 'adapter', error: 'не удалось применить ranges' });
+    }
     const accepted = rangeResult.ranges.length;
     const rejected = rangeResult.diagnostics.filter((d) => d.code !== 'document-changed').length;
     const state = {
@@ -202,8 +226,10 @@ async function runStyleShadow() {
       if (api.styleCancel) {
         try { const p = api.styleCancel(task); if (p && typeof p.catch === 'function') p.catch(() => {}); } catch { /* игнорируем */ }
       }
+      fallbackStyleAnalysis();
       setShadowState(task, epoch, { status: 'timeout', ok: false, categories, error: 'Таймаут style:parse.', analysisMs: Math.round(performance.now() - t0) });
     } else {
+      fallbackStyleAnalysis();
       setShadowState(task, epoch, { status: 'error', ok: false, categories, error: err && err.message ? err.message : String(err), analysisMs: Math.round(performance.now() - t0) });
     }
   } finally {
@@ -219,8 +245,14 @@ window.kabinetStyleShadow = {
     invalidateShadow();
     clearTimeout(shadowTimer);
     shadowSeq += 1;
+    fallbackStyleAnalysis();
     window.__styleShadow = null;
   },
   enabled: styleShadowEnabled,
   last: () => window.__styleShadow || null,
 };
+
+// Контур готов только после инициализации всех констант этого модуля;
+// applyAnalysisSettings() вызывается раньше во время загрузки окна.
+window.__styleShadowReady = true;
+if (styleShadowEnabled()) scheduleStyleShadow();

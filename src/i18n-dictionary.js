@@ -4,6 +4,7 @@
 module.exports = {
   ...require('./i18n-sync-en'),
   ...require('./i18n-en'),
+  'не удалось применить ranges': 'could not apply ranges',
   'Таймаут style:parse.': 'style:parse timed out.',
   'tell rule вернул не массив.': 'The tell rule returned a non-array.',
   'remark rule вернул не массив.': 'The remark rule returned a non-array.',
