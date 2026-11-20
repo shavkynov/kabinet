@@ -250,6 +250,17 @@ window.kabinetStyleShadow = {
   },
   enabled: styleShadowEnabled,
   last: () => window.__styleShadow || null,
+  // Только для E2E-диагностики: текст снимка и фактические ranges подсветки в текущем документе.
+  inspect() {
+    if (!editor) return null;
+    const doc = editor.state.doc;
+    const ranges = {};
+    const all = analysisRanges(editor.state);
+    for (const cat of SHADOW_CATEGORIES) {
+      ranges[cat] = (all[cat] || []).map(({ from, to }) => ({ from, to, text: doc.textBetween(from, to, '', '') }));
+    }
+    return { text: createDocumentSnapshot(doc).text, size: doc.content.size, ranges };
+  },
 };
 
 // Контур готов только после инициализации всех констант этого модуля;

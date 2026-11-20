@@ -281,6 +281,9 @@ function setEditorContent(markdown, editable, keepView) {
   } finally {
     loading = false;
   }
+  // setContent(…, false) не вызывает onUpdate: без этого смена главы не отменяла бы запрос прежней главы
+  // и не запускала бы разбор новой (состояние тени оставалось бы от предыдущего документа).
+  if (window.__styleShadowReady) scheduleStyleShadow();
   area.scrollTop = keepView ? top : 0;
   if (keepView) twTarget = area.scrollTop; // «Машинка» не должна потом доезжать до старой цели
   updateToolbar();
