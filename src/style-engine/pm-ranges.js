@@ -163,19 +163,35 @@ function findingsToRanges(snapshotOrDoc, findings, currentDoc) {
     });
   });
 
-  // Одинаковые/вложенные диапазоны одной категории: оставляем только внешний.
-  // Частичные пересечения и одинаковые диапазоны разных категорий сохраняются.
+  // Внутри одной категории диапазоны должны быть непересекающимися:
+  // вложенные и частично пересекающиеся findings сливаются в детерминированный
+  // внешний диапазон. Разные категории не смешиваются.
   const kept = [];
   let droppedNested = 0;
+  let mergedOverlaps = 0;
   for (const range of mapped.sort((a, b) => a.from - b.from || b.to - a.to)) {
-    if (kept.some((outer) => outer.category === range.category
-      && outer.from <= range.from && outer.to >= range.to)) {
-      droppedNested += 1;
+    const overlapping = kept.filter((other) => other.category === range.category
+      && range.from <= other.to && range.to >= other.from);
+    if (!overlapping.length) {
+      kept.push({ ...range, sources: [range] });
       continue;
     }
-    kept.push(range);
+    const from = Math.min(range.from, ...overlapping.map((x) => x.from));
+    const to = Math.max(range.to, ...overlapping.map((x) => x.to));
+    const group = [range, ...overlapping];
+    const primary = group.slice().sort((a, b) => (b.to - b.from) - (a.to - a.from) || a.from - b.from)[0];
+    for (const old of overlapping) kept.splice(kept.indexOf(old), 1);
+    kept.push({
+      ...primary,
+      from,
+      to,
+      fragment: snapshot.doc.textBetween(from, to, '', ''),
+      sources: group.flatMap((item) => item.sources || [item]),
+    });
+    droppedNested += group.length - 1;
+    mergedOverlaps += group.length - 1;
   }
-  return { ranges: kept.sort((a, b) => a.from - b.from || a.to - b.to), diagnostics, droppedNested };
+  return { ranges: kept.sort((a, b) => a.from - b.from || a.to - b.to), diagnostics, droppedNested, mergedOverlaps };
 }
 
 module.exports = { createDocumentSnapshot, findingsToRanges, BLOCK_SEPARATOR, LEAF_TEXT };

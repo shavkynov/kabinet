@@ -15,6 +15,7 @@ import { HiddenMarks, refreshMarks } from './marks.js';
 import { Comments, commentRanges, setCommentRanges, addCommentRange, removeCommentRange, setActiveComment } from './comments.js';
 import { TextAnalysis, refreshAnalysis, scanTense, scanRhythm, analysisRanges, analysisAt, stepIndex, AN_CATS, AN_NAV_CATS } from './analysis.js';
 import { analyzeStructural } from '../src/style-engine/structural.js';
+import { createDocumentSnapshot, findingsToRanges } from '../src/style-engine/pm-ranges.js';
 import { Typography, fixDocTypography } from './typo.js';
 import { AlignParagraph, toggleAlign } from './align.js';
 import { Slice, Fragment } from '@tiptap/pm/model';

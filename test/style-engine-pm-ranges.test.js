@@ -167,15 +167,15 @@ test('pm-ranges: неверные offsets и fragment отклоняются', (
   assert.equal(res.diagnostics.length, 2);
 });
 
-test('pm-ranges: частичные пересечения одной категории сохраняются', () => {
+test('pm-ranges: частичные пересечения одной категории сливаются', () => {
   const doc = makeDoc();
   const snapshot = createDocumentSnapshot(doc);
   const base = finding(snapshot, 'Первый абзац.');
   const left = { ...base, end: base.start + 8, fragment: snapshot.text.slice(base.start, base.start + 8) };
   const right = { ...base, start: base.start + 5, fragment: snapshot.text.slice(base.start + 5, base.end) };
   const res = map(snapshot, [left, right]);
-  assert.equal(res.ranges.filter((r) => r.category === 'chain').length, 2);
-  assert.equal(res.droppedNested, 0);
+  assert.equal(res.ranges.filter((r) => r.category === 'chain').length, 1);
+  assert.ok(res.mergedOverlaps >= 1);
 });
 
 test('pm-ranges: вложенные дубли одной категории удаляются, разные категории сохраняются', () => {

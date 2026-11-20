@@ -1,18 +1,51 @@
-// Теневой режим нового стилевого парсера. Старый анализ (src/style.js) продолжает
-// обслуживать подсветку; здесь только фоновый вызов Rust-парсера и диагностика.
-// Включается только внутренней настройкой localStorage, без пользовательского UI.
+// Теневой режим нового структурного анализатора. Старый анализ (src/style.js)
+// остаётся единственным источником пользовательской подсветки; здесь только
+// snapshot → Rust/UDPipe → structural findings → проверка диапазонов.
 
 let shadowTimer = 0;
 let shadowSeq = 0;
 let shadowEpoch = 0;
 let shadowPrev = 0;
 
+const SHADOW_CATEGORIES = ['chain', 'which', 'chancery', 'weak', 'own', 'redund', 'remark', 'tell'];
+const SHADOW_DEBOUNCE_MS = 900;
+const SHADOW_DEFAULT_TIMEOUT_MS = 10000;
+
 function styleShadowEnabled() {
   try { return localStorage.getItem('kabinet.styleEngineShadow') === '1'; } catch { return false; }
 }
 
+function shadowCategories() {
+  const an = (typeof settings !== 'undefined' && settings && settings.an) || {};
+  return SHADOW_CATEGORIES.filter((cat) => !!an[cat]);
+}
+
+function emptyShadowState() {
+  const state = {
+    sentences: 0,
+    tokens: 0,
+    categories: [],
+    ruleErrors: [],
+    diagnostics: [],
+    findingsCount: 0,
+    acceptedRanges: 0,
+    rejectedFindings: 0,
+    droppedNested: 0,
+    mergedOverlaps: 0,
+    analysisMs: 0,
+    adapterMs: 0,
+    error: '',
+    reason: '',
+  };
+  for (const cat of SHADOW_CATEGORIES) {
+    state[cat] = [];
+    state[`${cat}Count`] = 0;
+  }
+  return state;
+}
+
 function setShadowState(task, epoch, state) {
-  window.__styleShadow = { task, epoch, at: Date.now(), ...state };
+  window.__styleShadow = { task, epoch, at: Date.now(), ...emptyShadowState(), ...state };
 }
 
 // Любое изменение документа/отключение режима делает текущий запрос устаревшим
@@ -31,140 +64,150 @@ function invalidateShadow() {
 
 function scheduleStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
+  const categories = shadowCategories();
+  if (!categories.length) {
+    invalidateShadow();
+    clearTimeout(shadowTimer);
+    shadowSeq += 1;
+    setShadowState(shadowSeq, shadowEpoch, { status: 'unavailable', ok: false, reason: 'no-categories', error: '' });
+    return;
+  }
   invalidateShadow();
   clearTimeout(shadowTimer);
-  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: '' });
-  shadowTimer = setTimeout(runStyleShadow, 900);
+  setShadowState(++shadowSeq, shadowEpoch, { status: 'pending', ok: false, cancelled: false, categories });
+  shadowTimer = setTimeout(runStyleShadow, SHADOW_DEBOUNCE_MS);
+}
+
+function timeoutError() {
+  return Object.assign(new Error('Таймаут style:parse.'), { shadowTimeout: true });
 }
 
 async function runStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
+  const categories = shadowCategories();
   const epoch = shadowEpoch;
   const task = ++shadowSeq;
-  if (!api.styleParse) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: 'Rust-команда style:parse недоступна.' });
+  if (!categories.length) {
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'unavailable', ok: false, reason: 'no-categories', error: '' });
     return;
   }
-  const text = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n\n', '\n');
-  if (!text.trim()) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: '' });
+  if (!api.styleParse) {
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'unavailable', ok: false, categories, reason: 'ipc-unavailable', error: 'Rust-команда style:parse недоступна.' });
+    return;
+  }
+
+  let snapshot;
+  try {
+    snapshot = createDocumentSnapshot(editor.state.doc);
+  } catch (err) {
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, categories, error: err && err.message ? err.message : String(err) });
+    return;
+  }
+  if (!snapshot.text.trim()) {
+    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, categories });
     return;
   }
   if (epoch !== shadowEpoch) return;
-  // Старый результат не должен выглядеть как ответ на новый запрос.
-  setShadowState(task, epoch, { status: 'running', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: '' });
+
+  setShadowState(task, epoch, { status: 'running', ok: false, categories });
   if (shadowPrev && api.styleCancel) {
     try { await api.styleCancel(shadowPrev); } catch { /* ошибка отмены не должна ломать новый запрос */ }
   }
   if (epoch !== shadowEpoch) return;
   shadowPrev = task;
   const t0 = performance.now();
+  let timer = 0;
+  let timedOut = false;
+
   try {
-    const res = await api.styleParse(text, task);
-    if (task !== shadowSeq || epoch !== shadowEpoch) return; // ответ устаревшего запроса
+    const timeoutMs = Number(window.__styleTimeoutMs) > 0 ? Number(window.__styleTimeoutMs) : SHADOW_DEFAULT_TIMEOUT_MS;
+    const parsePromise = api.styleParse(snapshot.text, task);
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        reject(timeoutError());
+      }, timeoutMs);
+    });
+    const res = await Promise.race([parsePromise, timeoutPromise]);
+    clearTimeout(timer);
+    timer = 0;
+    if (task !== shadowSeq || epoch !== shadowEpoch) return;
     if (!res || typeof res !== 'object' || !res.parse || !Array.isArray(res.parse.sentences)) {
       throw new Error('Некорректный ответ style:parse.');
     }
     if (res.cancelled) {
-      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: '', ms: Math.round(performance.now() - t0) });
+      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, categories, ms: Math.round(performance.now() - t0) });
       return;
     }
+
     const parse = res.parse;
-    let chain = [];
-    let which = [];
-    let chancery = [];
-    let weak = [];
-    let own = [];
-    let redund = [];
-    let remark = [];
-    let tell = [];
-    const ruleErrors = [];
+    const enabled = Object.fromEntries(categories.map((cat) => [cat, true]));
+    const analysis = analyzeStructural(snapshot.text, parse, enabled);
+    if (task !== shadowSeq || epoch !== shadowEpoch) return;
+
+    const findings = categories.flatMap((cat) => (Array.isArray(analysis[cat]) ? analysis[cat] : []));
+    const adapterStart = performance.now();
+    let rangeResult;
+    const adapterErrors = [];
     try {
-      chain = analyzeStructural(text, parse, { chain: true }).chain;
-      if (!Array.isArray(chain)) throw new Error('chain rule вернул не массив.');
+      rangeResult = findingsToRanges(snapshot, findings, editor.state.doc);
     } catch (err) {
-      // Ошибка правила не должна ломать редактор и не отменяет diagnostics parser.
-      chain = [];
-      ruleErrors.push({ category: 'chain', error: err && err.message ? err.message : String(err) });
+      rangeResult = { ranges: [], diagnostics: [{ code: 'adapter-error', message: err && err.message ? err.message : String(err) }], droppedNested: 0, mergedOverlaps: 0 };
+      adapterErrors.push({ category: 'adapter', error: err && err.message ? err.message : String(err) });
     }
-    try {
-      which = analyzeStructural(text, parse, { which: true }).which;
-      if (!Array.isArray(which)) throw new Error('which rule вернул не массив.');
-    } catch (err) {
-      which = [];
-      ruleErrors.push({ category: 'which', error: err && err.message ? err.message : String(err) });
+    const adapterMs = Math.round(performance.now() - adapterStart);
+    if (task !== shadowSeq || epoch !== shadowEpoch) return;
+
+    if (rangeResult.diagnostics.some((d) => d.code === 'document-changed')) {
+      shadowPrev = 0;
+      setShadowState(task, epoch, {
+        status: 'stale', ok: false, categories, reason: 'document-changed',
+        diagnostics: rangeResult.diagnostics, analysisMs: Math.round(performance.now() - t0),
+      });
+      scheduleStyleShadow();
+      return;
     }
-    try {
-      chancery = analyzeStructural(text, parse, { chancery: true }).chancery;
-      if (!Array.isArray(chancery)) throw new Error('chancery rule вернул не массив.');
-    } catch (err) {
-      chancery = [];
-      ruleErrors.push({ category: 'chancery', error: err && err.message ? err.message : String(err) });
-    }
-    try {
-      weak = analyzeStructural(text, parse, { weak: true }).weak;
-      if (!Array.isArray(weak)) throw new Error('weak rule вернул не массив.');
-    } catch (err) {
-      weak = [];
-      ruleErrors.push({ category: 'weak', error: err && err.message ? err.message : String(err) });
-    }
-    try {
-      own = analyzeStructural(text, parse, { own: true }).own;
-      if (!Array.isArray(own)) throw new Error('own rule вернул не массив.');
-    } catch (err) {
-      own = [];
-      ruleErrors.push({ category: 'own', error: err && err.message ? err.message : String(err) });
-    }
-    try {
-      redund = analyzeStructural(text, parse, { redund: true }).redund;
-      if (!Array.isArray(redund)) throw new Error('redund rule вернул не массив.');
-    } catch (err) {
-      redund = [];
-      ruleErrors.push({ category: 'redund', error: err && err.message ? err.message : String(err) });
-    }
-    try {
-      remark = analyzeStructural(text, parse, { remark: true }).remark;
-      if (!Array.isArray(remark)) throw new Error('remark rule вернул не массив.');
-    } catch (err) {
-      remark = [];
-      ruleErrors.push({ category: 'remark', error: err && err.message ? err.message : String(err) });
-    }
-    try {
-      tell = analyzeStructural(text, parse, { tell: true }).tell;
-      if (!Array.isArray(tell)) throw new Error('tell rule вернул не массив.');
-    } catch (err) {
-      tell = [];
-      ruleErrors.push({ category: 'tell', error: err && err.message ? err.message : String(err) });
-    }
-    setShadowState(task, epoch, {
+
+    const ruleErrors = [...(analysis.ruleErrors || []), ...adapterErrors];
+    const accepted = rangeResult.ranges.length;
+    const rejected = rangeResult.diagnostics.filter((d) => d.code !== 'document-changed').length;
+    const state = {
       status: 'ok',
       ok: true,
       cancelled: false,
+      categories,
       sentences: parse.sentences.length,
       tokens: parse.sentences.reduce((n, s) => n + ((s.tokens && s.tokens.length) || 0), 0),
-      chain,
-      chainCount: chain.length,
-      which,
-      whichCount: which.length,
-      chancery,
-      chanceryCount: chancery.length,
-      weak,
-      weakCount: weak.length,
-      own,
-      ownCount: own.length,
-      redund,
-      redundCount: redund.length,
-      remark,
-      remarkCount: remark.length,
-      tell,
-      tellCount: tell.length,
       ruleErrors,
+      diagnostics: rangeResult.diagnostics,
+      findingsCount: findings.length,
+      acceptedRanges: accepted,
+      rejectedFindings: rejected,
+      droppedNested: rangeResult.droppedNested,
+      mergedOverlaps: rangeResult.mergedOverlaps,
+      analysisMs: Math.round(performance.now() - t0),
+      adapterMs,
       error: '',
-      ms: Math.round(performance.now() - t0),
-    });
+      reason: '',
+    };
+    for (const cat of SHADOW_CATEGORIES) {
+      state[cat] = Array.isArray(analysis[cat]) ? analysis[cat] : [];
+      state[`${cat}Count`] = state[cat].length;
+    }
+    setShadowState(task, epoch, state);
   } catch (err) {
     if (task !== shadowSeq || epoch !== shadowEpoch) return;
-    setShadowState(task, epoch, { status: 'error', ok: false, cancelled: false, sentences: 0, tokens: 0, chain: [], chainCount: 0, which: [], whichCount: 0, chancery: [], chanceryCount: 0, weak: [], weakCount: 0, own: [], ownCount: 0, redund: [], redundCount: 0, remark: [], remarkCount: 0, tell: [], tellCount: 0, ruleErrors: [], error: err && err.message ? err.message : String(err), ms: Math.round(performance.now() - t0) });
+    shadowPrev = 0;
+    if (timedOut || (err && err.shadowTimeout)) {
+      if (api.styleCancel) {
+        try { const p = api.styleCancel(task); if (p && typeof p.catch === 'function') p.catch(() => {}); } catch { /* игнорируем */ }
+      }
+      setShadowState(task, epoch, { status: 'timeout', ok: false, categories, error: 'Таймаут style:parse.', analysisMs: Math.round(performance.now() - t0) });
+    } else {
+      setShadowState(task, epoch, { status: 'error', ok: false, categories, error: err && err.message ? err.message : String(err), analysisMs: Math.round(performance.now() - t0) });
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

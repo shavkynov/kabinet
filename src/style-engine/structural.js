@@ -177,7 +177,7 @@ function validSpan(token, text) {
  * Стартуем только с головы без входящего генитивного ребра, поэтому
  * вложенные подцепочки не выдаются как отдельные findings.
  */
-function findNounChains(text, sentence) {
+function findNounChains(text, sentence, speech = []) {
   const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
   if (!tokens.length) return [];
   const byId = new Map(tokens.map((token) => [token.id, token]));
@@ -239,6 +239,7 @@ function findNounChains(text, sentence) {
     kept.push(candidate);
   }
   return kept
+    .filter((candidate) => !speech.some(([from, to]) => candidate.start < to && candidate.end > from))
     .sort((a, b) => a.start - b.start || a.end - b.end)
     .map((candidate) => {
       const deprels = [...new Set(candidate.path.slice(1).map((token) => `dependency:${token.deprel}`))];
@@ -872,7 +873,7 @@ function clauseBounds(root, children, text) {
   return [start, end];
 }
 
-function findSubordinateAvalanches(text, sentence) {
+function findSubordinateAvalanches(text, sentence, speech = []) {
   const tokens = Array.isArray(sentence && sentence.tokens) ? sentence.tokens : [];
   if (!tokens.length) return [];
   if (!hasValidDependencyForest(tokens)) return [];
@@ -958,23 +959,34 @@ function findSubordinateAvalanches(text, sentence) {
       ],
     });
   }
-  return out.sort((a, b) => a.start - b.start || a.end - b.end);
+  return out.filter((finding) => !speech.some(([from, to]) => finding.start < to && finding.end > from))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 /** Запускает структурные категории 4, 7 и chancery по нормализованному parse contract. */
 function analyzeStructural(text, parseResult, enabled = {}) {
-  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [], remark: [], tell: [] };
+  const result = { chain: [], which: [], chancery: [], weak: [], own: [], redund: [], remark: [], tell: [], ruleErrors: [] };
   if (!parseResult || !Array.isArray(parseResult.sentences)) return result;
   const speech = speechRanges(text);
+  const run = (category, fn) => {
+    if (!enabled[category]) return;
+    try {
+      const findings = fn();
+      if (!Array.isArray(findings)) throw new Error(`${category} rule вернул не массив.`);
+      result[category].push(...findings);
+    } catch (err) {
+      result.ruleErrors.push({ category, error: err && err.message ? err.message : String(err) });
+    }
+  };
   for (const sentence of parseResult.sentences) {
-    if (enabled.chain) result.chain.push(...findNounChains(text, sentence));
-    if (enabled.which) result.which.push(...findSubordinateAvalanches(text, sentence));
-    if (enabled.chancery) result.chancery.push(...findChancery(text, sentence, speech));
-    if (enabled.weak) result.weak.push(...findWeak(text, sentence, speech));
-    if (enabled.own) result.own.push(...findOwn(text, sentence, speech));
-    if (enabled.redund) result.redund.push(...findRedund(text, sentence, speech));
-    if (enabled.remark) result.remark.push(...findRemark(text, sentence, speech));
-    if (enabled.tell) result.tell.push(...findTell(text, sentence, speech));
+    run('chain', () => findNounChains(text, sentence, speech));
+    run('which', () => findSubordinateAvalanches(text, sentence, speech));
+    run('chancery', () => findChancery(text, sentence, speech));
+    run('weak', () => findWeak(text, sentence, speech));
+    run('own', () => findOwn(text, sentence, speech));
+    run('redund', () => findRedund(text, sentence, speech));
+    run('remark', () => findRemark(text, sentence, speech));
+    run('tell', () => findTell(text, sentence, speech));
   }
   return result;
 }

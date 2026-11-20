@@ -269,7 +269,14 @@ function fakeTauri() {
   ok(/слизеринцев/.test(spellMenu) && /Добавить «Слизеринцы» в словарь/.test(spellMenu) && /Пропустить/.test(spellMenu), 'слово с ошибкой: варианты, «Добавить в словарь», «Пропустить». Получено: ' + spellMenu.slice(0, 160).replace(/\n/g, ' / '));
   await page.keyboard.press('Escape');
 
-  // теневой режим: новый парсер вызывается, но не создаёт подсветку и не трогает старый анализ
+  // теневой режим: новый парсер вызывается только при включённой категории
+  await page.evaluate(() => {
+    for (const cat of ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own']) {
+      const box = document.getElementById(`an_${cat}`);
+      if (box && !box.checked) box.click();
+    }
+  });
+  await page.waitForTimeout(400);
   await page.locator('.ProseMirror').first().click();
   await page.keyboard.type(' ');
   await page.waitForTimeout(1500);
@@ -333,8 +340,27 @@ function fakeTauri() {
   ok(!!tellShadow && tellShadow.tellCount === 1 && tellShadow.tell[0].fragment === 'почувствовал страх', 'тень: tell finding доступен в diagnostics');
   ok(!!tellShadow && tellShadow.ruleErrors.length === 0, 'тень: tell не дал rule error');
   await page.evaluate(() => { window.__styleTell = false; });
+  const callsBeforeNoCategories = await page.evaluate(() => window.__calls.filter(([n]) => n === 'style:parse').length);
+  await page.evaluate(() => {
+    for (const cat of ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own']) {
+      const box = document.getElementById(`an_${cat}`);
+      if (box && box.checked) box.click();
+    }
+  });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1200);
+  const noCategoriesShadow = await page.evaluate(() => window.__styleShadow || null);
+  const callsAfterNoCategories = await page.evaluate(() => window.__calls.filter(([n]) => n === 'style:parse').length);
+  ok(!!noCategoriesShadow && noCategoriesShadow.status === 'unavailable' && noCategoriesShadow.reason === 'no-categories', 'тень: без категорий status unavailable');
+  ok(callsAfterNoCategories === callsBeforeNoCategories, 'тень: без категорий style:parse не вызывается');
+  await page.waitForTimeout(300);
   const shadowMarks = await page.evaluate(() => document.querySelectorAll('.ProseMirror [class*="an-"]').length);
   ok(shadowMarks === 0, 'тень: подсветка не создаётся (старый анализатор не затронут)');
+  await page.evaluate(() => {
+    const box = document.getElementById('an_chain');
+    if (box && !box.checked) box.click();
+  });
+  await page.waitForTimeout(300);
 
   // Новый запрос сразу убирает старый успешный результат из диагностики.
   await page.evaluate(() => { window.__styleDelay = 1800; });
@@ -390,6 +416,18 @@ function fakeTauri() {
   const reenabledShadow = await page.evaluate(() => window.__styleShadow || null);
   ok(!!reenabledShadow && reenabledShadow.status === 'ok', 'тень: после повторного включения запрос снова работает');
 
+  // Таймаут не должен вешать редактор и не должен применять поздний ответ.
+  await page.evaluate(() => { window.__styleTimeoutMs = 50; window.__styleDelay = 900; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1300);
+  const timeoutShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!timeoutShadow && timeoutShadow.status === 'timeout', 'тень: таймаут даёт status timeout');
+  await page.evaluate(() => { window.__styleTimeoutMs = 0; window.__styleDelay = 0; });
+  await page.keyboard.type(' ');
+  await page.waitForTimeout(1400);
+  const afterTimeoutShadow = await page.evaluate(() => window.__styleShadow || null);
+  ok(!!afterTimeoutShadow && afterTimeoutShadow.status === 'ok', 'тень: после таймаута новый разбор восстанавливается');
+
   // Ошибка моста должна дать однозначное состояние ошибки, а затем восстановиться.
   await page.evaluate(() => { window.__styleDelay = 0; window.__styleFail = true; });
   await page.keyboard.type(' ');
@@ -416,7 +454,7 @@ function fakeTauri() {
   await page.keyboard.type(' ');
   await page.waitForTimeout(1400);
   const unavailableShadow = await page.evaluate(() => window.__styleShadow || null);
-  ok(!!unavailableShadow && unavailableShadow.status === 'error' && /недоступна/.test(unavailableShadow.error || ''), 'тень: недоступная команда даёт явную ошибку');
+  ok(!!unavailableShadow && unavailableShadow.status === 'unavailable' && /недоступна/.test(unavailableShadow.error || ''), 'тень: недоступная команда даёт unavailable');
   await page.evaluate(() => { window.kabinet.styleParse = window.__savedStyleParse; });
 
   // Некорректный ответ моста: ошибка, а не пустой успешный результат.

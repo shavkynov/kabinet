@@ -115,3 +115,46 @@ test('speech: общий механизм исключения работает 
   assert.equal(hits[0].start, second + 3);
   assert.equal(hits[0].fragment, text.slice(hits[0].start, hits[0].end));
 });
+
+function chainSentenceAt(text, start) {
+  return sentence(text, start, [
+    ['Осуществление', 'осуществление', 'NOUN', { Case: 'Nom' }, 0, 'root'],
+    ['проверки', 'проверка', 'NOUN', { Case: 'Gen' }, 1, 'nmod'],
+    ['выполнения', 'выполнение', 'NOUN', { Case: 'Gen' }, 2, 'nmod'],
+    ['требований', 'требование', 'NOUN', { Case: 'Gen' }, 3, 'nmod'],
+    ['.', '.', 'PUNCT', {}, 1, 'punct'],
+  ]);
+}
+
+function whichSentenceAt(text, start) {
+  return sentence(text, start, [
+    ['Дом', 'дом', 'NOUN', { Case: 'Nom' }, 0, 'root'],
+    [',', ',', 'PUNCT', {}, 4, 'punct'],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 4, 'nsubj'],
+    ['стоял', 'стоять', 'VERB', { VerbForm: 'Fin' }, 1, 'acl:relcl'],
+    [',', ',', 'PUNCT', {}, 7, 'punct'],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 7, 'nsubj'],
+    ['видел', 'видеть', 'VERB', { VerbForm: 'Fin' }, 4, 'acl:relcl'],
+    ['лес', 'лес', 'NOUN', { Case: 'Acc' }, 7, 'obj'],
+    [',', ',', 'PUNCT', {}, 11, 'punct'],
+    ['который', 'который', 'PRON', { Case: 'Nom' }, 11, 'nsubj'],
+    ['шумел', 'шуметь', 'VERB', { VerbForm: 'Fin' }, 7, 'acl:relcl'],
+    ['.', '.', 'PUNCT', {}, 1, 'punct'],
+  ]);
+}
+
+test('speech: chain и which не отмечают прямую речь и работают в авторском абзаце', () => {
+  const chainText = 'Он вошёл.\n\n— Осуществление проверки выполнения требований.';
+  const chainStart = chainText.indexOf('—') + 2;
+  const chainParsed = { sentences: [authorEntry(chainText, 0), chainSentenceAt(chainText, chainStart)] };
+  assert.deepEqual(analyzeStructural(chainText, chainParsed, { chain: true }).chain, []);
+  const chainAuthor = 'Осуществление проверки выполнения требований.';
+  assert.equal(analyzeStructural(chainAuthor, { sentences: [chainSentenceAt(chainAuthor, 0)] }, { chain: true }).chain.length, 1);
+
+  const whichText = 'Он вошёл.\n\n— Дом, который стоял, который видел лес, который шумел.';
+  const whichStart = whichText.indexOf('—') + 2;
+  const whichParsed = { sentences: [authorEntry(whichText, 0), whichSentenceAt(whichText, whichStart)] };
+  assert.deepEqual(analyzeStructural(whichText, whichParsed, { which: true }).which, []);
+  const whichAuthor = 'Дом, который стоял, который видел лес, который шумел.';
+  assert.equal(analyzeStructural(whichAuthor, { sentences: [whichSentenceAt(whichAuthor, 0)] }, { which: true }).which.length, 1);
+});
