@@ -1,6 +1,6 @@
-// Теневой режим нового структурного анализатора. Старый анализ (src/style.js)
-// остаётся единственным источником пользовательской подсветки; здесь только
-// snapshot → Rust/UDPipe → structural findings → проверка диапазонов.
+// Гибридный структурный и грамматический анализ текста: при готовой встроенной
+// модели передаёт снимок в Rust/UDPipe и строит разборы для панелей «Стиль»
+// и «Проверка», иначе используется базовый разбор (src/style.js / src/analysis.js).
 
 let shadowTimer = 0;
 let shadowSeq = 0;
@@ -300,40 +300,19 @@ function updateCheckModeHint() {
   if (!el) return;
   const precise = styleModelReady && styleShadowEnabled() && !isShadowOnlyMode();
   el.textContent = precise
-    ? t('Выбранные виды слов выделяются цветом, текст не меняется. Работает точный разбор (Russian-GSD): части речи, пассив, повторы и времена.')
+    ? t('Выбранные виды слов выделяются цветом, текст не меняется. Работает точный грамматический разбор.')
     : t('Выбранные виды слов выделяются цветом, текст не меняется. Разбор приблизительный: по окончаниям, без словаря.');
 }
 
 function renderStyleEngineUi(st) {
   const box = typeof document !== 'undefined' ? document.querySelector('#styleEngineBox') : null;
   if (!box) return;
-  if (!st || !st.supported) { box.hidden = true; updateCheckModeHint(); return; }
-  box.hidden = false;
-  styleModelReady = !!st.ready;
-  if (typeof box.hasAttribute === 'function' && !box.hasAttribute('data-init')) {
-    box.open = !styleModelReady;
-    box.setAttribute('data-init', '1');
-  }
-  const summary = document.querySelector('#styleEngineSummary');
+  styleModelReady = !!(st && st.supported && st.ready);
+  box.hidden = !styleModelReady;
   const toggle = document.querySelector('#styleEngineToggle');
-  const status = document.querySelector('#styleEngineStatus');
-  const btn = document.querySelector('#btnStylePickModel');
-  if (summary) {
-    summary.textContent = styleModelReady
-      ? t('Точный разбор · подключён')
-      : t('Базовый разбор · подключить модель');
-  }
   if (toggle) {
     toggle.disabled = !styleModelReady;
     toggle.checked = styleModelReady && styleShadowEnabled();
-  }
-  if (status) {
-    status.textContent = styleModelReady
-      ? t('Подключена локальная модель ({0}).', st.modelVersion || 'russian-gsd')
-      : t('Модель не подключена — работает базовый разбор.');
-  }
-  if (btn) {
-    btn.textContent = styleModelReady ? t('Заменить файл модели…') : t('Подключить файл модели…');
   }
   updateCheckModeHint();
 }
@@ -350,7 +329,6 @@ async function refreshStyleEngineUi() {
 
 function wireStyleEngineUi() {
   const toggle = typeof document !== 'undefined' ? document.querySelector('#styleEngineToggle') : null;
-  const btn = typeof document !== 'undefined' ? document.querySelector('#btnStylePickModel') : null;
   if (toggle) {
     toggle.addEventListener('change', () => {
       shadowForcedOff = false;
@@ -371,26 +349,6 @@ function wireStyleEngineUi() {
         shadowSeq += 1;
         fallbackStyleAnalysis();
         window.__styleShadow = null;
-      }
-    });
-  }
-  if (btn && typeof api !== 'undefined' && api && typeof api.stylePickModel === 'function') {
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      try {
-        const st = await api.stylePickModel();
-        if (!st) return;
-        shadowForcedOff = false;
-        lastStyleParse = null;
-        try { localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
-        renderStyleEngineUi(st);
-        if (styleShadowEnabled()) scheduleStyleShadow();
-        if (st.ready && typeof setStatus === 'function') setStatus('ok', t('Языковая модель подключена'));
-      } catch (err) {
-        if (typeof showError === 'function') showError(err && err.message ? err.message : String(err));
-        await refreshStyleEngineUi();
-      } finally {
-        btn.disabled = false;
       }
     });
   }

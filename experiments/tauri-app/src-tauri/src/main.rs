@@ -484,16 +484,6 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             tauri::async_runtime::spawn_blocking(move || svc.status())
                 .await.map_err(|e| format!("Поток проверки модели завершился: {}", e))
         }
-        "style:pickModel" => {
-            let Some(f) = rfd::AsyncFileDialog::new()
-                .set_title("Выберите файл языковой модели")
-                .add_filter("UDPipe", &["udpipe"])
-                .pick_file().await else { return Ok(Value::Null); };
-            let svc = app.state::<Arc<StyleParser>>().inner().clone();
-            let src = f.path().to_path_buf();
-            tauri::async_runtime::spawn_blocking(move || svc.install_model_from(&src))
-                .await.map_err(|e| format!("Поток установки модели завершился: {}", e))?
-        }
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
         "log:write" => {
             let level = a.first().and_then(|v| v.as_str()).unwrap_or("info");
@@ -932,7 +922,7 @@ fn main() {
             if let Ok(Some(start)) = app.deep_link().get_current() { take(start.iter().map(|u| u.to_string()).collect()); }
             app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
             app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))));
-            // Модель стилевого анализа не входит в установщик до юридической проверки.
+            // Встроенная офлайн-модель языкового разбора (из resource_dir установщика или KABINET_STYLE_MODEL).
             let resource_dir = app.path().resource_dir().ok();
             let style_model = kabinet_core::style_parser::resolve_model_path(std::env::var("KABINET_STYLE_MODEL").ok().map(PathBuf::from), &data, resource_dir.as_deref());
             let style_svc = Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok()));

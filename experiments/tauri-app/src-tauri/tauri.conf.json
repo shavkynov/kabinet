@@ -28,6 +28,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/style-models/*": "style-models/",
+      "resources/licenses/*": "licenses/"
+    },
     "icon": [
       "../../../build/icon.png",
       "../../../build/icon.ico",

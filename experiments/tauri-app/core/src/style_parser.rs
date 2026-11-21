@@ -8,14 +8,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use udpipe_rs::{Model, Word};
-
-static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn sha256_file(path: &Path) -> std::io::Result<(String, u64)> {
     let mut f = fs::File::open(path)?;
@@ -31,77 +29,28 @@ fn sha256_file(path: &Path) -> std::io::Result<(String, u64)> {
     Ok((format!("{:x}", hasher.finalize()), total))
 }
 
-fn copy_and_verify_sha256(src: &Path, dst: &Path, expected_sha: &str) -> Result<(), String> {
-    let mut reader = fs::File::open(src).map_err(|e| format!("Не удалось прочитать файл модели: {}", e))?;
-    let mut writer = fs::File::create(dst).map_err(|e| format!("Не удалось сохранить модель: {}", e))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 65536];
-    loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("Не удалось прочитать файл модели: {}", e))?;
-        if n == 0 { break; }
-        hasher.update(&buf[..n]);
-        writer.write_all(&buf[..n]).map_err(|e| format!("Не удалось сохранить модель: {}", e))?;
-    }
-    writer.sync_all().map_err(|e| format!("Не удалось сохранить модель: {}", e))?;
-    let written_sha = format!("{:x}", hasher.finalize());
-    if written_sha != expected_sha {
-        return Err(format!("Файл модели изменился во время копирования: SHA-256 {} вместо {}.", written_sha, expected_sha));
-    }
-    Ok(())
-}
-
-/// Заменяет `target` на `tmp`. На Windows `fs::rename` поверх существующего файла может
-/// завершиться ошибкой — тогда переносим `target` во временный `backup`, ставим `tmp` на место
-/// `target` и откатываем `backup` обратно при сбое.
-fn replace_file_with<F>(tmp: &Path, target: &Path, backup: &Path, mut rename: F) -> std::io::Result<()>
-where
-    F: FnMut(&Path, &Path) -> std::io::Result<()>,
-{
-    match rename(tmp, target) {
-        Ok(()) => Ok(()),
-        Err(first_err) => {
-            if !target.exists() {
-                return Err(first_err);
-            }
-            let _ = fs::remove_file(backup);
-            rename(target, backup)?;
-            match rename(tmp, target) {
-                Ok(()) => {
-                    let _ = fs::remove_file(backup);
-                    Ok(())
-                }
-                Err(replace_err) => {
-                    if rename(backup, target).is_err() {
-                        let _ = fs::rename(backup, target);
-                    }
-                    Err(replace_err)
-                }
-            }
-        }
-    }
-}
-
 const DEFAULT_MODEL_VERSION: &str = "russian-gsd-ud-2.5-191206";
 const DEFAULT_MODEL_SHA256: &str = "ba63e42f79f525cbcb78c8bc98dd126c2960cbada91b964a741285c15504f06a";
 
-/// Имя файла модели во внешнем локальном каталоге.
+/// Имя файла модели в ресурсах приложения.
 pub const MODEL_FILE_NAME: &str = "russian-gsd-ud-2.5-191206.udpipe";
 
-/// Где искать модель. Модель не входит в установщик (лицензионный статус CONDITIONAL).
+/// Где искать модель.
 ///
-/// Порядок: явный путь `KABINET_STYLE_MODEL`; затем `<каталог данных приложения>/style-models/` — внешний локальный
-/// ресурс пользователя; затем `<каталог ресурсов>/style-models/` — для сборок, где поставка модели разрешена.
-/// Берётся первый существующий файл. Если файла нет нигде, возвращается путь из каталога данных, и сообщение
-/// об ошибке покажет, куда его положить. Явный путь не подменяется: ошибка будет именно про него.
+/// Порядок: явный путь `KABINET_STYLE_MODEL`; затем встроенный ресурс `<каталог ресурсов>/style-models/`;
+/// затем `<каталог данных приложения>/style-models/` (резервный внешний путь).
+/// Если файла нет нигде, возвращается путь в ресурсах (или каталоге данных, если resource_dir нет).
 pub fn resolve_model_path(explicit: Option<PathBuf>, data_dir: &Path, resource_dir: Option<&Path>) -> PathBuf {
     if let Some(p) = explicit { return p; }
-    let user = data_dir.join("style-models").join(MODEL_FILE_NAME);
-    if user.is_file() { return user; }
     if let Some(r) = resource_dir {
         let bundled = r.join("style-models").join(MODEL_FILE_NAME);
         if bundled.is_file() { return bundled; }
     }
-    user
+    let user = data_dir.join("style-models").join(MODEL_FILE_NAME);
+    if user.is_file() { return user; }
+    resource_dir
+        .map(|r| r.join("style-models").join(MODEL_FILE_NAME))
+        .unwrap_or(user)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -375,35 +324,6 @@ impl StyleParser {
             "modelVersion": self.model_version,
             "modelSha256": self.model_sha256,
         })
-    }
-
-    pub fn install_model_from(&self, src: &Path) -> Result<Value, String> {
-        let (actual, _len) = sha256_file(src).map_err(|e| format!("Не удалось прочитать файл модели: {}", e))?;
-        if !self.model_sha256.is_empty() && actual != self.model_sha256 {
-            return Err(format!("Модель стилевого анализа повреждена или не та: SHA-256 {} вместо {}.", actual, self.model_sha256));
-        }
-        let parent = self.model_path.parent().ok_or_else(|| "Некорректный путь для хранения модели.".to_string())?;
-        fs::create_dir_all(parent).map_err(|e| format!("Не удалось создать каталог для модели: {}", e))?;
-        let same_path = src == self.model_path
-            || (fs::canonicalize(src).ok().zip(fs::canonicalize(&self.model_path).ok()).map(|(a, b)| a == b) == Some(true));
-        if !same_path {
-            let name = self.model_path.file_name().and_then(|n| n.to_str()).unwrap_or(MODEL_FILE_NAME);
-            let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-            let tmp = parent.join(format!("{}.tmp.{}.{}", name, std::process::id(), seq));
-            let bak = parent.join(format!("{}.bak.{}.{}", name, std::process::id(), seq));
-            if let Err(e) = copy_and_verify_sha256(src, &tmp, &actual) {
-                let _ = fs::remove_file(&tmp);
-                return Err(e);
-            }
-            if let Err(e) = replace_file_with(&tmp, &self.model_path, &bak, |a, b| fs::rename(a, b)) {
-                let _ = fs::remove_file(&tmp);
-                return Err(format!("Не удалось разместить файл модели: {}", e));
-            }
-        }
-        if let Ok(mut guard) = self.loaded.lock() {
-            *guard = None;
-        }
-        Ok(self.status())
     }
 
     /// Модель загружается один раз; хэш проверяется до Model::load.
@@ -734,18 +654,20 @@ mod tests {
     }
 
     #[test]
-    fn model_path_prefers_explicit_then_user_dir_then_resources() {
+    fn model_path_prefers_explicit_then_resources_then_user_dir() {
         let tmp = std::env::temp_dir().join(format!("kabinet-model-path-{}", std::process::id()));
         let (data, res) = (tmp.join("data"), tmp.join("res"));
         for d in [&data, &res] { std::fs::create_dir_all(d.join("style-models")).unwrap(); }
         let user = data.join("style-models").join(MODEL_FILE_NAME);
         let bundled = res.join("style-models").join(MODEL_FILE_NAME);
-        // ничего нет: путь пользователя, чтобы ошибка сказала, куда положить файл
-        assert_eq!(resolve_model_path(None, &data, Some(&res)), user);
-        std::fs::write(&bundled, b"x").unwrap();
+        // ничего нет: путь в ресурсах, иначе в данных пользователя
         assert_eq!(resolve_model_path(None, &data, Some(&res)), bundled);
+        assert_eq!(resolve_model_path(None, &data, None), user);
         std::fs::write(&user, b"x").unwrap();
         assert_eq!(resolve_model_path(None, &data, Some(&res)), user);
+        // встроенная модель в resource_dir приоритетнее внешнего файла
+        std::fs::write(&bundled, b"x").unwrap();
+        assert_eq!(resolve_model_path(None, &data, Some(&res)), bundled);
         // явный путь не подменяется, даже если его нет
         let explicit = tmp.join("nope.udpipe");
         assert_eq!(resolve_model_path(Some(explicit.clone()), &data, Some(&res)), explicit);
@@ -798,41 +720,6 @@ mod tests {
     }
 
     #[test]
-    fn status_and_install_model_from_validates_sha256_and_installs_atomically() {
-        let tmp = std::env::temp_dir().join(format!("kabinet-install-model-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
-        let target = tmp.join("data").join("style-models").join(MODEL_FILE_NAME);
-        let good_bytes = b"valid-model-bytes";
-        let expected_sha = format!("{:x}", Sha256::digest(good_bytes));
-        let p = StyleParser::new(target.clone(), Some("test-ver".into()), Some(expected_sha));
-
-        let st0 = p.status();
-        assert_eq!(st0["supported"], json!(true));
-        assert_eq!(st0["ready"], json!(false));
-
-        let bad_src = tmp.join("bad.udpipe");
-        fs::write(&bad_src, b"wrong-bytes").unwrap();
-        let err = p.install_model_from(&bad_src).unwrap_err();
-        assert!(err.contains("повреждена или не та"), "{}", err);
-        assert!(!target.exists(), "при неверном SHA-256 целевой файл не создаётся");
-
-        let good_src = tmp.join("good.udpipe");
-        fs::write(&good_src, good_bytes).unwrap();
-        let st1 = p.install_model_from(&good_src).unwrap();
-        assert_eq!(st1["ready"], json!(true));
-        assert_eq!(st1["modelVersion"], json!("test-ver"));
-        assert_eq!(fs::read(&target).unwrap(), good_bytes);
-
-        // Повторный выбор уже установленного целевого файла тоже проходит без потери данных.
-        let st2 = p.install_model_from(&target).unwrap();
-        assert_eq!(st2["ready"], json!(true));
-        assert_eq!(fs::read(&target).unwrap(), good_bytes);
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
     fn status_verifies_sha256_without_loading_model() {
         let tmp = std::env::temp_dir().join(format!("kabinet-status-sha-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -863,109 +750,6 @@ mod tests {
         assert_eq!(p_empty_sha.status()["ready"], json!(false));
 
         let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn install_model_from_replaces_existing_and_preserves_old_on_error() {
-        let tmp = std::env::temp_dir().join(format!("kabinet-reinstall-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
-        let target = tmp.join("data").join("style-models").join(MODEL_FILE_NAME);
-
-        // Пустой model_sha256 позволяет проверить реальную перезапись одного валидного файла другим.
-        let p = StyleParser::new(target.clone(), Some("test-ver".into()), Some(String::new()));
-        let src_v1 = tmp.join("v1.udpipe");
-        let src_v2 = tmp.join("v2.udpipe");
-        fs::write(&src_v1, b"model-version-1").unwrap();
-        fs::write(&src_v2, b"model-version-2-longer").unwrap();
-
-        let st1 = p.install_model_from(&src_v1).unwrap();
-        assert_eq!(st1["ready"], json!(true));
-        assert_eq!(fs::read(&target).unwrap(), b"model-version-1");
-
-        // Сбой при несуществующем источнике не затирает прежнюю модель.
-        let missing = tmp.join("missing.udpipe");
-        assert!(p.install_model_from(&missing).is_err());
-        assert_eq!(fs::read(&target).unwrap(), b"model-version-1");
-        assert_eq!(p.status()["ready"], json!(true));
-
-        // Повторная установка (замена существующего файла).
-        let st2 = p.install_model_from(&src_v2).unwrap();
-        assert_eq!(st2["ready"], json!(true));
-        assert_eq!(fs::read(&target).unwrap(), b"model-version-2-longer");
-
-        // Сбой при несовпадении SHA-256 тоже сохраняет уже установленный target нетронутым.
-        let p_strict = StyleParser::new(target.clone(), Some("test-ver".into()), Some(format!("{:x}", Sha256::digest(b"model-version-2-longer"))));
-        let bad_src = tmp.join("bad.udpipe");
-        fs::write(&bad_src, b"broken").unwrap();
-        assert!(p_strict.install_model_from(&bad_src).is_err());
-        assert_eq!(fs::read(&target).unwrap(), b"model-version-2-longer");
-        assert_eq!(p_strict.status()["ready"], json!(true));
-
-        // В каталоге назначения не остаётся временных .tmp / .bak файлов.
-        let leftovers: Vec<_> = fs::read_dir(target.parent().unwrap())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n != MODEL_FILE_NAME)
-            .collect();
-        assert!(leftovers.is_empty(), "остались временные файлы: {:?}", leftovers);
-
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn replace_file_with_fallback_and_rollback_on_failure() {
-        let tmp_dir = std::env::temp_dir().join(format!("kabinet-replace-fallback-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&tmp_dir);
-        fs::create_dir_all(&tmp_dir).unwrap();
-        let target = tmp_dir.join("model.udpipe");
-        let tmp_file = tmp_dir.join("model.udpipe.tmp");
-        let bak_file = tmp_dir.join("model.udpipe.bak");
-
-        // 1. Имитация Windows: первый rename(tmp, target) падает с PermissionDenied, fallback через backup завершается успехом.
-        fs::write(&target, b"old-v1").unwrap();
-        fs::write(&tmp_file, b"new-v2").unwrap();
-        let mut first = true;
-        replace_file_with(&tmp_file, &target, &bak_file, |a, b| {
-            if first && a == tmp_file && b == target {
-                first = false;
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "exists on windows"));
-            }
-            fs::rename(a, b)
-        }).unwrap();
-        assert_eq!(fs::read(&target).unwrap(), b"new-v2");
-        assert!(!bak_file.exists());
-        assert!(!tmp_file.exists());
-
-        // 2. Сбой после переноса target -> bak (второй rename tmp -> target падает): откат восстанавливает target.
-        fs::write(&target, b"old-stable").unwrap();
-        fs::write(&tmp_file, b"new-broken").unwrap();
-        let err = replace_file_with(&tmp_file, &target, &bak_file, |a, b| {
-            if a == tmp_file && b == target {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, "injected rename failure"));
-            }
-            fs::rename(a, b)
-        }).unwrap_err();
-        assert!(err.to_string().contains("injected rename failure"));
-        assert_eq!(fs::read(&target).unwrap(), b"old-stable");
-        assert!(!bak_file.exists());
-
-        // 3. Сбой при переносе target -> bak: прежний target остаётся на месте.
-        fs::write(&target, b"old-untouched").unwrap();
-        let err2 = replace_file_with(&tmp_file, &target, &bak_file, |a, b| {
-            if a == tmp_file && b == target {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "windows"));
-            }
-            if a == target && b == bak_file {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "locked"));
-            }
-            fs::rename(a, b)
-        }).unwrap_err();
-        assert!(err2.to_string().contains("locked"));
-        assert_eq!(fs::read(&target).unwrap(), b"old-untouched");
-
-        let _ = fs::remove_dir_all(&tmp_dir);
     }
 
     #[test]

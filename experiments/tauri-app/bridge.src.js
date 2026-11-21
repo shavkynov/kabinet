@@ -127,7 +127,6 @@ const { createCloseCoordinator } = require('./close-coordinator');
     styleParse: (text, taskId) => call('style:parse', text, taskId),
     styleCancel: (taskId) => call('style:cancel', taskId),
     styleStatus: () => call('style:status'),
-    stylePickModel: () => call('style:pickModel'),
     setProjectDeadline: (d) => call('project:setDeadline', d),
     setDayWords: (d, w) => call('stats:setDay', d, w),
     statsSummary: (d, w) => call('stats:summary', d, w),

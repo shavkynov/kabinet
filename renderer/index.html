@@ -613,7 +613,7 @@
           <button id="btnStyleNone" type="button" class="linkish">Снять все</button>
         </div>
       </div>
-      <p class="hint">Наведите курсор или листайте ‹ › — появится подсказка с советом и кнопкой «Не отмечать здесь». Реплики героев не проверяются.</p>
+      <p class="hint">Наведите курсор на отмеченное или листайте ‹ › — появится совет. Реплики героев не проверяются.</p>
       <div id="styleBox">
         <label class="an-row an-row2">
           <input id="an_chancery" type="checkbox" data-an="chancery">
@@ -672,19 +672,13 @@
           <span id="anCount_own" class="an-count"></span>
         </label>
       </div>
-      <p class="hint">Только для русского текста. Слова-паразиты, повторы, длинные предложения и части речи — в разделе «Проверка».</p>
-      <details id="styleEngineBox" class="more" hidden>
-        <summary><span id="styleEngineSummary">Точный разбор</span></summary>
+      <p class="hint style-panel-foot">Только для русского текста. Слова-паразиты, повторы, длинные предложения и части речи — в разделе «Проверка».</p>
+      <div id="styleEngineBox" class="style-engine-row" hidden>
         <label class="an-row">
           <input id="styleEngineToggle" type="checkbox">
-          <span class="an-name">Точный синтаксический разбор</span>
+          <span class="an-name">Глубокий грамматический разбор</span>
         </label>
-        <p id="styleEngineStatus" class="hint"></p>
-        <div class="row">
-          <button id="btnStylePickModel" type="button" class="secondary wide-btn">Подключить файл модели…</button>
-        </div>
-        <p class="hint">Локальная модель UD Russian-GSD (CC BY-NC-SA 4.0, russian-gsd-ud-2.5-191206.udpipe). Работает без интернета; без модели используется базовый разбор.</p>
-      </details>
+      </div>
     </div>
 
     <!-- анализ и проверка текста -->

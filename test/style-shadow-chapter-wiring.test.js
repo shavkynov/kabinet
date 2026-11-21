@@ -2,7 +2,7 @@
 // Регрессия F.3.1-C: смена главы идёт через editor.setContent(…, false), а он не вызывает onUpdate.
 // Без явного scheduleStyleShadow() запрос прежней главы не отменялся, а разбор новой главы не запускался:
 // состояние тени оставалось от предыдущего документа (findings с offsets главы А применялись к тексту главы Б).
-// Проверка проводки по исходникам; поведение в настоящем окне проверяет experiments/tauri-app/e2e/chapters-ranges.js.
+// Проверка проводки по исходникам.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

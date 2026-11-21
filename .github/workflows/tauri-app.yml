@@ -2,15 +2,6 @@ name: Кабинет на Tauri (сборка)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [experiment/tauri-rust, experiment/tauri-rust-finish, test-1]
-    paths:
-      - 'experiments/tauri-app/**'
-      - '.github/workflows/tauri-app.yml'
-      - 'renderer/**'
-      - 'src/**'
-      - 'package.json'
-      - 'package-lock.json'
 
 permissions:
   contents: read
@@ -44,6 +35,8 @@ jobs:
       - run: npm ci
       - name: Интерфейс для Tauri
         run: node experiments/tauri-app/build.cjs
+      - name: Языковая модель (Russian-GSD)
+        run: node scripts/prepare-style-model.cjs
       - name: Rust stable
         run: |
           rustup update stable --no-self-update
@@ -76,6 +69,8 @@ jobs:
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp experiments/tauri-app/src-tauri/target/release/kabinet-tauri "$APP/Contents/MacOS/kabinet-tauri"
           cp build/icon.icns "$APP/Contents/Resources/icon.icns"
+          cp -R experiments/tauri-app/src-tauri/resources/style-models "$APP/Contents/Resources/style-models"
+          cp -R experiments/tauri-app/src-tauri/resources/licenses "$APP/Contents/Resources/licenses"
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -27,4 +27,26 @@ fs.writeFileSync(path.join(out, 'index.html'), html);
 fs.copyFileSync(path.join(root, 'renderer', 'style.css'), path.join(out, 'style.css'));
 fs.copyFileSync(path.join(root, 'renderer', 'dist', 'app.js'), path.join(out, 'dist', 'app.js'));
 require('esbuild').buildSync({ entryPoints: [path.join(__dirname, 'bridge.src.js')], bundle: true, outfile: path.join(out, 'bridge.js'), format: 'iife', platform: 'browser', target: 'chrome120', logLevel: 'info' });
+
+// Гарантируем существование resources/style-models и resources/licenses для cargo check / tauri build,
+// даже когда сама 14-МБ модель ещё не скачана (например, в облегчённом rust-check).
+const resRoot = path.join(__dirname, 'src-tauri', 'resources');
+const resModels = path.join(resRoot, 'style-models');
+const resLicenses = path.join(resRoot, 'licenses');
+fs.mkdirSync(resModels, { recursive: true });
+fs.mkdirSync(resLicenses, { recursive: true });
+const licSrc = path.join(root, 'docs', 'licenses');
+if (fs.existsSync(licSrc)) {
+  for (const name of fs.readdirSync(licSrc)) {
+    const p = path.join(licSrc, name);
+    if (fs.statSync(p).isFile()) fs.copyFileSync(p, path.join(resLicenses, name));
+  }
+}
+const hasModel = fs.readdirSync(resModels).some((n) => n.endsWith('.udpipe'));
+const placeholder = path.join(resModels, 'placeholder.txt');
+if (hasModel) {
+  try { fs.rmSync(placeholder, { force: true }); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(placeholder, 'Модель загружается на этапе сборки установщика (scripts/prepare-style-model.cjs).\n');
+}
 console.log('experiments/tauri-app/dist готов.');

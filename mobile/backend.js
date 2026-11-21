@@ -1074,7 +1074,6 @@ function createBackend(host, { session } = {}) {
     styleParse: null,
     styleCancel: null,
     styleStatus: () => Promise.resolve({ supported: false, ready: false }),
-    stylePickModel: () => Promise.resolve(null),
     setProjectDeadline: (date) => call('project:setDeadline', date),
     setDayWords: (date, words) => call('stats:setDay', date, words),
     statsSummary: (today, todayWords) => call('stats:summary', today, todayWords),

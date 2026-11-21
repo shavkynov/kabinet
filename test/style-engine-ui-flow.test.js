@@ -94,10 +94,7 @@ async function mountShadow({ storage, docText, apiStub, initialAn = null }) {
 
   const els = {
     '#styleEngineBox': makeEl(),
-    '#styleEngineSummary': makeEl(),
     '#styleEngineToggle': makeEl(),
-    '#styleEngineStatus': makeEl(),
-    '#btnStylePickModel': makeEl(),
     '#anModeHint': makeEl(),
   };
   const statusCalls = [];
@@ -138,11 +135,10 @@ async function mountShadow({ storage, docText, apiStub, initialAn = null }) {
   return { ctx, els, editor, analysisMod, statusCalls, errorCalls };
 }
 
-test('полный жизненный цикл UI стилевого движка: без модели, подключение, повторный запуск, базовый режим и ошибка замены', async () => {
+test('жизненный цикл встроенного стилевого движка: без ресурса скрыт, при готовой модели работает и переключается в базовый режим', async () => {
   const docText = 'Он вернулся обратно. Он был зол.';
   const storage = makeStorage();
   let modelReady = false;
-  let failPick = false;
   let parseCalls = 0;
 
   // Синтетический разбор первого предложения «Он вернулся обратно.» по контракту;
@@ -165,11 +161,6 @@ test('полный жизненный цикл UI стилевого движк�
 
   const makeApi = () => ({
     styleStatus: async () => ({ supported: true, ready: modelReady, modelVersion: 'russian-gsd-ud-2.5-191206' }),
-    stylePickModel: async () => {
-      if (failPick) throw new Error('Модель стилевого анализа повреждена или не та.');
-      modelReady = true;
-      return { supported: true, ready: true, modelVersion: 'russian-gsd-ud-2.5-191206' };
-    },
     styleCancel: async () => true,
     styleParse: async (_text, taskId) => {
       parseCalls += 1;
@@ -177,53 +168,39 @@ test('полный жизненный цикл UI стилевого движк�
     },
   });
 
-  // 1. Первый запуск без модели: чекбокс выключен, style:parse не вызывается, работает базовый режим.
+  // 1. Когда модель недоступна (напр., на мобильной/веб-сборке): переключатель скрыт, style:parse не вызывается, работает базовый режим.
   const first = await mountShadow({ storage, docText, apiStub: makeApi() });
-  assert.equal(first.els['#styleEngineBox'].hidden, false);
-  assert.equal(first.els['#styleEngineBox'].open, true);
-  assert.match(first.els['#styleEngineSummary'].textContent, /Базовый разбор/);
+  assert.equal(first.els['#styleEngineBox'].hidden, true);
   assert.equal(first.els['#styleEngineToggle'].disabled, true);
   assert.equal(first.els['#styleEngineToggle'].checked, false);
-  assert.match(first.els['#styleEngineStatus'].textContent, /Модель не подключена/);
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(parseCalls, 0);
   assert.equal(first.editor.state.__an.engine, null);
 
-  // 2. Подключение модели через интерфейс: статус обновляется, запускается точный разбор, есть подсветка и title.
-  await first.els['#btnStylePickModel'].trigger('click');
-  assert.equal(first.els['#styleEngineToggle'].disabled, false);
-  assert.equal(first.els['#styleEngineToggle'].checked, true);
-  assert.match(first.els['#styleEngineSummary'].textContent, /Точный разбор/);
-  assert.match(first.els['#styleEngineStatus'].textContent, /Подключена локальная модель/);
-  assert.equal(first.statusCalls.at(-1).msg, 'Языковая модель подключена');
-  await new Promise((r) => setTimeout(r, 60));
-  assert.equal(parseCalls, 1);
-  assert.equal(first.ctx.__styleShadow.status, 'ok');
-  assert.equal(first.ctx.__styleShadow.acceptedRanges, 1);
-  assert.equal(first.editor.state.__an.engine.hybrid, true);
-  assert.equal(first.editor.state.__an.stats.redund, 1);
-  assert.equal(first.editor.state.__an.stats.tell, 1);
-  assert.equal(first.editor.state.__an.ranges.redund.length, 1);
-  assert.equal(first.editor.state.__an.ranges.tell.length, 1);
-  const redDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-redund');
-  assert.ok(redDeco && redDeco.attrs.title.length > 0, 'подсветка должна содержать объяснение в title');
-  assert.match(redDeco.attrs.title, /Совет:/);
-  const tellDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-tell');
-  assert.ok(tellDeco && tellDeco.attrs.title.length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
-  assert.equal(first.analysisMod.stepIndex(first.editor.state.__an.ranges.redund, 0, 1), 0);
-
-  // 3. Повторный запуск приложения: при том же storage модель остаётся подключённой и запускается автоматически.
+  // 2. Встроенная модель готова сразу при запуске: переключатель виден и включён, есть подсветка и title.
+  modelReady = true;
   const second = await mountShadow({ storage, docText, apiStub: makeApi() });
-  assert.equal(second.els['#styleEngineBox'].open, false);
-  assert.match(second.els['#styleEngineSummary'].textContent, /Точный разбор/);
+  assert.equal(second.els['#styleEngineBox'].hidden, false);
   assert.equal(second.els['#styleEngineToggle'].disabled, false);
   assert.equal(second.els['#styleEngineToggle'].checked, true);
+  assert.match(second.els['#anModeHint'].textContent, /точный грамматический разбор/);
   await new Promise((r) => setTimeout(r, 60));
-  assert.equal(parseCalls, 2);
+  assert.equal(parseCalls, 1);
   assert.equal(second.ctx.__styleShadow.status, 'ok');
+  assert.equal(second.ctx.__styleShadow.acceptedRanges, 1);
+  assert.equal(second.editor.state.__an.engine.hybrid, true);
   assert.equal(second.editor.state.__an.stats.redund, 1);
+  assert.equal(second.editor.state.__an.stats.tell, 1);
+  assert.equal(second.editor.state.__an.ranges.redund.length, 1);
+  assert.equal(second.editor.state.__an.ranges.tell.length, 1);
+  const redDeco = second.editor.state.__an.set.find((d) => d.attrs.class === 'an an-redund');
+  assert.ok(redDeco && redDeco.attrs.title.length > 0, 'подсветка должна содержать объяснение в title');
+  assert.match(redDeco.attrs.title, /Совет:/);
+  const tellDeco = second.editor.state.__an.set.find((d) => d.attrs.class === 'an an-tell');
+  assert.ok(tellDeco && tellDeco.attrs.title.length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
+  assert.equal(second.analysisMod.stepIndex(second.editor.state.__an.ranges.redund, 0, 1), 0);
 
-  // 4. Переключение в базовый режим (даже если ранее стоял флаг тени kabinet.styleEngineShadow='1').
+  // 3. Переключение в базовый режим (даже если ранее стоял флаг тени kabinet.styleEngineShadow='1').
   storage.setItem('kabinet.styleEngineShadow', '1');
   second.els['#styleEngineToggle'].checked = false;
   await second.els['#styleEngineToggle'].trigger('change');
@@ -231,16 +208,9 @@ test('полный жизненный цикл UI стилевого движк�
   assert.equal(storage.getItem('kabinet.styleEngineMode'), 'basic');
   assert.equal(storage.getItem('kabinet.styleEngineShadow'), null);
   assert.equal(second.editor.state.__an.engine.active, false);
+  assert.match(second.els['#anModeHint'].textContent, /приблизительный/);
   await new Promise((r) => setTimeout(r, 40));
-  assert.equal(parseCalls, 2, 'в базовом режиме style:parse не вызывается');
-
-  // 5. Ошибка при попытке заменить модель не сбрасывает статус подключённой модели и показывает ошибку.
-  failPick = true;
-  await second.els['#btnStylePickModel'].trigger('click');
-  assert.equal(second.errorCalls.length, 1);
-  assert.match(second.errorCalls[0], /повреждена/);
-  assert.equal(second.els['#styleEngineToggle'].disabled, false);
-  assert.match(second.els['#styleEngineStatus'].textContent, /Подключена локальная модель/);
+  assert.equal(parseCalls, 1, 'в базовом режиме style:parse не вызывается');
 });
 
 test('интерфейс анализа и структурные советы: #anPop, сводка главы, быстрые переключатели и «Совет:» во всех 8 категориях', () => {
@@ -249,9 +219,10 @@ test('интерфейс анализа и структурные советы: 
   assert.equal(adviceMatches.length, 16, 'все 16 шаблонов правил в structural.js должны содержать практический «Совет:»');
 
   const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
-  for (const needle of ['id="anPop"', 'id="anSummary"', 'id="anModeHint"', 'id="btnStyleAll"', 'id="btnStyleNone"', 'id="btnAnNone"', '<details id="styleEngineBox"']) {
+  for (const needle of ['id="anPop"', 'id="anSummary"', 'id="anModeHint"', 'id="btnStyleAll"', 'id="btnStyleNone"', 'id="btnAnNone"', 'id="styleEngineBox"']) {
     assert.ok(html.includes(needle), `в index.html должен присутствовать ${needle}`);
   }
+  assert.ok(!html.includes('btnStylePickModel'), 'кнопка ручного подключения файла модели должна быть удалена');
 });
 
 test('раздел «Проверка»: при готовой модели подключает пассив/повторы/времена и кэширует parse без лишних вызовов', async () => {
@@ -289,7 +260,7 @@ test('раздел «Проверка»: при готовой модели по
   assert.equal(parseCalls, 1, 'style:parse запускается даже при выключенном «Стиле текста»');
   assert.ok(mounted.editor.state.__an.engine.blocks instanceof Map);
   assert.equal(mounted.editor.state.__an.stats.passive, 1);
-  assert.match(mounted.els['#anModeHint'].textContent, /Russian-GSD/);
+  assert.match(mounted.els['#anModeHint'].textContent, /точный грамматический разбор/);
 
   // Переключение галочек на неизменном тексте не вызывает style:parse повторно (берётся кэш).
   mounted.ctx.settings.an = { passive: true, verb: true, noun: true };
