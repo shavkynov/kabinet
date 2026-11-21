@@ -6,7 +6,7 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -240,12 +240,19 @@ fn build_contract(source: &str, raw_words: &[RawToken], parser: &ParserInfo) -> 
     Ok(Contract { schema_version: 1, parser: parser.clone(), sentences })
 }
 
+const MAX_CANCELLED_IDS: usize = 256;
+
+struct TaskState {
+    current: Option<(u64, Arc<AtomicBool>)>,
+    cancelled: VecDeque<u64>,
+}
+
 pub struct StyleParser {
     model_path: PathBuf,
     model_version: String,
     model_sha256: String,
     loaded: Mutex<Option<Arc<Mutex<Model>>>>,
-    current: Mutex<Option<(u64, Arc<AtomicBool>)>>,
+    tasks: Mutex<TaskState>,
 }
 
 impl StyleParser {
@@ -255,7 +262,7 @@ impl StyleParser {
             model_version: model_version.unwrap_or_else(|| DEFAULT_MODEL_VERSION.to_string()),
             model_sha256: model_sha256.unwrap_or_else(|| DEFAULT_MODEL_SHA256.to_string()),
             loaded: Mutex::new(None),
-            current: Mutex::new(None),
+            tasks: Mutex::new(TaskState { current: None, cancelled: VecDeque::new() }),
         }
     }
 
@@ -275,9 +282,17 @@ impl StyleParser {
     }
 
     pub fn cancel(&self, task_id: u64) {
-        if let Ok(current) = self.current.lock() {
-            if let Some((id, flag)) = current.as_ref() {
-                if *id == task_id { flag.store(true, Ordering::SeqCst); }
+        if let Ok(mut tasks) = self.tasks.lock() {
+            if let Some((id, flag)) = tasks.current.as_ref() {
+                if *id == task_id {
+                    flag.store(true, Ordering::SeqCst);
+                    return;
+                }
+            }
+            // Отмена могла прийти до того, как поток spawn_blocking зарегистрировал задачу.
+            if !tasks.cancelled.contains(&task_id) {
+                if tasks.cancelled.len() >= MAX_CANCELLED_IDS { tasks.cancelled.pop_front(); }
+                tasks.cancelled.push_back(task_id);
             }
         }
     }
@@ -285,19 +300,29 @@ impl StyleParser {
     pub fn parse(&self, task_id: u64, text: &str) -> Result<Value, String> {
         let flag = Arc::new(AtomicBool::new(false));
         {
-            let mut current = self.current.lock().map_err(|_| "Внутренний замок задач недоступен.".to_string())?;
-            if let Some((_, old)) = current.replace((task_id, flag.clone())) { old.store(true, Ordering::SeqCst); }
+            let mut tasks = self.tasks.lock().map_err(|_| "Внутренний замок задач недоступен.".to_string())?;
+            if let Some(pos) = tasks.cancelled.iter().position(|&id| id == task_id) {
+                tasks.cancelled.remove(pos);
+                return Ok(json!({ "taskId": task_id, "cancelled": true }));
+            }
+            if let Some((_, old)) = tasks.current.replace((task_id, flag.clone())) { old.store(true, Ordering::SeqCst); }
         }
         let result = self.parse_inner(task_id, text, &flag);
-        if let Ok(mut current) = self.current.lock() {
-            if current.as_ref().map(|(id, _)| *id) == Some(task_id) { *current = None; }
+        if let Ok(mut tasks) = self.tasks.lock() {
+            if tasks.current.as_ref().map(|(id, _)| *id) == Some(task_id) { tasks.current = None; }
         }
         result
     }
 
     fn parse_inner(&self, task_id: u64, text: &str, cancel: &Arc<AtomicBool>) -> Result<Value, String> {
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(json!({ "taskId": task_id, "cancelled": true }));
+        }
         let model = self.model()?;
         let model = model.lock().map_err(|_| "Модель стилевого анализа занята.".to_string())?;
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(json!({ "taskId": task_id, "cancelled": true }));
+        }
         let started = std::time::Instant::now();
         let parser = ParserInfo {
             name: "udpipe-rs".to_string(),
@@ -585,6 +610,44 @@ mod tests {
         let p = StyleParser::new(PathBuf::from("/tmp/kabinet-no-model-x/m.udpipe"), None, None);
         let err = p.parse(1, "Он пришёл.").unwrap_err();
         assert!(err.contains("не найдена") && err.contains(MODEL_FILE_NAME) && err.contains("KABINET_STYLE_MODEL"), "{}", err);
+    }
+
+    #[test]
+    fn cancel_before_parse_registration_returns_cancelled() {
+        let p = StyleParser::new(PathBuf::from("/tmp/kabinet-no-model-cancel.udpipe"), None, None);
+        p.cancel(42);
+        let res = p.parse(42, "Он пришёл.").unwrap();
+        assert_eq!(res["taskId"], json!(42));
+        assert_eq!(res["cancelled"], json!(true));
+        // Повторный запуск другой задачи не должен быть отменён.
+        let err = p.parse(43, "Он пришёл.").unwrap_err();
+        assert!(err.contains("не найдена"), "{}", err);
+    }
+
+    #[test]
+    #[ignore = "нужна локальная GSD-модель: KABINET_STYLE_MODEL=... cargo test -- --ignored"]
+    fn real_model_handles_crlf_bom_and_paragraph_boundaries() {
+        let path = std::env::var("KABINET_STYLE_MODEL").expect("KABINET_STYLE_MODEL");
+        let parser = StyleParser::new(PathBuf::from(path), None, std::env::var("KABINET_STYLE_MODEL_SHA256").ok());
+        let cases = [
+            "\u{FEFF}Он пришёл домой. Потом ушёл.",
+            "Он \u{FEFF}пришёл домой.",
+            "Первый абзац.\r\n\r\nВторой\u{00a0}абзац\u{200b} с 😀.",
+            "Строка один.\r\nСтрока два.",
+            "Первый.\u{2028}Второй.\u{2029}Третий.",
+        ];
+        for text in cases {
+            let value = parser.parse(1, text).unwrap_or_else(|e| panic!("«{}»: {}", text.escape_unicode(), e));
+            assert_eq!(value["cancelled"], json!(false));
+            for sentence in value["parse"]["sentences"].as_array().unwrap() {
+                let (ss, se) = (sentence["start"].as_u64().unwrap() as usize, sentence["end"].as_u64().unwrap() as usize);
+                assert_eq!(utf16_slice(text, ss, se), sentence["text"].as_str().unwrap());
+                for token in sentence["tokens"].as_array().unwrap() {
+                    let (s, e) = (token["start"].as_u64().unwrap() as usize, token["end"].as_u64().unwrap() as usize);
+                    assert_eq!(utf16_slice(text, s, e), token["text"].as_str().unwrap());
+                }
+            }
+        }
     }
 
     #[test]
