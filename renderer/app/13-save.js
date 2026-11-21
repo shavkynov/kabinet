@@ -35,7 +35,8 @@ function markDirty() {
   dirtyKind = currentKind;
   refreshSaveState();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, SAVE_DELAY_MS);
+  const delay = typeof editor !== 'undefined' && editor && editor.state && editor.state.doc && editor.state.doc.content.size > 100000 ? 2500 : SAVE_DELAY_MS;
+  saveTimer = setTimeout(flush, delay);
 }
 
 // Возвращает false, если текст открытого документа записать не удалось: переходить к другому документу или закрывать проект нельзя.

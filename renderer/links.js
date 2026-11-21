@@ -14,6 +14,8 @@ import { nameRegex, isCapital } from '../src/namematch.js';
 
 const linkKey = new PluginKey('nameLinks');
 let matcher = null; // { re, map: имя в нижнем регистре -> { kind, id, cap } }
+let matcherVer = 0;
+const linkNodeCache = new WeakMap();
 
 function buildMatcher(cards) {
   const map = new Map();
@@ -39,25 +41,37 @@ function buildMatcher(cards) {
   return re ? { re, map } : null;
 }
 
+function nodeLinks(node) {
+  const cached = linkNodeCache.get(node);
+  if (cached && cached.ver === matcherVer) return cached.hits;
+  const text = node.textBetween(0, node.content.size, undefined, '￼').replace(/\u00a0/g, ' '); // неразрывный пробел как обычный
+  const hits = [];
+  matcher.re.lastIndex = 0;
+  let m;
+  while ((m = matcher.re.exec(text)) !== null) {
+    if (m[0].length === 0) { matcher.re.lastIndex += 1; continue; }
+    const hit = matcher.map.get(m[0].toLowerCase());
+    if (hit && !(hit.cap && !isCapital(m[0]))) {
+      hits.push({ off: m.index, len: m[0].length, kind: hit.kind, id: hit.id });
+    }
+  }
+  linkNodeCache.set(node, { ver: matcherVer, hits });
+  return hits;
+}
+
 function decorate(doc) {
   if (!matcher) return DecorationSet.empty;
   const decos = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
-    const text = node.textBetween(0, node.content.size, undefined, '￼').replace(/\u00a0/g, ' '); // неразрывный пробел как обычный
-    matcher.re.lastIndex = 0;
-    let m;
-    while ((m = matcher.re.exec(text)) !== null) {
-      if (m[0].length === 0) { matcher.re.lastIndex += 1; continue; }
-      const hit = matcher.map.get(m[0].toLowerCase());
-      if (hit && !(hit.cap && !isCapital(m[0]))) {
-        const from = pos + 1 + m.index;
-        decos.push(Decoration.inline(from, from + m[0].length, {
-          class: `name-link kind-${hit.kind}`,
-          'data-card': hit.id,
-          'data-kind': hit.kind,
-        }));
-      }
+    const base = pos + 1;
+    for (const h of nodeLinks(node)) {
+      const from = base + h.off;
+      decos.push(Decoration.inline(from, from + h.len, {
+        class: `name-link kind-${h.kind}`,
+        'data-card': h.id,
+        'data-kind': h.kind,
+      }));
     }
     return false;
   });
@@ -89,6 +103,7 @@ export const NameLinks = Extension.create({
 /** Обновить список карточек (пустой список выключает подсветку). */
 export function setNameLinks(editor, cards) {
   matcher = buildMatcher(cards);
+  matcherVer += 1;
   editor.view.dispatch(editor.state.tr.setMeta(linkKey, true));
 }
 

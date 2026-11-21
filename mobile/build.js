@@ -32,6 +32,8 @@ fs.rmSync(www, { recursive: true, force: true });
 fs.mkdirSync(path.join(www, 'dist'), { recursive: true });
 
 // 2. загрузчик с «главным процессом» внутри
+const dev = process.env.KABINET_DEV === '1';
+const sourcemap = process.env.KABINET_SOURCEMAP === '1';
 loadEsbuild().buildSync({
   entryPoints: [path.join(__dirname, 'boot.js')],
   bundle: true,
@@ -39,6 +41,8 @@ loadEsbuild().buildSync({
   format: 'iife',
   platform: 'browser',
   target: 'chrome100',
+  minify: !dev,
+  sourcemap,
   external: ['node:crypto'], // запасной путь только для проверок в Node; в Android есть globalThis.crypto
   logLevel: 'info',
   nodePaths: [path.join(__dirname, 'node_modules'), path.join(root, 'node_modules')],

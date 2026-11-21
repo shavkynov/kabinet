@@ -11,23 +11,34 @@ const skipKey = new PluginKey('spellSkip');
 const WORD = /[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu;
 let dict = new Set();    // словарь проекта (нижний регистр)
 let ignored = new Set(); // «Пропустить» до закрытия приложения
+let dictVer = 0;
+const skipNodeCache = new WeakMap();
 
 const norm = (w) => String(w).trim().replace(/-+$/, '').toLowerCase();
+
+function nodeSkips(node) {
+  const cached = skipNodeCache.get(node);
+  if (cached && cached.ver === dictVer) return cached.hits;
+  const text = node.textBetween(0, node.content.size, undefined, '￼');
+  const hits = [];
+  WORD.lastIndex = 0;
+  let m;
+  while ((m = WORD.exec(text)) !== null) {
+    const key = norm(m[0]);
+    if (dict.has(key) || ignored.has(key)) hits.push({ off: m.index, len: m[0].length });
+  }
+  skipNodeCache.set(node, { ver: dictVer, hits });
+  return hits;
+}
 
 function decorate(doc) {
   if (!dict.size && !ignored.size) return DecorationSet.empty;
   const decos = [];
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
-    const text = node.textBetween(0, node.content.size, undefined, '￼');
-    WORD.lastIndex = 0;
-    let m;
-    while ((m = WORD.exec(text)) !== null) {
-      const key = norm(m[0]);
-      if (dict.has(key) || ignored.has(key)) {
-        const from = pos + 1 + m.index;
-        decos.push(Decoration.inline(from, from + m[0].length, { spellcheck: 'false' }));
-      }
+    const base = pos + 1;
+    for (const h of nodeSkips(node)) {
+      decos.push(Decoration.inline(base + h.off, base + h.off + h.len, { spellcheck: 'false' }));
     }
     return false;
   });
@@ -61,13 +72,14 @@ function redraw(editor) {
 /** Заменить список слов словаря и перерисовать. */
 export function setSpellSkipWords(editor, words) {
   dict = new Set((words || []).map(norm).filter(Boolean));
+  dictVer += 1;
   redraw(editor);
 }
 
 /** «Пропустить»: слово не подчёркивается до перезапуска. */
 export function ignoreSpellWord(editor, word) {
   const k = norm(word);
-  if (k) ignored.add(k);
+  if (k) { ignored.add(k); dictVer += 1; }
   redraw(editor);
 }
 

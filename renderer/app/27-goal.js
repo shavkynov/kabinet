@@ -8,14 +8,37 @@ let goalReached = false;   // цель достигнута в текущем с
 let countTimer = null;
 const chimedGoals = new Set(); // «глава:цель», на которые уже звучал сигнал в этом сеансе
 
+const statsNodeCache = new WeakMap();
+
+function nodeStats(node) {
+  let cached = statsNodeCache.get(node);
+  if (cached) return cached;
+  const text = node.textBetween(0, node.content.size, '\n', '');
+  WORD_RE.lastIndex = 0;
+  let words = 0;
+  while (WORD_RE.exec(text) !== null) words += 1;
+  const flat = text.includes('\n') ? text.replace(/\n/g, '') : text;
+  const charsNoSpace = text.replace(/\s/g, '').length;
+  cached = { words, chars: flat.length, charsNoSpace };
+  statsNodeCache.set(node, cached);
+  return cached;
+}
+
 function computeStats() {
-  const text = editor.getText({ blockSeparator: '\n' });
-  const flat = text.replace(/\n/g, '');
-  return {
-    words: (text.match(WORD_RE) || []).length,
-    chars: flat.length,
-    charsNoSpace: flat.replace(/\s/g, '').length,
-  };
+  const doc = typeof editor !== 'undefined' && editor && editor.state && editor.state.doc;
+  if (!doc) return { words: 0, chars: 0, charsNoSpace: 0 };
+  let words = 0;
+  let chars = 0;
+  let charsNoSpace = 0;
+  doc.descendants((node) => {
+    if (!node.isTextblock) return true;
+    const s = nodeStats(node);
+    words += s.words;
+    chars += s.chars;
+    charsNoSpace += s.charsNoSpace;
+    return false;
+  });
+  return { words, chars, charsNoSpace };
 }
 
 // Что считать целью: слова или знаки с пробелами (рассказы: по умолчанию знаки, можно переключить).
@@ -35,7 +58,8 @@ function effectiveGoal() {
 
 function scheduleCount() {
   clearTimeout(countTimer);
-  countTimer = setTimeout(() => updateCounts(true), 150);
+  const huge = typeof editor !== 'undefined' && editor && editor.state && editor.state.doc && editor.state.doc.content.size > 80000;
+  countTimer = setTimeout(() => updateCounts(true), huge ? 350 : 150);
 }
 
 // fromUser = true: текст изменил пользователь, и пересечение цели даёт сигнал.

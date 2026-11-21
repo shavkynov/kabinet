@@ -35,9 +35,19 @@ export const LangIssues = Extension.create({
           }
           if (!tr.docChanged) return set;
           let next = set.map(tr.mapping, tr.doc);
-          // слово изменили: старое замечание к нему больше не относится
-          const stale = next.find().filter((d) => flat(tr.doc.textBetween(d.from, d.to, '', '￼')) !== d.spec.text);
-          if (stale.length) next = next.remove(stale);
+          // Сверяемся только с замечаниями в затронутых правкой диапазонах: для глав на 60 000 слов это O(log N) вместо полного обхода.
+          const stale = new Set();
+          for (let i = 0; i < tr.mapping.maps.length; i += 1) {
+            const rest = tr.mapping.slice(i + 1);
+            tr.mapping.maps[i].forEach((_os, _oe, ns, ne) => {
+              const s = rest.map(ns, -1);
+              const e = Math.max(s, rest.map(ne, 1));
+              for (const d of next.find(s, e)) {
+                if (flat(tr.doc.textBetween(d.from, d.to, '', '￼')) !== d.spec.text) stale.add(d);
+              }
+            });
+          }
+          if (stale.size) next = next.remove([...stale]);
           return next;
         },
       },
@@ -78,9 +88,11 @@ const KIND_LABEL = {
  */
 export function initTextCheck(ctx) {
   const { api, $ } = ctx;
+  const CHECK_PAGE_SIZE = 150;
   let cfg = { consent: false, server: '', lang: 'ru', disabledRules: [], hiddenKinds: [], words: [] };
   let running = false;
   let skipped = 0;
+  let shownLimit = CHECK_PAGE_SIZE;
   let renderTimer = null;
 
   const editor = () => ctx.getEditor();
@@ -109,7 +121,7 @@ export function initTextCheck(ctx) {
     const summary = Object.entries(counts).map(([k, n]) => `${t(KIND_LABEL[k])}: ${n}`).join(' · ');
     setState(`${t('Найдено замечаний: {0}', items.length)}. ${summary}${skipped ? `. ${t('Пропущено из-за правок во время проверки: {0}', skipped)}` : ''}`);
 
-    for (const d of items.slice(0, 200)) {
+    for (const d of items.slice(0, shownLimit)) {
       const s = d.spec;
       const li = document.createElement('div');
       li.className = `chk-item lt-${s.kind}`;
@@ -164,6 +176,18 @@ export function initTextCheck(ctx) {
       li.append(head, ctxLine, acts);
       list.append(li);
     }
+    if (items.length > shownLimit) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'secondary small wide-btn';
+      more.style.marginTop = '8px';
+      more.textContent = t('Показать ещё ({0})', items.length - shownLimit);
+      more.addEventListener('click', () => {
+        shownLimit += CHECK_PAGE_SIZE;
+        render();
+      });
+      list.append(more);
+    }
   }
 
   function scheduleRender() {
@@ -180,6 +204,7 @@ export function initTextCheck(ctx) {
   function clear() {
     dispatch({ clear: true });
     skipped = 0;
+    shownLimit = CHECK_PAGE_SIZE;
     setState('');
     render();
   }
@@ -226,6 +251,7 @@ export function initTextCheck(ctx) {
     if (!snap.some((b) => b.text.trim())) { setState(t('В тексте пока нечего проверять.')); return; }
     running = true;
     skipped = 0;
+    shownLimit = CHECK_PAGE_SIZE;
     $('#btnRunCheck').disabled = true;
     $('#btnCancelCheck').hidden = false;
     setState(t('Проверяю…'));

@@ -84,7 +84,21 @@ function sameDocument(snapshot, currentDoc) {
 }
 
 function segmentFor(snapshot, start, end) {
-  for (const segment of snapshot.segments) {
+  const segs = snapshot.segments;
+  let lo = 0;
+  let hi = segs.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (segs[mid].parserStart <= start) {
+      idx = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (idx >= 0) {
+    const segment = segs[idx];
     if (start >= segment.parserStart && start < segment.parserEnd) {
       if (end <= segment.parserEnd) return { segment };
       return { error: 'crosses-segment' };

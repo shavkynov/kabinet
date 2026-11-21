@@ -355,9 +355,9 @@ export const TextAnalysis = Extension.create({
           if (engine !== undefined) return build(state.doc, opts.getConfig(), engine);
           if (tr.getMeta(analysisKey)) return build(state.doc, opts.getConfig(), old.engine || null);
           if (!tr.docChanged) return old;
-          // большая глава: пока идёт ввод, только старую разметку можно сдвигать.
-          // Результат нового движка относится к прежнему снимку и не переносится.
-          if (!old.engine && old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), stale: true };
+          // большая глава: пока идёт ввод, сдвигаем прежнюю разметку, не перестраивая всю главу на каждую клавишу.
+          // Результат движка относился к прошлому снимку, поэтому сбрасываем его до отложенного пересчёта.
+          if (old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), engine: null, stale: true };
           return build(state.doc, opts.getConfig(), null);
         },
       },

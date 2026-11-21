@@ -26,7 +26,9 @@ html = replaceOnce(html, '<script src="dist/app.js"></script>', '<script src="br
 fs.writeFileSync(path.join(out, 'index.html'), html);
 fs.copyFileSync(path.join(root, 'renderer', 'style.css'), path.join(out, 'style.css'));
 fs.copyFileSync(path.join(root, 'renderer', 'dist', 'app.js'), path.join(out, 'dist', 'app.js'));
-require('esbuild').buildSync({ entryPoints: [path.join(__dirname, 'bridge.src.js')], bundle: true, outfile: path.join(out, 'bridge.js'), format: 'iife', platform: 'browser', target: 'chrome120', logLevel: 'info' });
+const dev = process.env.KABINET_DEV === '1';
+const sourcemap = process.env.KABINET_SOURCEMAP === '1';
+require('esbuild').buildSync({ entryPoints: [path.join(__dirname, 'bridge.src.js')], bundle: true, outfile: path.join(out, 'bridge.js'), format: 'iife', platform: 'browser', target: 'chrome120', minify: !dev, sourcemap, logLevel: 'info' });
 
 // Гарантируем существование resources/style-models и resources/licenses для cargo check / tauri build,
 // даже когда сама 14-МБ модель ещё не скачана (например, в облегчённом rust-check).
