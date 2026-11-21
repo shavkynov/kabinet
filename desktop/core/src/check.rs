@@ -2,6 +2,7 @@
 //! и обработчиков check:* из main.js. Ничего не правит сама: возвращает замечания, автор принимает или пропускает каждое.
 //! Позиции считаются в единицах UTF-16, как в JavaScript и в ответе сервера.
 use crate::dict;
+use crate::offline_spell::OfflineSpell;
 use crate::store::{self, write_atomic, R};
 use crate::http::{Http, Req};
 use serde_json::{json, Map, Value};
@@ -195,12 +196,34 @@ fn strs(v: &Value) -> Vec<String> {
 pub struct CheckApi {
     data_dir: PathBuf,
     make_http: Arc<dyn Fn() -> Box<dyn Http> + Send + Sync>,
+    offline: Option<Arc<OfflineSpell>>,
     running: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl CheckApi {
     pub fn new(data_dir: &Path, make_http: Arc<dyn Fn() -> Box<dyn Http> + Send + Sync>) -> Self {
-        CheckApi { data_dir: data_dir.to_path_buf(), make_http, running: Mutex::new(None) }
+        CheckApi { data_dir: data_dir.to_path_buf(), make_http, offline: None, running: Mutex::new(None) }
+    }
+
+    pub fn with_offline(data_dir: &Path, make_http: Arc<dyn Fn() -> Box<dyn Http> + Send + Sync>, offline: Arc<OfflineSpell>) -> Self {
+        CheckApi { data_dir: data_dir.to_path_buf(), make_http, offline: Some(offline), running: Mutex::new(None) }
+    }
+
+    fn offline_available(&self) -> bool {
+        self.offline.as_ref().map(|o| o.has_any_dict()).unwrap_or(false)
+    }
+
+    fn with_runtime_flags(&self, mut cfg: Map<String, Value>) -> Map<String, Value> {
+        let avail = self.offline_available();
+        let has_custom_server = !cfg.get("server").and_then(|v| v.as_str()).unwrap_or("").trim().is_empty();
+        let mode = match cfg.get("mode").and_then(|v| v.as_str()) {
+            Some("online") => "online",
+            Some("offline") if avail => "offline",
+            _ => if avail && !has_custom_server { "offline" } else { "online" },
+        };
+        cfg.insert("mode".into(), json!(mode));
+        cfg.insert("offlineAvailable".into(), json!(avail));
+        cfg
     }
 
     fn file(&self) -> PathBuf { self.data_dir.join("check.json") }
@@ -215,7 +238,9 @@ impl CheckApi {
 
     fn save(&self, cfg: &Map<String, Value>) -> R<()> {
         let _ = std::fs::create_dir_all(&self.data_dir);
-        write_atomic(&self.file(), &serde_json::to_string_pretty(&Value::Object(cfg.clone())).unwrap())
+        let mut clean = cfg.clone();
+        clean.remove("offlineAvailable");
+        write_atomic(&self.file(), &serde_json::to_string_pretty(&Value::Object(clean)).unwrap())
     }
 
     fn shared_words(cfg: &Map<String, Value>) -> Vec<String> { strs(cfg.get("words").unwrap_or(&Value::Null)) }
@@ -230,12 +255,13 @@ impl CheckApi {
 
     pub fn call(&self, op: &str, a: &[Value], project: Option<&Path>, progress: &dyn Fn(usize, usize)) -> R<Value> {
         match op {
-            "getConfig" => Ok(Value::Object(self.load())),
+            "getConfig" => Ok(Value::Object(self.with_runtime_flags(self.load()))),
             "setConfig" => {
                 let mut cur = self.load();
                 let p = a.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
                 if let Some(v) = p.get("consent") { cur.insert("consent".into(), json!(v.as_bool().unwrap_or(false))); }
                 if let Some(v) = p.get("lang") { cur.insert("lang".into(), json!(match v.as_str() { Some("en") => "en", Some("auto") => "auto", _ => "ru" })); }
+                if let Some(v) = p.get("mode") { cur.insert("mode".into(), json!(if v.as_str() == Some("online") { "online" } else { "offline" })); }
                 if let Some(v) = p.get("server") {
                     let t = v.as_str().unwrap_or("").trim().to_string();
                     if !t.is_empty() {
@@ -248,12 +274,28 @@ impl CheckApi {
                 if let Some(v) = p.get("hiddenKinds") { cur.insert("hiddenKinds".into(), json!(clean_kinds(v))); }
                 if let Some(v) = p.get("words") { cur.insert("words".into(), json!(strs(v))); }
                 self.save(&cur)?;
-                Ok(Value::Object(cur))
+                Ok(Value::Object(self.with_runtime_flags(cur)))
             }
             "run" => {
-                let cfg = self.load();
+                let cfg = self.with_runtime_flags(self.load());
                 let paragraphs: Vec<String> = a.first().and_then(|v| v.as_array()).ok_or("Нет текста для проверки.")?
                     .iter().map(|x| x.as_str().map(String::from).unwrap_or_else(|| x.to_string())).collect();
+                let mode = cfg["mode"].as_str().unwrap_or("online");
+                if mode == "offline" {
+                    if let Some(off) = &self.offline {
+                        let cancel = Arc::new(AtomicBool::new(false));
+                        if let Some(old) = self.running.lock().unwrap().replace(cancel.clone()) { old.store(true, Ordering::SeqCst); }
+                        let mut words = dict::effective(Self::project_words(project).as_deref(), &Self::shared_words(&cfg));
+                        words.extend(strs(a.get(1).unwrap_or(&Value::Null)));
+                        let lang = cfg["lang"].as_str().unwrap_or("ru").to_string();
+                        let res = off.check_paragraphs(&paragraphs, &lang, &words, &cancel, progress);
+                        let mut guard = self.running.lock().unwrap();
+                        if guard.as_ref().map(|c| Arc::ptr_eq(c, &cancel)).unwrap_or(false) { *guard = None; }
+                        let mut all = filter_issues(res?, &strs(&cfg["disabledRules"]), &words, &clean_kinds(&cfg["hiddenKinds"]));
+                        for (n, x) in all.iter_mut().enumerate() { x["id"] = json!(n + 1); }
+                        return Ok(Value::Array(all));
+                    }
+                }
                 let server = cfg["server"].as_str().unwrap_or("").to_string();
                 if cfg["consent"] != json!(true) && !is_local_server(&server) { return Err("Сначала нужно разрешить отправку текста службе проверки.".into()); }
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -383,5 +425,40 @@ mod tests {
         assert_eq!(api.call("getConfig", &[], None, &none).unwrap()["words"], json!(["Дракон", "Меч"]));
         assert_eq!(api.call("ignoreRule", &[json!("RULE_1")], None, &none).unwrap(), json!(["RULE_1"]));
         assert_eq!(api.call("addWord", &[json!("")], None, &none).unwrap(), json!(false));
+    }
+
+    #[test]
+    fn check_api_defaults_to_offline_without_consent_and_switches_to_online() {
+        let data = tmpdir("chk-off-data");
+        let dicts = tmpdir("chk-off-dicts");
+        std::fs::write(dicts.join("ru.aff"), "SET UTF-8\n").unwrap();
+        std::fs::write(dicts.join("ru.dic"), "1\nпривет\n").unwrap();
+
+        let off = Arc::new(OfflineSpell::new(dicts));
+        let api = CheckApi::with_offline(
+            &data,
+            Arc::new(|| Box::new(Fake { calls: AtomicUsize::new(0), bodies: Mutex::new(vec![]), fail_first_429: false }) as Box<dyn Http>),
+            off,
+        );
+        let none = |_: usize, _: usize| {};
+
+        let cfg = api.call("getConfig", &[], None, &none).unwrap();
+        assert_eq!(cfg["offlineAvailable"], json!(true));
+        assert_eq!(cfg["mode"], json!("offline"));
+
+        // Офлайн-проверка работает без согласия на отправку во внешнюю службу
+        let res = api.call("run", &[json!(["Привет првиет"])], None, &none).unwrap();
+        let arr = res.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["text"], json!("првиет"));
+        assert_eq!(arr[0]["ruleId"], json!("OFFLINE_SPELL"));
+
+        // Явное переключение в онлайн-режим требует согласия, как раньше
+        let cfg2 = api.call("setConfig", &[json!({ "mode": "online" })], None, &none).unwrap();
+        assert_eq!(cfg2["mode"], json!("online"));
+        assert_eq!(
+            api.call("run", &[json!(["текст"])], None, &none).unwrap_err(),
+            "Сначала нужно разрешить отправку текста службе проверки."
+        );
     }
 }

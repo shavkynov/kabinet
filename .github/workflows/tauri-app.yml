@@ -35,8 +35,8 @@ jobs:
       - run: npm ci
       - name: Интерфейс для Tauri
         run: node desktop/build.cjs
-      - name: Языковая модель (Russian-GSD)
-        run: node scripts/prepare-style-model.cjs
+      - name: Языковая модель и словари (Russian-GSD, RU/EN)
+        run: node scripts/prepare-resources.cjs
       - name: Rust stable
         run: |
           rustup update stable --no-self-update
@@ -70,6 +70,7 @@ jobs:
           cp desktop/src-tauri/target/release/kabinet-tauri "$APP/Contents/MacOS/kabinet-tauri"
           cp build/icon.icns "$APP/Contents/Resources/icon.icns"
           cp -R desktop/src-tauri/resources/style-models "$APP/Contents/Resources/style-models"
+          cp -R desktop/src-tauri/resources/dictionaries "$APP/Contents/Resources/dictionaries"
           cp -R desktop/src-tauri/resources/licenses "$APP/Contents/Resources/licenses"
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>

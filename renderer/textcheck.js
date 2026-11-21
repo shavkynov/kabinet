@@ -232,6 +232,7 @@ export function initTextCheck(ctx) {
   }
 
   async function ask() {
+    if (cfg.offlineAvailable && cfg.mode !== 'online') return true;
     if (cfg.consent) return true;
     const local = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:|\/|$)/i.test(cfg.server.trim());
     if (local) return true;
@@ -328,11 +329,23 @@ export function initTextCheck(ctx) {
     else if (e.key !== 'Escape') e.stopPropagation();
   });
 
+  function syncModeUi() {
+    const avail = !!cfg.offlineAvailable;
+    const modeRow = $('#checkModeRow');
+    const modeSel = $('#setCheckMode');
+    const serverRow = $('#checkServerRow');
+    if (modeRow) modeRow.hidden = !avail;
+    const mode = avail && cfg.mode !== 'online' ? 'offline' : 'online';
+    if (modeSel) modeSel.value = mode;
+    if (serverRow) serverRow.hidden = avail && mode === 'offline';
+  }
+
   async function open() {
     loadDict();
     try { cfg = await api.getCheckConfig(); } catch { /* значения по умолчанию */ }
     $('#setCheckLang').value = cfg.lang;
     $('#setCheckServer').value = cfg.server;
+    syncModeUi();
     syncKindBoxes();
     render();
   }
@@ -368,6 +381,17 @@ export function initTextCheck(ctx) {
   $('#btnCancelCheck').addEventListener('click', () => api.cancelCheck());
   $('#btnCheckClear').addEventListener('click', clear);
   document.querySelectorAll('#chkKinds input[data-chk-kind]').forEach((box) => box.addEventListener('change', onKindChange));
+  if ($('#setCheckMode')) {
+    $('#setCheckMode').addEventListener('change', async (e) => {
+      try {
+        cfg = await api.setCheckConfig({ mode: e.target.value });
+        syncModeUi();
+      } catch (err) {
+        ctx.showError(err.message);
+        syncModeUi();
+      }
+    });
+  }
   $('#setCheckLang').addEventListener('change', async (e) => {
     try { cfg = await api.setCheckConfig({ lang: e.target.value }); } catch (err) { ctx.showError(err.message); }
   });

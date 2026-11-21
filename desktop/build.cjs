@@ -30,12 +30,14 @@ const dev = process.env.KABINET_DEV === '1';
 const sourcemap = process.env.KABINET_SOURCEMAP === '1';
 require('esbuild').buildSync({ entryPoints: [path.join(__dirname, 'bridge.src.js')], bundle: true, outfile: path.join(out, 'bridge.js'), format: 'iife', platform: 'browser', target: 'chrome120', minify: !dev, sourcemap, logLevel: 'info' });
 
-// Гарантируем существование resources/style-models и resources/licenses для cargo check / tauri build,
-// даже когда сама 14-МБ модель ещё не скачана (например, в облегчённом rust-check).
+// Гарантируем существование resources/{style-models,dictionaries,licenses} для cargo check / tauri build,
+// даже когда сама модель и словари ещё не скачаны (например, в облегчённом rust-check).
 const resRoot = path.join(__dirname, 'src-tauri', 'resources');
 const resModels = path.join(resRoot, 'style-models');
+const resDicts = path.join(resRoot, 'dictionaries');
 const resLicenses = path.join(resRoot, 'licenses');
 fs.mkdirSync(resModels, { recursive: true });
+fs.mkdirSync(resDicts, { recursive: true });
 fs.mkdirSync(resLicenses, { recursive: true });
 const licSrc = path.join(root, 'docs', 'licenses');
 if (fs.existsSync(licSrc)) {
@@ -45,10 +47,17 @@ if (fs.existsSync(licSrc)) {
   }
 }
 const hasModel = fs.readdirSync(resModels).some((n) => n.endsWith('.udpipe'));
-const placeholder = path.join(resModels, 'placeholder.txt');
+const modelPlaceholder = path.join(resModels, 'placeholder.txt');
 if (hasModel) {
-  try { fs.rmSync(placeholder, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(modelPlaceholder, { force: true }); } catch { /* ignore */ }
 } else {
-  fs.writeFileSync(placeholder, 'Модель загружается на этапе сборки установщика (scripts/prepare-style-model.cjs).\n');
+  fs.writeFileSync(modelPlaceholder, 'Модель загружается на этапе сборки установщика (scripts/prepare-resources.cjs).\n');
+}
+const hasDicts = fs.readdirSync(resDicts).some((n) => n.endsWith('.dic'));
+const dictPlaceholder = path.join(resDicts, 'placeholder.txt');
+if (hasDicts) {
+  try { fs.rmSync(dictPlaceholder, { force: true }); } catch { /* ignore */ }
+} else {
+  fs.writeFileSync(dictPlaceholder, 'Словари загружаются на этапе сборки установщика (scripts/prepare-resources.cjs).\n');
 }
 console.log('desktop/dist готов.');

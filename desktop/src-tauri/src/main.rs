@@ -5,6 +5,7 @@ use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
 use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searchreplace, store};
 use kabinet_core::style_parser::StyleParser;
+use kabinet_core::offline_spell::{resolve_dict_dir, OfflineSpell};
 use kabinet_core::check::CheckApi;
 use kabinet_core::media;
 use kabinet_core::stats;
@@ -564,8 +565,23 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
         "spell:check" => {
             let word = arg_str(a, 0)?;
             let en = LANG_EN.load(std::sync::atomic::Ordering::SeqCst);
-            let v = spell_run(&app, move || spell::check(&word, en)).await.flatten();
-            Ok(spell::to_json(v))
+            let w_sys = word.clone();
+            let v = spell_run(&app, move || spell::check(&w_sys, en)).await.flatten();
+            if v.is_some() {
+                Ok(spell::to_json(v))
+            } else if let Some(off) = app.try_state::<Arc<OfflineSpell>>() {
+                let svc = off.inner().clone();
+                let res = tauri::async_runtime::spawn_blocking(move || svc.check_word(&word, en))
+                    .await
+                    .ok()
+                    .flatten();
+                match res {
+                    Some((ok, suggestions)) => Ok(json!({ "available": true, "ok": ok, "suggestions": suggestions })),
+                    None => Ok(spell::to_json(None)),
+                }
+            } else {
+                Ok(spell::to_json(None))
+            }
         }
         "spell:learn" => {
             let word = arg_str(a, 0)?;
@@ -921,17 +937,24 @@ fn main() {
             };
             if let Ok(Some(start)) = app.deep_link().get_current() { take(start.iter().map(|u| u.to_string()).collect()); }
             app.deep_link().on_open_url(move |e| take(e.urls().iter().map(|u| u.to_string()).collect()));
-            app.manage(Arc::new(CheckApi::new(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>))));
-            // Встроенная офлайн-модель языкового разбора (из resource_dir установщика или KABINET_STYLE_MODEL).
             let resource_dir = app.path().resource_dir().ok();
+            let dict_dir = resolve_dict_dir(std::env::var("KABINET_SPELL_DIR").ok().map(PathBuf::from), &data, resource_dir.as_deref());
+            let offline_spell = Arc::new(OfflineSpell::new(dict_dir));
+            app.manage(offline_spell.clone());
+            app.manage(Arc::new(CheckApi::with_offline(&data, Arc::new(|| Box::new(UreqHttp::with_timeout(30)) as Box<dyn Http>), offline_spell.clone())));
+            // Встроенная офлайн-модель языкового разбора (из resource_dir установщика или KABINET_STYLE_MODEL).
             let style_model = kabinet_core::style_parser::resolve_model_path(std::env::var("KABINET_STYLE_MODEL").ok().map(PathBuf::from), &data, resource_dir.as_deref());
             let style_svc = Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok()));
             app.manage(style_svc.clone());
-            // Выгружаем загруженную модель после 10 минут простоя, чтобы не держать RAM зря.
+            // Выгружаем загруженные модель и словари после 10 минут простоя, чтобы не держать RAM зря.
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(60));
-                if style_svc.unload_if_idle(std::time::Duration::from_secs(10 * 60)) {
+                let idle = std::time::Duration::from_secs(10 * 60);
+                if style_svc.unload_if_idle(idle) {
                     applog::info("Языковая модель выгружена из памяти после простоя.");
+                }
+                if offline_spell.unload_if_idle(idle) {
+                    applog::info("Словари офлайн-орфографии выгружены из памяти после простоя.");
                 }
             });
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;

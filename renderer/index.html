@@ -831,6 +831,13 @@
       </div>
 
       <div id="viewCheck" hidden>
+        <div id="checkModeRow" class="row" hidden>
+          <label for="setCheckMode">Режим</label>
+          <select id="setCheckMode">
+            <option value="offline">Встроенная орфография</option>
+            <option value="online">LanguageTool (онлайн)</option>
+          </select>
+        </div>
         <div class="row">
           <label for="setCheckLang">Язык текста</label>
           <select id="setCheckLang">
@@ -858,7 +865,7 @@
             <label class="row-check"><input type="checkbox" data-chk-kind="other"> <span>Другое</span></label>
           </div>
           <p class="hint">Скрытый вид пропадает из списка сразу и при следующих проверках не появляется. Включить его обратно можно здесь, замечания вернутся при следующей проверке.</p>
-          <div class="row">
+          <div id="checkServerRow" class="row">
             <label for="setCheckServer">Свой сервер</label>
             <input id="setCheckServer" class="text" type="text" placeholder="по умолчанию languagetool.org" autocomplete="off" spellcheck="false" translate="no">
           </div>

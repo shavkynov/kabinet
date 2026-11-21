@@ -1011,5 +1011,8 @@ module.exports = {
   "Выбранные виды слов выделяются цветом, текст не меняется. Работает точный грамматический разбор.": "Selected word types are highlighted without changing text. Precise grammatical analysis is active.",
   "Закрыть подсказку": "Close hint",
   "Показать ещё ({0})": "Show more ({0})",
+  "Режим": "Mode",
+  "Встроенная орфография": "Built-in spellcheck",
+  "LanguageTool (онлайн)": "LanguageTool (online)",
   "Свои звуки": "Custom sounds",
 };

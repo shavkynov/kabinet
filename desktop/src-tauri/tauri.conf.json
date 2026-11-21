@@ -30,6 +30,7 @@
     "targets": "all",
     "resources": {
       "resources/style-models/*": "style-models/",
+      "resources/dictionaries/*": "dictionaries/",
       "resources/licenses/*": "licenses/"
     },
     "icon": [
