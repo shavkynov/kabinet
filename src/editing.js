@@ -189,7 +189,8 @@ function rootVariants(stemWord, pos) {
 /** Основа слова для сравнения; '' если слово не подходит для поиска повторов. */
 function repeatKey(word) {
   const w = norm(word.text);
-  if (w.length < 5 || !REPEAT_POS.has(word.pos) || COMMON.has(w)) return '';
+  const lem = typeof word.lemma === 'string' && word.lemma ? norm(word.lemma) : '';
+  if ((w.length < 5 && (!lem || lem.length < 5)) || !REPEAT_POS.has(word.pos) || COMMON.has(w) || (lem && COMMON.has(lem))) return '';
   if (/^[a-z'’-]+$/.test(w)) { // английский: свои стоп-слова и основа
     if (COMMON_EN.has(w) || en.AUX.has(w)) return '';
     const s = en.stem(w, word.pos);
@@ -199,6 +200,7 @@ function repeatKey(word) {
     const cut = w.length >= 7 ? 3 : w.length === 6 ? 2 : 1;
     return `${word.pos}:${w.slice(0, -cut)}`;
   }
+  if (lem && /[а-я]/.test(lem)) return `ru-l:${lem}`;
   const s = rootVariants(stem(w, word.pos), word.pos)[0];
   return s.length >= 3 ? `ru:${s}` : '';
 }
@@ -208,8 +210,11 @@ function repeatKeys(word) {
   const first = repeatKey(word);
   if (!first) return [];
   const w = norm(word.text);
+  const lem = typeof word.lemma === 'string' && word.lemma ? norm(word.lemma) : '';
   if (/^[a-z'’-]+$/.test(w) || !/[а-я]/.test(w)) return [first];
-  return rootVariants(stem(w, word.pos), word.pos).filter((x) => x.length >= 3).map((x) => `ru:${x}`);
+  const src = lem && /[а-я]/.test(lem) ? lem : w;
+  const roots = rootVariants(stem(src, word.pos), word.pos).filter((x) => x.length >= 3).map((x) => `ru:${x}`);
+  return [...new Set([first, ...roots])];
 }
 
 /**
@@ -232,7 +237,7 @@ function properFlags(text, words, sentences) {
 
 /**
  * Повторы: слова с одной основой ближе друг к другу, чем windowSize слов.
- * seq: все слова подряд [{ text, pos }]. Возвращает Set номеров слов, у которых есть повтор рядом.
+ * seq: все слова подряд [{ text, pos, lemma?, proper?, skip? }]. Возвращает пары [prevIdx, idx].
  */
 // Служебные слова, которые естественно повторяются рядом: предлоги, союзы, частицы, личные местоимения.
 const SHORT_STOP = new Set(`она оно они мы вы ты этого этому этим этой этом того тому том тем той его для при над под про без или так тут там вот уже ещё еще его неё нее них ними нем нём ему ней ним нас вас нам вам меня тебя мне тебе себя себе мой моя мои моё твой твоя твои наш ваш чем кто где когда если чтобы чтоб как что бы же ли ведь даже только лишь ещё тоже также либо хотя пока будто словно между через после перед около против сквозь вдоль среди кроме ради`.split(/\s+/));
@@ -243,27 +248,30 @@ function repeatPairs(seq, windowSize) {
   const last = new Map();
   const lastShort = new Map();
   const pairs = []; // [индекс предыдущего слова, индекс слова]
-  // основы имён собственных (w.proper): пропускаем все формы и все вхождения, в том числе в начале предложения
+  // основы и леммы имён собственных (w.proper): пропускаем все формы и все вхождения, в том числе в начале предложения
   const names = new Set();
   for (const w of seq) {
     if (!w.proper) continue;
-    const key = repeatKey({ text: w.text, pos: 'noun' });
-    if (key) names.add(key.slice(key.indexOf(':') + 1));
+    for (const k of repeatKeys({ text: w.text, lemma: w.lemma, pos: 'noun' })) names.add(k);
+    const nw = norm(w.text);
+    const nl = typeof w.lemma === 'string' && w.lemma ? norm(w.lemma) : '';
+    if (nw.length >= 3) names.add(`ru-l:${nw}`);
+    if (nl.length >= 3) names.add(`ru-l:${nl}`);
   }
   seq.forEach((w, i) => {
-    if (w.skip) return; // слово из «Не отмечать здесь»: в сравнении не участвует, но места в ряду занимает
+    if (w.skip || w.proper) return; // слово из «Не отмечать здесь» или имя собственное: в сравнении не участвует, но места в ряду занимает
     const keys = repeatKeys(w);
     if (!keys.length) {
       // Короткие и служебные слова («все … все») отмечаются, только если стоят совсем рядом.
       const t = norm(w.text);
-      if (t.length >= 3 && /^[а-яё-]+$/.test(t) && !w.proper && (!COMMON.has(t) || CLOSE_OK.has(t)) && !SHORT_STOP.has(t)) {
+      if (t.length >= 3 && /^[а-яё-]+$/.test(t) && (!COMMON.has(t) || CLOSE_OK.has(t)) && !SHORT_STOP.has(t) && !names.has(`ru-l:${t}`)) {
         const jj = lastShort.get(t);
         if (jj !== undefined && i - jj <= CLOSE_WINDOW) pairs.push([jj, i]);
         lastShort.set(t, i);
       }
       return;
     }
-    if (names.size && names.has(keys[0].slice(keys[0].indexOf(':') + 1))) return;
+    if (names.size && keys.some((k) => names.has(k))) return;
     let j;
     for (const k of keys) {
       const jj = last.get(k);

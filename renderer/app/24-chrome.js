@@ -29,6 +29,10 @@ function openPanel(name) {
   $(panel).hidden = false;
   $(btn).classList.add('on');
   if (name === 'check' && checker) checker.open();
+  if (name === 'check' && $('#viewTense') && !$('#viewTense').hidden) {
+    renderTense();
+    if (window.__styleShadowReady && typeof styleShadowEnabled === 'function' && styleShadowEnabled()) scheduleStyleShadow();
+  }
   // Клавиатура сразу работает внутри открытой панели (Tab, стрелки, пробел). Список замечаний не трогаем: там правят текст.
   if (name !== 'check') {
     const first = $(panel).querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])');

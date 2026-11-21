@@ -424,4 +424,4 @@ function analyzeBlock(text) {
 // Начала предложений, с которых анафора («И… И… И…») бывает намеренным приёмом: для них в «Ритме» порог выше.
 const ANAPHORA_STARTS = set('и а но');
 
-module.exports = { classify, tokenize, findPassive, sentences, analyzeBlock, norm, ANAPHORA_STARTS };
+module.exports = { classify, tokenize, findPassive, sentences, analyzeBlock, norm, ANAPHORA_STARTS, NOT_AGENT_RE, STATE_PART_STEMS };

@@ -8,10 +8,21 @@ let shadowEpoch = 0;
 let shadowPrev = 0;
 let shadowForcedOff = false;
 let styleModelReady = false;
+let lastStyleParse = null;
 
 const SHADOW_CATEGORIES = ['chain', 'which', 'chancery', 'weak', 'own', 'redund', 'remark', 'tell'];
+const LINGUISTIC_CATEGORIES = ['verb', 'noun', 'adj', 'adv', 'part', 'pron', 'passive', 'repeat', 'tense'];
 const SHADOW_DEBOUNCE_MS = 900;
 const SHADOW_DEFAULT_TIMEOUT_MS = 10000;
+
+function isShadowOnlyMode() {
+  try { return localStorage.getItem('kabinet.styleEngineShadow') === '1'; } catch { return false; }
+}
+
+function sameEngineDoc(a, b) {
+  if (!a || !b) return false;
+  return typeof a.eq === 'function' ? a.eq(b) : a === b;
+}
 
 function styleShadowEnabled() {
   if (shadowForcedOff) return false;
@@ -25,6 +36,20 @@ function styleShadowEnabled() {
 function shadowCategories() {
   const an = (typeof settings !== 'undefined' && settings && settings.an) || {};
   return SHADOW_CATEGORIES.filter((cat) => !!an[cat]);
+}
+
+function tenseViewOpen() {
+  if (typeof document === 'undefined') return false;
+  const cp = document.querySelector('#checkPanel');
+  const vt = document.querySelector('#viewTense');
+  return !!cp && !cp.hidden && !!vt && !vt.hidden;
+}
+
+function linguisticCategories() {
+  const an = (typeof settings !== 'undefined' && settings && settings.an) || {};
+  const cats = LINGUISTIC_CATEGORIES.filter((cat) => !!an[cat]);
+  if (!cats.includes('tense') && tenseViewOpen()) cats.push('tense');
+  return cats;
 }
 
 function emptyShadowState() {
@@ -57,16 +82,16 @@ function setShadowState(task, epoch, state) {
 
 function fallbackStyleAnalysis() {
   if (!editor) return;
-  try { applyEngineAnalysis(editor, { active: false, ranges: [] }); } catch { /* старый анализ должен остаться рабочим */ }
+  try { applyEngineAnalysis(editor, { active: false, ranges: [], blocks: null }); } catch { /* старый анализ должен остаться рабочим */ }
+  if (typeof renderTense === 'function') renderTense();
 }
 
-function applyStyleAnalysis(ranges) {
+function applyStyleAnalysis(ranges, blocks = null) {
   if (!editor) return false;
   try {
-    let shadowFlag = false;
-    try { shadowFlag = localStorage.getItem('kabinet.styleEngineShadow') === '1'; } catch { /* нет хранилища */ }
-    const hybrid = styleModelReady && !shadowFlag;
-    applyEngineAnalysis(editor, { active: true, ranges: Array.isArray(ranges) ? ranges : [], hybrid });
+    const hybrid = styleModelReady && !isShadowOnlyMode();
+    applyEngineAnalysis(editor, { active: true, ranges: Array.isArray(ranges) ? ranges : [], hybrid, blocks: blocks || null });
+    if (typeof renderTense === 'function') renderTense();
     return true;
   } catch {
     fallbackStyleAnalysis();
@@ -90,7 +115,9 @@ function invalidateShadow() {
 
 function scheduleStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
-  const categories = shadowCategories();
+  const styleCats = shadowCategories();
+  const lingCats = !isShadowOnlyMode() && styleModelReady ? linguisticCategories() : [];
+  const categories = [...styleCats, ...lingCats];
   if (!categories.length) {
     invalidateShadow();
     clearTimeout(shadowTimer);
@@ -111,7 +138,10 @@ function timeoutError() {
 
 async function runStyleShadow() {
   if (!styleShadowEnabled() || LANG !== 'ru' || !editor) return;
-  const categories = shadowCategories();
+  const styleCats = shadowCategories();
+  const shadowFlag = isShadowOnlyMode();
+  const lingCats = !shadowFlag && styleModelReady ? linguisticCategories() : [];
+  const categories = [...styleCats, ...lingCats];
   const epoch = shadowEpoch;
   const task = ++shadowSeq;
   if (!categories.length) {
@@ -123,70 +153,88 @@ async function runStyleShadow() {
     return;
   }
 
+  const docNow = editor.state.doc;
+  const cached = !shadowFlag && lastStyleParse && sameEngineDoc(lastStyleParse.doc, docNow);
   let snapshot;
-  try {
-    snapshot = createDocumentSnapshot(editor.state.doc);
-  } catch (err) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, categories, error: err && err.message ? err.message : String(err) });
-    return;
-  }
-  if (!snapshot.text.trim()) {
-    if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, categories });
-    return;
-  }
-  if (epoch !== shadowEpoch) return;
+  let parse = null;
+  if (cached) {
+    snapshot = lastStyleParse.snapshot;
+    parse = lastStyleParse.parse;
+  } else {
+    try {
+      snapshot = createDocumentSnapshot(docNow);
+    } catch (err) {
+      if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'error', ok: false, categories, error: err && err.message ? err.message : String(err) });
+      return;
+    }
+    if (!snapshot.text.trim()) {
+      if (epoch === shadowEpoch) setShadowState(task, epoch, { status: 'empty', ok: false, categories });
+      return;
+    }
+    if (epoch !== shadowEpoch) return;
 
-  setShadowState(task, epoch, { status: 'running', ok: false, categories });
-  if (shadowPrev && api.styleCancel) {
-    try { await api.styleCancel(shadowPrev); } catch { /* ошибка отмены не должна ломать новый запрос */ }
+    setShadowState(task, epoch, { status: 'running', ok: false, categories });
+    if (shadowPrev && api.styleCancel) {
+      try { await api.styleCancel(shadowPrev); } catch { /* ошибка отмены не должна ломать новый запрос */ }
+    }
+    if (epoch !== shadowEpoch) return;
+    shadowPrev = task;
   }
-  if (epoch !== shadowEpoch) return;
-  shadowPrev = task;
   const t0 = performance.now();
   let timer = 0;
   let timedOut = false;
 
   try {
-    const timeoutMs = Number(window.__styleTimeoutMs) > 0 ? Number(window.__styleTimeoutMs) : SHADOW_DEFAULT_TIMEOUT_MS;
-    const parsePromise = api.styleParse(snapshot.text, task);
-    const timeoutPromise = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        timedOut = true;
-        reject(timeoutError());
-      }, timeoutMs);
-    });
-    const res = await Promise.race([parsePromise, timeoutPromise]);
-    clearTimeout(timer);
-    timer = 0;
-    if (task !== shadowSeq || epoch !== shadowEpoch) return;
-    if (!res || typeof res !== 'object' || !res.parse || !Array.isArray(res.parse.sentences)) {
-      throw new Error('Некорректный ответ style:parse.');
-    }
-    if (res.cancelled) {
-      fallbackStyleAnalysis();
-      setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, categories, ms: Math.round(performance.now() - t0) });
-      return;
+    if (!parse) {
+      const timeoutMs = Number(window.__styleTimeoutMs) > 0 ? Number(window.__styleTimeoutMs) : SHADOW_DEFAULT_TIMEOUT_MS;
+      const parsePromise = api.styleParse(snapshot.text, task);
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(timeoutError());
+        }, timeoutMs);
+      });
+      const res = await Promise.race([parsePromise, timeoutPromise]);
+      clearTimeout(timer);
+      timer = 0;
+      if (task !== shadowSeq || epoch !== shadowEpoch) return;
+      if (!res || typeof res !== 'object' || !res.parse || !Array.isArray(res.parse.sentences)) {
+        throw new Error('Некорректный ответ style:parse.');
+      }
+      if (res.cancelled) {
+        fallbackStyleAnalysis();
+        setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, categories, ms: Math.round(performance.now() - t0) });
+        return;
+      }
+      parse = res.parse;
+      lastStyleParse = { doc: docNow, snapshot, parse };
     }
 
-    const parse = res.parse;
-    const enabled = Object.fromEntries(categories.map((cat) => [cat, true]));
-    const analysis = analyzeStructural(snapshot.text, parse, enabled);
+    const enabled = Object.fromEntries(styleCats.map((cat) => [cat, true]));
+    const analysis = styleCats.length ? analyzeStructural(snapshot.text, parse, enabled) : { ruleErrors: [] };
     if (task !== shadowSeq || epoch !== shadowEpoch) return;
 
-    const findings = categories.flatMap((cat) => (Array.isArray(analysis[cat]) ? analysis[cat] : []));
+    const findings = styleCats.flatMap((cat) => (Array.isArray(analysis[cat]) ? analysis[cat] : []));
     const adapterStart = performance.now();
     let rangeResult;
     const adapterErrors = [];
     try {
-      rangeResult = findingsToRanges(snapshot, findings, editor.state.doc);
+      rangeResult = findings.length
+        ? findingsToRanges(snapshot, findings, editor.state.doc)
+        : { ranges: [], diagnostics: [], droppedNested: 0, mergedOverlaps: 0 };
     } catch (err) {
       rangeResult = { ranges: [], diagnostics: [{ code: 'adapter-error', message: err && err.message ? err.message : String(err) }], droppedNested: 0, mergedOverlaps: 0 };
       adapterErrors.push({ category: 'adapter', error: err && err.message ? err.message : String(err) });
     }
+    const blocks = !shadowFlag && styleModelReady && lingCats.length > 0 && typeof buildLinguisticBlocks === 'function'
+      ? buildLinguisticBlocks(snapshot, parse, editor.state.doc)
+      : null;
     const adapterMs = Math.round(performance.now() - adapterStart);
     if (task !== shadowSeq || epoch !== shadowEpoch) return;
 
-    if (rangeResult.diagnostics.some((d) => d.code === 'document-changed')) {
+    const docChanged = rangeResult.diagnostics.some((d) => d.code === 'document-changed')
+      || (!shadowFlag && styleModelReady && lingCats.length > 0 && blocks === null);
+    if (docChanged) {
       shadowPrev = 0;
       fallbackStyleAnalysis();
       setShadowState(task, epoch, {
@@ -200,7 +248,7 @@ async function runStyleShadow() {
     const ruleErrors = [...(analysis.ruleErrors || []), ...adapterErrors];
     if (adapterErrors.length) {
       fallbackStyleAnalysis();
-    } else if (!applyStyleAnalysis(rangeResult.ranges)) {
+    } else if (!applyStyleAnalysis(rangeResult.ranges, blocks)) {
       ruleErrors.push({ category: 'adapter', error: 'не удалось применить ranges' });
     }
     const accepted = rangeResult.ranges.length;
@@ -247,10 +295,19 @@ async function runStyleShadow() {
   }
 }
 
+function updateCheckModeHint() {
+  const el = typeof document !== 'undefined' ? document.querySelector('#anModeHint') : null;
+  if (!el) return;
+  const precise = styleModelReady && styleShadowEnabled() && !isShadowOnlyMode();
+  el.textContent = precise
+    ? t('Выбранные виды слов выделяются цветом, текст не меняется. Работает точный разбор (Russian-GSD): части речи, пассив, повторы и времена.')
+    : t('Выбранные виды слов выделяются цветом, текст не меняется. Разбор приблизительный: по окончаниям, без словаря.');
+}
+
 function renderStyleEngineUi(st) {
   const box = typeof document !== 'undefined' ? document.querySelector('#styleEngineBox') : null;
   if (!box) return;
-  if (!st || !st.supported) { box.hidden = true; return; }
+  if (!st || !st.supported) { box.hidden = true; updateCheckModeHint(); return; }
   box.hidden = false;
   styleModelReady = !!st.ready;
   if (typeof box.hasAttribute === 'function' && !box.hasAttribute('data-init')) {
@@ -278,6 +335,7 @@ function renderStyleEngineUi(st) {
   if (btn) {
     btn.textContent = styleModelReady ? t('Заменить файл модели…') : t('Подключить файл модели…');
   }
+  updateCheckModeHint();
 }
 
 async function refreshStyleEngineUi() {
@@ -304,6 +362,7 @@ function wireStyleEngineUi() {
           localStorage.removeItem('kabinet.styleEngineShadow');
         }
       } catch { /* нет хранилища */ }
+      updateCheckModeHint();
       if (toggle.checked) {
         scheduleStyleShadow();
       } else {
@@ -322,6 +381,7 @@ function wireStyleEngineUi() {
         const st = await api.stylePickModel();
         if (!st) return;
         shadowForcedOff = false;
+        lastStyleParse = null;
         try { localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
         renderStyleEngineUi(st);
         if (styleShadowEnabled()) scheduleStyleShadow();
@@ -342,11 +402,13 @@ window.kabinetStyleShadow = {
   enable() {
     shadowForcedOff = false;
     try { localStorage.setItem('kabinet.styleEngineShadow', '1'); localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
+    updateCheckModeHint();
     scheduleStyleShadow();
   },
   disable() {
     shadowForcedOff = true;
     try { localStorage.removeItem('kabinet.styleEngineShadow'); } catch { /* нет хранилища */ }
+    updateCheckModeHint();
     invalidateShadow();
     clearTimeout(shadowTimer);
     shadowSeq += 1;

@@ -1018,4 +1018,5 @@ module.exports = {
   "Наведите курсор или листайте ‹ › — появится подсказка с советом и кнопкой «Не отмечать здесь». Реплики героев не проверяются.": "Hover or use ‹ › arrows to view advice and the Ignore button. Characters' speech is not checked.",
   "Точный разбор": "Precise analysis",
   "Закрыть подсказку": "Close hint",
+  "Выбранные виды слов выделяются цветом, текст не меняется. Работает точный разбор (Russian-GSD): части речи, пассив, повторы и времена.": "Selected word types are highlighted without changing text. Precise Russian-GSD parsing is active for parts of speech, passive voice, repeats and tenses.",
 };

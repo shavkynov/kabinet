@@ -88,13 +88,25 @@ function blockResult(node) {
 const tenseCache = new WeakMap();
 
 /** Несогласованность времён: глаголы не того времени, что в основном повествовании. mode: auto (по тексту) | present | past. */
-export function scanTense(doc, mode) {
+export function scanTense(doc, mode, engine = null) {
   let past = 0;
   let present = 0;
   const found = [];
+  const udBlocks = LANG === 'ru' && engine && engine.active && engine.blocks && typeof engine.blocks.get === 'function'
+    ? engine.blocks
+    : null;
   doc.descendants((node, pos) => {
     if (!node.isTextblock) return true;
     if (node.type.name === 'codeBlock' || node.content.size === 0) return false;
+    const ud = udBlocks ? udBlocks.get(pos + 1) : null;
+    if (ud && ud.tense) {
+      past += ud.tense.past;
+      present += ud.tense.present;
+      for (const it of ud.tense.items) {
+        found.push({ from: it.from, to: it.to, kind: it.kind, conf: it.conf, why: it.why });
+      }
+      return false;
+    }
     let tr = tenseCache.get(node);
     if (!tr) {
       const r = blockResult(node);
@@ -169,9 +181,12 @@ function build(doc, cfg, engine = null) {
   const cats = cfg.cats || {};
   const engineActive = !!(engine && engine.active);
   const engineHybrid = engineActive && !!engine.hybrid;
+  const udBlocks = LANG === 'ru' && engineActive && engine.blocks && typeof engine.blocks.get === 'function'
+    ? engine.blocks
+    : null;
   const any = AN_CATS.some((k) => cats[k]);
   const stats = { words: 0, verb: 0, noun: 0, adj: 0, adv: 0, part: 0, pron: 0, passive: 0, long: 0, filler: 0, repeat: 0, tense: 0, rhythm: 0, chancery: 0, weak: 0, tell: 0, chain: 0, remark: 0, redund: 0, which: 0, own: 0 };
-  if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges(), engine: null };
+  if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges(), engine: engine || null };
   const decos = [];
   const T = tpl();
   const ranges = emptyRanges(); // места по категориям, в порядке текста: для «‹ ›» и меню «Не отмечать здесь»
@@ -193,7 +208,7 @@ function build(doc, cfg, engine = null) {
     }
   }
   if (cats.tense) {
-    const ts = scanTense(doc, cfg.tenseMode);
+    const ts = scanTense(doc, cfg.tenseMode, engine);
     stats.tense = ts.items.length;
     for (const it of ts.items) decos.push(Decoration.inline(it.from, it.to, { class: it.conf === 'low' ? 'an an-tense an-tense-soft' : 'an an-tense' }));
   }
@@ -219,10 +234,12 @@ function build(doc, cfg, engine = null) {
     const base = pos + 1;
     const r = blockResult(node);
     const blockText = node.textBetween(0, node.content.size, '', '￼');
+    const ud = udBlocks ? udBlocks.get(base) : null;
+    const words = ud && Array.isArray(ud.words) ? ud.words : r.words;
     // Слова-паразиты ищем первыми: слово, отмеченное как паразит, не красим ещё и как наречие
     const allFillerHits = re ? fillersOf(node, blockText, re, cfg) : [];
     const fillerHits = skip.filler.size ? allFillerHits.filter((f) => !skip.filler.has(skipKey(blockText.slice(f.start, f.end)))) : allFillerHits;
-    for (const w of r.words) {
+    for (const w of words) {
       if (w.pos === 'num' || w.pos === 'other') continue;
       stats.words += 1;
       // слово, отмеченное как паразит (даже исключённое из паразитов), не красим ещё и как наречие
@@ -230,18 +247,28 @@ function build(doc, cfg, engine = null) {
       const skipped = w.pos === 'adv' && skip.adv.size > 0 && skip.adv.has(skipKey(w.text));
       if (stats[w.pos] !== undefined && !asFiller && !skipped) stats[w.pos] += 1;
       if (cats[w.pos] && !asFiller && !skipped) {
+        const from = w.from ?? (base + w.start);
+        const to = w.to ?? (base + w.end);
         const attrs = { class: `an an-${w.pos}` };
         if (w.pos === 'adv') {
           attrs.title = fill(T.adv, w.text);
-          ranges.adv.push({ from: base + w.start, to: base + w.end });
+          ranges.adv.push({ from, to });
         }
-        decos.push(Decoration.inline(base + w.start, base + w.end, attrs));
+        decos.push(Decoration.inline(from, to, attrs));
       }
     }
     if (cats.repeat) {
-      const proper = properFlags(node.textBetween(0, node.content.size, '', '￼'), r.words, r.sentences);
+      const proper = properFlags(blockText, words, r.sentences);
       const hasSkip = skip.repeat.size > 0;
-      r.words.forEach((w, i) => seq.push({ text: w.text, pos: w.pos, from: base + w.start, to: base + w.end, proper: proper[i], skip: hasSkip && skip.repeat.has(skipKey(w.text)) }));
+      words.forEach((w, i) => seq.push({
+        text: w.text,
+        lemma: w.lemma || '',
+        pos: w.pos,
+        from: w.from ?? (base + w.start),
+        to: w.to ?? (base + w.end),
+        proper: !!(w.proper || proper[i]),
+        skip: hasSkip && skip.repeat.has(skipKey(w.text)),
+      }));
     }
     for (const f of fillerHits) {
       stats.filler += 1;
@@ -250,13 +277,16 @@ function build(doc, cfg, engine = null) {
       decos.push(Decoration.inline(from, to, { class: 'an an-filler', title: fill(T.filler, blockText.slice(f.start, f.end)) }));
       ranges.filler.push({ from, to });
     }
-    for (const p of r.passive) {
-      const text = blockText.slice(p.start, p.end);
+    const passiveSpans = ud && Array.isArray(ud.passive) ? ud.passive : r.passive;
+    for (const p of passiveSpans) {
+      const text = p.text !== undefined ? p.text : blockText.slice(p.start, p.end);
       if (skip.passive.size && skip.passive.has(skipKey(text))) continue;
       stats.passive += 1;
       if (cats.passive) {
-        decos.push(Decoration.inline(base + p.start, base + p.end, { class: 'an an-passive', title: fill(T.passive, text) }));
-        ranges.passive.push({ from: base + p.start, to: base + p.end });
+        const from = p.from ?? (base + p.start);
+        const to = p.to ?? (base + p.end);
+        decos.push(Decoration.inline(from, to, { class: 'an an-passive', title: fill(T.passive, text) }));
+        ranges.passive.push({ from, to });
       }
     }
     for (const s of r.sentences) {
@@ -359,6 +389,12 @@ export function applyEngineAnalysis(editor, payload) {
 export function analysisRanges(state) {
   const s = analysisKey.getState(state);
   return s && s.ranges ? s.ranges : emptyRanges();
+}
+
+/** Текущее состояние лингвистического движка (или null). */
+export function analysisEngine(state) {
+  const s = analysisKey.getState(state);
+  return s && s.engine ? s.engine : null;
 }
 
 /** Какое место показать при переходе «‹ ›»: dir > 0 следующее после позиции from, dir < 0 предыдущее; по кругу. -1: мест нет. */

@@ -298,7 +298,10 @@ function setCheckView(view) {
   $('#viewCheck').hidden = v !== 'check';
   $('#viewTense').hidden = v !== 'tense';
   $('#viewRhythm').hidden = v !== 'rhythm';
-  if (v === 'tense') renderTense();
+  if (v === 'tense') {
+    renderTense();
+    if (window.__styleShadowReady && typeof styleShadowEnabled === 'function' && styleShadowEnabled()) scheduleStyleShadow();
+  }
   if (v === 'rhythm') renderRhythm();
   document.querySelectorAll('#checkPanel .seg button').forEach((b) => {
     const on = b.dataset.view === v;
@@ -321,7 +324,7 @@ function scheduleTense() {
 function renderTense() {
   const box = $('#tenseList');
   if (!box || !editor || $('#viewTense').hidden) return;
-  const res = scanTense(editor.state.doc, settings.tenseMode);
+  const res = scanTense(editor.state.doc, settings.tenseMode, analysisEngine(editor.state));
   tenseItems = res.items;
   const names = { present: t('настоящее'), past: t('прошедшее'), unknown: t('не определено') };
   $('#tenseBase').textContent = t('Основное время: {0}. Глаголов в главных предложениях: настоящего {1}, прошедшего {2}.', names[res.base], res.present, res.past);

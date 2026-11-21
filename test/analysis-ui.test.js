@@ -280,3 +280,62 @@ test('движок (гибрид): chain/which только от UDPipe, ост�
   assert.equal(result.stats.redund, 0);
   assert.equal(byClass(result.set, 'an-redund').length, 0);
 });
+
+test('движок (blocks): переиспользует UDPipe для частей речи, пассива, повторов по леммам и времён с уважением analysisSkip', () => {
+  const line = 'Иван читал книгу. Книгу была открыта Иваном. Иван читает.';
+  const pos = (w, occurrence = 0) => {
+    let idx = -1;
+    for (let n = 0; n <= occurrence; n += 1) idx = line.indexOf(w, idx + 1);
+    return { start: idx, end: idx + w.length, from: 1 + idx, to: 1 + idx + w.length };
+  };
+  const blocks = new Map([[1, {
+    words: [
+      { ...pos('Иван', 0), text: 'Иван', lemma: 'иван', pos: 'noun', proper: true },
+      { ...pos('читал', 0), text: 'читал', lemma: 'читать', pos: 'verb', proper: false },
+      { ...pos('книгу', 0), text: 'книгу', lemma: 'книга', pos: 'noun', proper: false },
+      { ...pos('Книгу', 0), text: 'Книгу', lemma: 'книга', pos: 'noun', proper: false },
+      { ...pos('была', 0), text: 'была', lemma: 'быть', pos: 'verb', proper: false },
+      { ...pos('открыта', 0), text: 'открыта', lemma: 'открыть', pos: 'part', proper: false },
+      { ...pos('Иваном', 0), text: 'Иваном', lemma: 'иван', pos: 'noun', proper: true },
+      { ...pos('Иван', 1), text: 'Иван', lemma: 'иван', pos: 'noun', proper: true },
+      { ...pos('читает', 0), text: 'читает', lemma: 'читать', pos: 'verb', proper: false },
+    ],
+    passive: [{ ...pos('была открыта', 0), text: 'была открыта' }],
+    tense: {
+      past: 1,
+      present: 1,
+      items: [
+        { ...pos('читал', 0), kind: 'past', conf: 'high', why: 'actor' },
+        { ...pos('читает', 0), kind: 'present', conf: 'high', why: 'actor' },
+      ],
+    },
+  }]]);
+
+  const cfgUd = cfg({
+    cats: { verb: true, part: true, noun: true, passive: true, repeat: true, tense: true },
+    repeatWin: 20,
+    skip: { passive: [skipKey('была открыта')] },
+  });
+  // Намеренно проверяем с all engine ranges = [] (активны только блоки)
+  const { result, state } = runBuild(mod, [line], cfgUd, { active: true, hybrid: true, ranges: [], blocks });
+  // «читал», «была», «читает» -> verb (3), «открыта» -> part (1), «Иван», «книгу», «Книгу», «Иваном», «Иван» -> noun (5)
+  assert.equal(result.stats.verb, 3);
+  assert.equal(result.stats.part, 1);
+  assert.equal(result.stats.noun, 5);
+  // «была открыта» исключено через analysisSkip
+  assert.equal(result.stats.passive, 0);
+  // Повторы по леммам: «книгу»/«Книгу» и «читал»/«читает» (итого 4 выделения), PROPN «Иван»/«Иваном»/«Иван» не отмечается!
+  const repTexts = byClass(result.set, 'an-repeat').map((d) => line.slice(d.from - 1, d.to - 1));
+  assert.deepEqual(repTexts, ['читал', 'книгу', 'Книгу', 'читает']);
+  //scanTense с engine.blocks использует UD-разметку; с пустым engine без all checkboxes engine тоже сохраняется
+  assert.equal(mod.analysisEngine(state).blocks, blocks);
+  const ts = mod.scanTense(state.doc, 'past', mod.analysisEngine(state));
+  assert.equal(ts.items.length, 1);
+  assert.equal(line.slice(ts.items[0].from - 1, ts.items[0].to - 1), 'читает');
+
+  // При сбросе engine (active: false / null) падает обратно на базовый разбор
+  const cfgNoSkip = cfg({ cats: cfgUd.cats, repeatWin: 20 });
+  const plain = runBuild(mod, [line], cfgNoSkip, null);
+  assert.equal(plain.result.stats.passive, 1);
+  assert.equal(mod.analysisEngine(plain.state), null);
+});

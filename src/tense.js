@@ -308,4 +308,4 @@ function detectBase(past, present) {
   return present > past ? 'present' : 'past';
 }
 
-module.exports = { analyzeTenseBlock, detectBase, speechRanges, pastInfo, isPresentVerb, isFuturePerfective, ATTRIB };
+module.exports = { analyzeTenseBlock, detectBase, speechRanges, pastInfo, isPresentVerb, isFuturePerfective, ATTRIB, MEMORY };

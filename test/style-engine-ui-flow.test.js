@@ -8,6 +8,7 @@ const vm = require('vm');
 const { Schema } = require('prosemirror-model');
 const { createDocumentSnapshot, findingsToRanges } = require('../src/style-engine/pm-ranges');
 const { analyzeStructural } = require('../src/style-engine/structural');
+const { buildLinguisticBlocks } = require('../src/style-engine/linguistic');
 const { loadAnalysis } = require('./analysis-harness');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -67,11 +68,12 @@ function makeTr(doc) {
   };
 }
 
-async function mountShadow({ storage, docText, apiStub }) {
+async function mountShadow({ storage, docText, apiStub, initialAn = null }) {
+  const cats = initialAn || { chancery: true, redund: true, chain: true, weak: true, own: true, remark: true, tell: true, which: true };
   const analysisMod = await loadAnalysis(ROOT, 'ru');
   const [plugin] = analysisMod.TextAnalysis.plugins({
     getConfig: () => ({
-      cats: { chancery: true, redund: true, chain: true, weak: true, own: true, remark: true, tell: true, which: true },
+      cats,
       longMin: 30,
       fillers: [],
       repeatWin: 25,
@@ -96,6 +98,7 @@ async function mountShadow({ storage, docText, apiStub }) {
     '#styleEngineToggle': makeEl(),
     '#styleEngineStatus': makeEl(),
     '#btnStylePickModel': makeEl(),
+    '#anModeHint': makeEl(),
   };
   const statusCalls = [];
   const errorCalls = [];
@@ -105,14 +108,16 @@ async function mountShadow({ storage, docText, apiStub }) {
     document: { querySelector: (sel) => els[sel] || null },
     localStorage: storage,
     LANG: 'ru',
-    settings: { an: { chancery: true, redund: true, chain: true, weak: true, own: true, remark: true, tell: true, which: true } },
+    settings: { an: { ...cats } },
     t: (s, ...a) => s.replace(/\{(\d+)\}/g, (m, i) => (a[i] === undefined ? m : a[i])),
     editor,
     api: apiStub,
     createDocumentSnapshot,
     findingsToRanges,
     analyzeStructural,
+    buildLinguisticBlocks,
     applyEngineAnalysis: analysisMod.applyEngineAnalysis,
+    analysisEngine: analysisMod.analysisEngine,
     analysisRanges: analysisMod.analysisRanges,
     setStatus: (kind, msg) => statusCalls.push({ kind, msg }),
     showError: (msg) => errorCalls.push(msg),
@@ -244,7 +249,57 @@ test('интерфейс анализа и структурные советы: 
   assert.equal(adviceMatches.length, 16, 'все 16 шаблонов правил в structural.js должны содержать практический «Совет:»');
 
   const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
-  for (const needle of ['id="anPop"', 'id="anSummary"', 'id="btnStyleAll"', 'id="btnStyleNone"', 'id="btnAnNone"', '<details id="styleEngineBox"']) {
+  for (const needle of ['id="anPop"', 'id="anSummary"', 'id="anModeHint"', 'id="btnStyleAll"', 'id="btnStyleNone"', 'id="btnAnNone"', '<details id="styleEngineBox"']) {
     assert.ok(html.includes(needle), `в index.html должен присутствовать ${needle}`);
   }
+});
+
+test('раздел «Проверка»: при готовой модели подключает пассив/повторы/времена и кэширует parse без лишних вызовов', async () => {
+  const docText = 'Дверь была открыта ключом.';
+  const storage = makeStorage();
+  let parseCalls = 0;
+  const fakeParse = {
+    schemaVersion: 1,
+    parser: { name: 'udpipe-rs', version: '0.2', modelVersion: 'russian-gsd-ud-2.5-191206', modelSha256: 'ba63' },
+    sentences: [{
+      start: 0,
+      end: docText.length,
+      text: docText,
+      tokens: [
+        { id: 1, text: 'Дверь', lemma: 'дверь', upos: 'NOUN', feats: { Case: 'Nom' }, head: 3, deprel: 'nsubj:pass', start: 0, end: 5 },
+        { id: 2, text: 'была', lemma: 'быть', upos: 'AUX', feats: { VerbForm: 'Fin', Tense: 'Past' }, head: 3, deprel: 'aux:pass', start: 6, end: 10 },
+        { id: 3, text: 'открыта', lemma: 'открыть', upos: 'VERB', feats: { VerbForm: 'Part', Voice: 'Pass', Variant: 'Short' }, head: 0, deprel: 'root', start: 11, end: 18 },
+        { id: 4, text: 'ключом', lemma: 'ключ', upos: 'NOUN', feats: { Case: 'Ins' }, head: 3, deprel: 'obl', start: 19, end: 25 },
+        { id: 5, text: '.', lemma: '.', upos: 'PUNCT', feats: {}, head: 3, deprel: 'punct', start: 25, end: 26 },
+      ],
+    }],
+  };
+  const apiStub = {
+    styleStatus: async () => ({ supported: true, ready: true, modelVersion: 'russian-gsd-ud-2.5-191206' }),
+    styleCancel: async () => true,
+    styleParse: async (_text, taskId) => {
+      parseCalls += 1;
+      return { taskId, cancelled: false, parse: fakeParse };
+    },
+  };
+
+  // Все категории стиля выключены — включён только «passive» в #checkPanel.
+  const mounted = await mountShadow({ storage, docText, apiStub, initialAn: { passive: true } });
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(parseCalls, 1, 'style:parse запускается даже при выключенном «Стиле текста»');
+  assert.ok(mounted.editor.state.__an.engine.blocks instanceof Map);
+  assert.equal(mounted.editor.state.__an.stats.passive, 1);
+  assert.match(mounted.els['#anModeHint'].textContent, /Russian-GSD/);
+
+  // Переключение галочек на неизменном тексте не вызывает style:parse повторно (берётся кэш).
+  mounted.ctx.settings.an = { passive: true, verb: true, noun: true };
+  mounted.ctx.scheduleStyleShadow();
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(parseCalls, 1, 'кэш документа переиспользуется без повторного style:parse');
+  assert.equal(mounted.editor.state.__an.stats.noun, 2);
+
+  // Отключение точного разбора возвращает подсказку базового режима.
+  mounted.els['#styleEngineToggle'].checked = false;
+  await mounted.els['#styleEngineToggle'].trigger('change');
+  assert.match(mounted.els['#anModeHint'].textContent, /приблизительный/);
 });
