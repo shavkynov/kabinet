@@ -1,11 +1,11 @@
 'use strict';
 // Собирает интерфейс Кабинета для Tauri: общий renderer плюс мост window.kabinet (bridge.js).
-//   node experiments/tauri-app/build.cjs   (нужны зависимости корня: npm ci)
+//   node desktop/build.cjs   (нужны зависимости корня: npm ci)
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const root = path.join(__dirname, '..', '..');
+const root = path.join(__dirname, '..');
 const out = path.join(__dirname, 'dist');
 
 function replaceOnce(text, from, to, label) {
@@ -49,4 +49,4 @@ if (hasModel) {
 } else {
   fs.writeFileSync(placeholder, 'Модель загружается на этапе сборки установщика (scripts/prepare-style-model.cjs).\n');
 }
-console.log('experiments/tauri-app/dist готов.');
+console.log('desktop/dist готов.');

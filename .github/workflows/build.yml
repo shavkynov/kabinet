@@ -21,10 +21,10 @@ jobs:
       contents: read
       statuses: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - name: Зависимости
         id: dependencies
@@ -84,14 +84,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: node experiments/tauri-app/build.cjs
+      - run: node desktop/build.cjs
       - run: npm i --no-save playwright@1.49.1
       - name: Chromium для UI-smoke (повтор при сбое зеркал apt)
         run: |
@@ -117,8 +117,8 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -133,13 +133,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xdg-utils
       - name: Тесты Rust (ядро)
-        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
+        run: cargo test --locked --manifest-path desktop/core/Cargo.toml
       - name: Окно для оболочки
         run: |
           npm run build
-          node experiments/tauri-app/build.cjs
+          node desktop/build.cjs
       - name: Оболочка компилируется
-        run: cargo check --locked --manifest-path experiments/tauri-app/src-tauri/Cargo.toml
+        run: cargo check --locked --manifest-path desktop/src-tauri/Cargo.toml
 
   tauri-test:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
       - name: Метка совпадает с версией
@@ -155,8 +155,8 @@ jobs:
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
           V=$(node -p "require('./package.json').version")
-          T=$(node -p "require('./experiments/tauri-app/src-tauri/tauri.conf.json').version")
-          C=$(grep -m1 '^version' experiments/tauri-app/src-tauri/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          T=$(node -p "require('./desktop/src-tauri/tauri.conf.json').version")
+          C=$(grep -m1 '^version' desktop/src-tauri/Cargo.toml | sed 's/.*"\(.*\)"/\1/')
           echo "метка=$TAG package=$V tauri=$T cargo=$C"
           # при пробном запуске без метки (ветка main) метку не сверяем
           case "$TAG" in v[0-9]*|[0-9]*) [ "${TAG#v}" = "$V" ] || BAD=1 ;; esac
@@ -169,7 +169,7 @@ jobs:
           rustup update stable --no-self-update
           rustup default stable
       - name: Тесты Rust (ядро — проекты, Яндекс Диск, синхронизация)
-        run: cargo test --locked --manifest-path experiments/tauri-app/core/Cargo.toml
+        run: cargo test --locked --manifest-path desktop/core/Cargo.toml
 
   build:
     needs: tauri-test
@@ -198,10 +198,10 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -220,14 +220,14 @@ jobs:
         run: node scripts/prepare-style-model.cjs
       - name: Установщик (${{ matrix.name }})
         shell: bash
-        working-directory: experiments/tauri-app
+        working-directory: desktop
         run: npx --yes @tauri-apps/cli@2 build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Проверка ad-hoc подписи macOS (для работы kabinet://)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -e
-          DMG=$(ls experiments/tauri-app/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -n1)
+          DMG=$(ls desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -n1)
           MNT=$(mktemp -d)
           hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -quiet
           APP=$(ls -d "$MNT"/*.app | head -n1)
@@ -239,7 +239,7 @@ jobs:
         run: |
           set -e
           V=$(node -p "require('./package.json').version")
-          B="experiments/tauri-app/src-tauri/target/${{ matrix.target }}/release/bundle"
+          B="desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
           mkdir -p out
           case "${{ matrix.name }}" in
             windows)   cp "$B"/nsis/*.exe "out/Kabinet-$V-windows-x64.exe" ;;
@@ -267,12 +267,12 @@ jobs:
       # отпечаток SHA-256 рабочего ключа подписи (не секрет); при смене ключа обновите
       EXPECTED_CERT_SHA256: 8703ed4e9f4cd67775750fa7ef56efee515b441aa279ce478d0ca73dd851bf96
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - uses: actions/setup-java@v4
         with:
@@ -357,7 +357,7 @@ jobs:
         with:
           path: files
           merge-multiple: true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref }}
           path: src

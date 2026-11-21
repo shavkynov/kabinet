@@ -1,8 +1,8 @@
 'use strict';
 
 // Генератор эталонного корпуса падежных форм имён и названий.
-// Эталон — src/declension.js (JS). Rust-порт experiments/tauri-app/core/src/declension.rs
-// сверяется с этим корпусом тестом experiments/tauri-app/core/tests/declension_golden.rs.
+// Эталон — src/declension.js (JS). Rust-порт desktop/core/src/declension.rs
+// сверяется с этим корпусом тестом desktop/core/tests/declension_golden.rs.
 //
 // Корпус строится только из JS-реализации, поэтому расхождение с Rust — это регрессия порта.
 // Скрипт детерминированный: повторный запуск перезаписывает файл байт в байт тем же содержимым.
@@ -15,7 +15,7 @@ const path = require('path');
 const { nameForms } = require('../src/declension');
 
 const root = path.join(__dirname, '..');
-const outFile = path.join(root, 'experiments/tauri-app/core/tests/fixtures/declension-golden.json');
+const outFile = path.join(root, 'desktop/core/tests/fixtures/declension-golden.json');
 
 const KINDS = new Set(['character', 'place', 'item']);
 const cases = [];

@@ -70,12 +70,12 @@ Linux) и для Android. Работает без интернета, текст
   npm run check      проверка и тесты
 
 Установщики для компьютеров (Tauri, Rust) собирает GitHub Actions при выпуске версии: см. .github/workflows/build.yml.
-Локально: cd experiments/tauri-app && npx @tauri-apps/cli@2 build. Нужны Rust и системные библиотеки Tauri.
+Локально: cd desktop && npx @tauri-apps/cli@2 build. Нужны Rust и системные библиотеки Tauri.
 
 
 СТРУКТУРА
 
-  experiments/tauri-app/  приложение для компьютеров: Rust-ядро (core), окно (src-tauri), мост к интерфейсу
+  desktop/              приложение для компьютеров: Rust-ядро (core), окно (src-tauri), мост к интерфейсу
   src/                  логика проекта, импорт и экспорт, анализ текста
   renderer/             интерфейс
   mobile/               оболочка для Android

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createCloseCoordinator } = require('../experiments/tauri-app/close-coordinator');
+const { createCloseCoordinator } = require('../desktop/close-coordinator');
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 function fixture(overrides = {}) {
   const events = [];
@@ -113,7 +113,7 @@ test('Tauri beforeunload does not clear unsaved flags or issue fire-and-forget w
   assert.equal(writes, 0); assert.equal(context.dirty, true); assert.equal(context.p2.dirty, true);
 });
 test('native shutdown has a quit guard and no forced five-second close', () => {
-  const main = fs.readFileSync(path.join(__dirname, '../experiments/tauri-app/src-tauri/src/main.rs'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '../desktop/src-tauri/src/main.rs'), 'utf8');
   assert.match(main, /RunEvent::ExitRequested/);
   assert.match(main, /api\.prevent_exit\(\)/);
   assert.match(main, /"app:close-cancel"/);

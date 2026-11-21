@@ -9,7 +9,7 @@ const { STORY, termize, cleanMode, authorSheets } = require('../src/terms');
 const ROOT = path.join(__dirname, '..');
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 function sources() {
-  const out = [read('renderer/index.html'), read('experiments/tauri-app/src-tauri/src/main.rs'), read('src/project.js')];
+  const out = [read('renderer/index.html'), read('desktop/src-tauri/src/main.rs'), read('src/project.js')];
   for (const f of fs.readdirSync(path.join(ROOT, 'renderer/app'))) out.push(read(`renderer/app/${f}`));
   for (const f of ['lists.js', 'cards.js', 'analysis.js']) out.push(read(`renderer/${f}`));
   return out.join('\n');

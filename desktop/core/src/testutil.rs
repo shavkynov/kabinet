@@ -207,7 +207,6 @@ pub(crate) struct Gate {
 }
 
 impl Gate {
-    pub(crate) fn new() -> Self { Self::with_timeout(Duration::from_secs(5)) }
     pub(crate) fn with_timeout(timeout: Duration) -> Self {
         Gate {
             reached: Arc::new((Mutex::new(false), Condvar::new())),

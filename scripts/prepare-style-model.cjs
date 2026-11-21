@@ -17,7 +17,7 @@ const MODEL_URLS = [
 ];
 
 const root = path.join(__dirname, '..');
-const resRoot = path.join(root, 'experiments', 'tauri-app', 'src-tauri', 'resources');
+const resRoot = path.join(root, 'desktop', 'src-tauri', 'resources');
 const modelsDir = path.join(resRoot, 'style-models');
 const licensesDir = path.join(resRoot, 'licenses');
 const target = path.join(modelsDir, MODEL_NAME);

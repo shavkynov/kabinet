@@ -33,9 +33,9 @@
       "resources/licenses/*": "licenses/"
     },
     "icon": [
-      "../../../build/icon.png",
-      "../../../build/icon.ico",
-      "../../../build/icon.icns"
+      "../../build/icon.png",
+      "../../build/icon.ico",
+      "../../build/icon.icns"
     ],
     "category": "Productivity",
     "shortDescription": "Редактор Кабинет",

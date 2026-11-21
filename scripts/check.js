@@ -38,8 +38,8 @@ for (const f of modules) {
   for (const id of used) if (!ids.has(id)) fail(`${f}: в index.html нет #${id}`);
 }
 
-// каждый api.метод(), который зовёт окно, есть в мосте Tauri (experiments/tauri-app/bridge.src.js)
-const bridge = fs.readFileSync(path.join(root, 'experiments', 'tauri-app', 'bridge.src.js'), 'utf8');
+// каждый api.метод(), который зовёт окно, есть в мосте Tauri (desktop/bridge.src.js)
+const bridge = fs.readFileSync(path.join(root, 'desktop', 'bridge.src.js'), 'utf8');
 for (const f of modules) {
   const code = fs.readFileSync(path.join(rdir, f), 'utf8');
   for (const m of code.matchAll(/\bapi\.([A-Za-z]+)\(/g)) if (!new RegExp(`\\b${m[1]}\\b`).test(bridge)) fail(`${f}: в bridge.src.js нет api.${m[1]}`);

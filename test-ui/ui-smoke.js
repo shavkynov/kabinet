@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 
-const root = path.join(__dirname, '..', 'experiments', 'tauri-app', 'dist'); // тот же интерфейс и мост, что в установщике
+const root = path.join(__dirname, '..', 'desktop', 'dist'); // тот же интерфейс и мост, что в установщике
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
   const p = path.join(root, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+$/, 'index.html'));
