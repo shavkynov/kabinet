@@ -16,9 +16,9 @@ const SHADOW_DEFAULT_TIMEOUT_MS = 10000;
 function styleShadowEnabled() {
   if (shadowForcedOff) return false;
   try {
+    if (localStorage.getItem('kabinet.styleEngineMode') === 'basic') return false;
     if (localStorage.getItem('kabinet.styleEngineShadow') === '1') return true;
-    if (styleModelReady && localStorage.getItem('kabinet.styleEngineMode') !== 'basic') return true;
-    return false;
+    return styleModelReady;
   } catch { return styleModelReady; }
 }
 
@@ -284,8 +284,12 @@ function wireStyleEngineUi() {
     toggle.addEventListener('change', () => {
       shadowForcedOff = false;
       try {
-        if (toggle.checked) localStorage.removeItem('kabinet.styleEngineMode');
-        else localStorage.setItem('kabinet.styleEngineMode', 'basic');
+        if (toggle.checked) {
+          localStorage.removeItem('kabinet.styleEngineMode');
+        } else {
+          localStorage.setItem('kabinet.styleEngineMode', 'basic');
+          localStorage.removeItem('kabinet.styleEngineShadow');
+        }
       } catch { /* нет хранилища */ }
       if (toggle.checked) {
         scheduleStyleShadow();
@@ -308,9 +312,10 @@ function wireStyleEngineUi() {
         try { localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
         renderStyleEngineUi(st);
         if (styleShadowEnabled()) scheduleStyleShadow();
-        if (typeof setStatus === 'function') setStatus('ok', t('Языковая модель подключена'));
+        if (st.ready && typeof setStatus === 'function') setStatus('ok', t('Языковая модель подключена'));
       } catch (err) {
         if (typeof showError === 'function') showError(err && err.message ? err.message : String(err));
+        await refreshStyleEngineUi();
       } finally {
         btn.disabled = false;
       }
