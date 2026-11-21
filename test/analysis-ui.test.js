@@ -184,13 +184,24 @@ test('стиль текста: все восемь категорий доход
 test('движок: ranges заменяют старые стилевые категории, счётчики и навигация совпадают', () => {
   const text = 'Осуществление проверки выполнения требований.';
   const cfgEngine = { cats: { chain: true, chancery: true }, longMin: 30, fillers: [], repeatWin: 25 };
-  const engine = { active: true, ranges: [{ category: 'chain', from: 1, to: 1 + text.length, fragment: text }] };
+  const engine = {
+    active: true,
+    ranges: [{
+      category: 'chain',
+      from: 1,
+      to: 1 + text.length,
+      fragment: text,
+      finding: { explanation: 'Цепочка из 4 существительных подряд.' },
+    }],
+  };
   const { result, state } = runBuild(mod, [text], cfgEngine, engine);
   assert.equal(result.stats.chain, 1);
   assert.equal(result.stats.chancery, 0);
   assert.equal(result.ranges.chain.length, 1);
   assert.equal(mod.analysisRanges(state).chain.length, 1);
-  assert.deepEqual(byClass(result.set, 'an-chain').map((d) => [d.from, d.to]), [[1, 1 + text.length]]);
+  const decos = byClass(result.set, 'an-chain');
+  assert.deepEqual(decos.map((d) => [d.from, d.to]), [[1, 1 + text.length]]);
+  assert.equal(decos[0].attrs.title, 'Цепочка из 4 существительных подряд.');
   assert.equal(byClass(result.set, 'an-chancery').length, 0);
 });
 

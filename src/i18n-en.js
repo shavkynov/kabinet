@@ -999,4 +999,11 @@ module.exports = {
   "Кавычки, тире и многоточие; двойные и лишние пробелы; пробелы перед запятой и точкой; мягкие переносы и невидимые знаки; реплики оформляются длинным тире. Если неразрывные пробелы выключены, заменит обычными и те, что уже есть в тексте. С галочкой «Убирать пустые строки между абзацами» удалит и пустые абзацы: расстояние между абзацами тогда задаёт режим «Абзацы» (отступ или красная строка).": "Quotes, dashes and ellipses; double and extra spaces; spaces before a comma or period; soft hyphens and invisible characters; dialogue gets a long dash. If non-breaking spaces are off, existing ones become ordinary spaces. With “Remove blank lines between paragraphs” on, empty paragraphs are deleted too; spacing between paragraphs then comes from the “Paragraphs” mode (spacing or first-line indent).",
   "¶ конец абзаца, ° неразрывный пробел, → табуляция и красная строка, ↵ мягкий перенос. Метки видны только на экране: в текст, копирование и экспорт они не попадают.": "¶ end of paragraph, ° non-breaking space, → tab and first-line indent, ↵ soft hyphen. The marks appear on screen only: they never get into the text, copies or exports.",
   "Места, где слог можно упростить или оживить. Это не ошибки: у каждого приёма бывает законное место. Реплики героев не проверяются. Курсор на отмеченном показывает совет, стрелки ‹ › листают места.": "Places where the prose could be simpler or livelier. These are not mistakes: every device has its place. Characters' speech is not checked. Hover a marked spot for advice; the ‹ › arrows step through the places.",
+  "Точный синтаксический разбор": "Precise syntactic analysis",
+  "Подключить файл модели…": "Connect model file…",
+  "Заменить файл модели…": "Replace model file…",
+  "Локальная модель UD Russian-GSD (CC BY-NC-SA 4.0, russian-gsd-ud-2.5-191206.udpipe). Работает без интернета; без модели используется базовый разбор.": "Local UD Russian-GSD model (CC BY-NC-SA 4.0, russian-gsd-ud-2.5-191206.udpipe). Works offline; basic analysis is used without a model.",
+  "Подключена локальная модель ({0}).": "Local model connected ({0}).",
+  "Модель не подключена — работает базовый разбор.": "Model not connected — basic analysis is active.",
+  "Языковая модель подключена": "Language model connected",
 };

@@ -55,8 +55,8 @@ for (const [name, n] of seen) if (n > 1) fail(`app: функция ${name} об�
 
 const tests = fs.readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'test', f));
 const t = spawnSync(process.execPath, ['--test', ...tests], { encoding: 'utf8' });
-const pass = /# pass (\d+)/.exec(t.stdout);
-const bad = /# fail (\d+)/.exec(t.stdout);
+const pass = /(?:#|ℹ) pass (\d+)/.exec(t.stdout);
+const bad = /(?:#|ℹ) fail (\d+)/.exec(t.stdout);
 if (t.status !== 0 || (bad && bad[1] !== '0')) fail(`тесты не прошли\n${t.stdout.split('\n').filter((l) => /not ok|Error/.test(l)).join('\n')}`);
 else console.log(`тесты: ${pass ? pass[1] : '?'} пройдено`);
 

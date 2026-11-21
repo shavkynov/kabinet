@@ -662,6 +662,17 @@
         </label>
       </div>
       <p class="hint">Только для русского текста. Слова-паразиты, повторы, длинные предложения и части речи — в разделе «Проверка».</p>
+      <div id="styleEngineBox" hidden>
+        <label class="an-row">
+          <input id="styleEngineToggle" type="checkbox">
+          <span class="an-name">Точный синтаксический разбор</span>
+        </label>
+        <p id="styleEngineStatus" class="hint"></p>
+        <div class="row">
+          <button id="btnStylePickModel" type="button" class="secondary wide-btn">Подключить файл модели…</button>
+        </div>
+        <p class="hint">Локальная модель UD Russian-GSD (CC BY-NC-SA 4.0, russian-gsd-ud-2.5-191206.udpipe). Работает без интернета; без модели используется базовый разбор.</p>
+      </div>
     </div>
 
     <!-- анализ и проверка текста -->

@@ -6,13 +6,20 @@ let shadowTimer = 0;
 let shadowSeq = 0;
 let shadowEpoch = 0;
 let shadowPrev = 0;
+let shadowForcedOff = false;
+let styleModelReady = false;
 
 const SHADOW_CATEGORIES = ['chain', 'which', 'chancery', 'weak', 'own', 'redund', 'remark', 'tell'];
 const SHADOW_DEBOUNCE_MS = 900;
 const SHADOW_DEFAULT_TIMEOUT_MS = 10000;
 
 function styleShadowEnabled() {
-  try { return localStorage.getItem('kabinet.styleEngineShadow') === '1'; } catch { return false; }
+  if (shadowForcedOff) return false;
+  try {
+    if (localStorage.getItem('kabinet.styleEngineShadow') === '1') return true;
+    if (styleModelReady && localStorage.getItem('kabinet.styleEngineMode') !== 'basic') return true;
+    return false;
+  } catch { return styleModelReady; }
 }
 
 function shadowCategories() {
@@ -237,10 +244,90 @@ async function runStyleShadow() {
   }
 }
 
-// Внутреннее управление для диагностики; намеренно не выведено в интерфейс.
+function renderStyleEngineUi(st) {
+  const box = typeof document !== 'undefined' ? document.querySelector('#styleEngineBox') : null;
+  if (!box) return;
+  if (!st || !st.supported) { box.hidden = true; return; }
+  box.hidden = false;
+  styleModelReady = !!st.ready;
+  const toggle = document.querySelector('#styleEngineToggle');
+  const status = document.querySelector('#styleEngineStatus');
+  const btn = document.querySelector('#btnStylePickModel');
+  if (toggle) {
+    toggle.disabled = !styleModelReady;
+    toggle.checked = styleModelReady && styleShadowEnabled();
+  }
+  if (status) {
+    status.textContent = styleModelReady
+      ? t('Подключена локальная модель ({0}).', st.modelVersion || 'russian-gsd')
+      : t('Модель не подключена — работает базовый разбор.');
+  }
+  if (btn) {
+    btn.textContent = styleModelReady ? t('Заменить файл модели…') : t('Подключить файл модели…');
+  }
+}
+
+async function refreshStyleEngineUi() {
+  if (typeof api === 'undefined' || !api || typeof api.styleStatus !== 'function') return;
+  const wasReady = styleModelReady;
+  try {
+    const st = await api.styleStatus();
+    renderStyleEngineUi(st);
+    if (!wasReady && styleModelReady && styleShadowEnabled()) scheduleStyleShadow();
+  } catch { /* платформа без статуса модели */ }
+}
+
+function wireStyleEngineUi() {
+  const toggle = typeof document !== 'undefined' ? document.querySelector('#styleEngineToggle') : null;
+  const btn = typeof document !== 'undefined' ? document.querySelector('#btnStylePickModel') : null;
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      shadowForcedOff = false;
+      try {
+        if (toggle.checked) localStorage.removeItem('kabinet.styleEngineMode');
+        else localStorage.setItem('kabinet.styleEngineMode', 'basic');
+      } catch { /* нет хранилища */ }
+      if (toggle.checked) {
+        scheduleStyleShadow();
+      } else {
+        invalidateShadow();
+        clearTimeout(shadowTimer);
+        shadowSeq += 1;
+        fallbackStyleAnalysis();
+        window.__styleShadow = null;
+      }
+    });
+  }
+  if (btn && typeof api !== 'undefined' && api && typeof api.stylePickModel === 'function') {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const st = await api.stylePickModel();
+        if (!st) return;
+        shadowForcedOff = false;
+        try { localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
+        renderStyleEngineUi(st);
+        if (styleShadowEnabled()) scheduleStyleShadow();
+        if (typeof setStatus === 'function') setStatus('ok', t('Языковая модель подключена'));
+      } catch (err) {
+        if (typeof showError === 'function') showError(err && err.message ? err.message : String(err));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+  refreshStyleEngineUi();
+}
+
+// Внутреннее управление для диагностики и E2E.
 window.kabinetStyleShadow = {
-  enable() { try { localStorage.setItem('kabinet.styleEngineShadow', '1'); } catch { /* нет хранилища */ } scheduleStyleShadow(); },
+  enable() {
+    shadowForcedOff = false;
+    try { localStorage.setItem('kabinet.styleEngineShadow', '1'); localStorage.removeItem('kabinet.styleEngineMode'); } catch { /* нет хранилища */ }
+    scheduleStyleShadow();
+  },
   disable() {
+    shadowForcedOff = true;
     try { localStorage.removeItem('kabinet.styleEngineShadow'); } catch { /* нет хранилища */ }
     invalidateShadow();
     clearTimeout(shadowTimer);
@@ -266,4 +353,5 @@ window.kabinetStyleShadow = {
 // Контур готов только после инициализации всех констант этого модуля;
 // applyAnalysisSettings() вызывается раньше во время загрузки окна.
 window.__styleShadowReady = true;
+wireStyleEngineUi();
 if (styleShadowEnabled()) scheduleStyleShadow();

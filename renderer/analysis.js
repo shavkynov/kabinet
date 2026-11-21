@@ -273,7 +273,9 @@ function build(doc, cfg, engine = null) {
       const fragment = range.fragment || doc.textBetween(range.from, range.to, '', '￼');
       if (skip[cat].size && skip[cat].has(skipKey(fragment))) continue;
       stats[cat] += 1;
-      decos.push(Decoration.inline(range.from, range.to, { class: `an an-${cat}` }));
+      const tip = (range.finding && range.finding.explanation) || range.explanation || range.tip || '';
+      const attrs = tip ? { class: `an an-${cat}`, title: tip } : { class: `an an-${cat}` };
+      decos.push(Decoration.inline(range.from, range.to, attrs));
       ranges[cat].push({ from: range.from, to: range.to });
     }
   }

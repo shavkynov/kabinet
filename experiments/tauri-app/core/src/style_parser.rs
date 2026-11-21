@@ -266,6 +266,44 @@ impl StyleParser {
         }
     }
 
+    pub fn status(&self) -> Value {
+        json!({
+            "supported": true,
+            "ready": self.model_path.is_file(),
+            "path": self.model_path.to_string_lossy(),
+            "modelVersion": self.model_version,
+            "modelSha256": self.model_sha256,
+        })
+    }
+
+    pub fn install_model_from(&self, src: &Path) -> Result<Value, String> {
+        let bytes = fs::read(src).map_err(|e| format!("Не удалось прочитать файл модели: {}", e))?;
+        let actual = format!("{:x}", Sha256::digest(&bytes));
+        if !self.model_sha256.is_empty() && actual != self.model_sha256 {
+            return Err(format!("Модель стилевого анализа повреждена или не та: SHA-256 {} вместо {}.", actual, self.model_sha256));
+        }
+        let parent = self.model_path.parent().ok_or_else(|| "Некорректный путь для хранения модели.".to_string())?;
+        fs::create_dir_all(parent).map_err(|e| format!("Не удалось создать каталог для модели: {}", e))?;
+        let same_path = src == self.model_path
+            || (fs::canonicalize(src).ok().zip(fs::canonicalize(&self.model_path).ok()).map(|(a, b)| a == b) == Some(true));
+        if !same_path {
+            let name = self.model_path.file_name().and_then(|n| n.to_str()).unwrap_or(MODEL_FILE_NAME);
+            let tmp = parent.join(format!("{}.tmp.{}", name, std::process::id()));
+            if let Err(e) = fs::write(&tmp, &bytes) {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!("Не удалось сохранить модель: {}", e));
+            }
+            if let Err(e) = fs::rename(&tmp, &self.model_path) {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!("Не удалось разместить файл модели: {}", e));
+            }
+        }
+        if let Ok(mut guard) = self.loaded.lock() {
+            *guard = None;
+        }
+        Ok(self.status())
+    }
+
     /// Модель загружается один раз; хэш проверяется до Model::load.
     fn model(&self) -> Result<Arc<Mutex<Model>>, String> {
         let mut guard = self.loaded.lock().map_err(|_| "Внутренний замок парсера недоступен.".to_string())?;
@@ -648,6 +686,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn status_and_install_model_from_validates_sha256_and_installs_atomically() {
+        let tmp = std::env::temp_dir().join(format!("kabinet-install-model-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let target = tmp.join("data").join("style-models").join(MODEL_FILE_NAME);
+        let good_bytes = b"valid-model-bytes";
+        let expected_sha = format!("{:x}", Sha256::digest(good_bytes));
+        let p = StyleParser::new(target.clone(), Some("test-ver".into()), Some(expected_sha));
+
+        let st0 = p.status();
+        assert_eq!(st0["supported"], json!(true));
+        assert_eq!(st0["ready"], json!(false));
+
+        let bad_src = tmp.join("bad.udpipe");
+        fs::write(&bad_src, b"wrong-bytes").unwrap();
+        let err = p.install_model_from(&bad_src).unwrap_err();
+        assert!(err.contains("повреждена или не та"), "{}", err);
+        assert!(!target.exists(), "при неверном SHA-256 целевой файл не создаётся");
+
+        let good_src = tmp.join("good.udpipe");
+        fs::write(&good_src, good_bytes).unwrap();
+        let st1 = p.install_model_from(&good_src).unwrap();
+        assert_eq!(st1["ready"], json!(true));
+        assert_eq!(st1["modelVersion"], json!("test-ver"));
+        assert_eq!(fs::read(&target).unwrap(), good_bytes);
+
+        // Повторный выбор уже установленного целевого файла тоже проходит без потери данных.
+        let st2 = p.install_model_from(&target).unwrap();
+        assert_eq!(st2["ready"], json!(true));
+        assert_eq!(fs::read(&target).unwrap(), good_bytes);
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]

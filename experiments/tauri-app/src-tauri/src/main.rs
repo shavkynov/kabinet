@@ -479,6 +479,17 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             app.state::<Arc<StyleParser>>().cancel(task_id);
             Ok(json!(true))
         }
+        "style:status" => Ok(app.state::<Arc<StyleParser>>().status()),
+        "style:pickModel" => {
+            let Some(f) = rfd::AsyncFileDialog::new()
+                .set_title("Выберите файл языковой модели")
+                .add_filter("UDPipe", &["udpipe"])
+                .pick_file().await else { return Ok(Value::Null); };
+            let svc = app.state::<Arc<StyleParser>>().inner().clone();
+            let src = f.path().to_path_buf();
+            tauri::async_runtime::spawn_blocking(move || svc.install_model_from(&src))
+                .await.map_err(|e| format!("Поток установки модели завершился: {}", e))?
+        }
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
         "log:write" => {
             let level = a.first().and_then(|v| v.as_str()).unwrap_or("info");
