@@ -256,7 +256,7 @@ function findNounChains(text, sentence, speech = []) {
         start: candidate.start,
         end: candidate.end,
         fragment: text.slice(candidate.start, candidate.end),
-        explanation: `Потенциально тяжёлая именная цепь: ${candidate.path.length} именные головы, ${candidate.path.length - 1} генитивные связи, ${candidate.nominalizations} кандидата в отглагольные существительные.`,
+        explanation: `Потенциально тяжёлая именная цепь: ${candidate.path.length} именные головы, ${candidate.path.length - 1} генитивные связи, ${candidate.nominalizations} кандидата в отглагольные существительные. Совет: замените часть отглагольных существительных на глаголы или разбейте цепь на два предложения.`,
         method: [...deprels, 'morphology:Case=Gen', 'derivational-suffix:nominalization'],
         // Суффикс — эвристика; без словаря/семантики high не выдаём.
         confidence: 'medium',
@@ -363,7 +363,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
         const path = bestEventPath(token, children);
         if (path.length >= 2 && path.every((t) => validSpan(t, text) && !tokenInSpeech(t, speech))) {
           add('chancery.nominal-subject-cluster', path[0].start, path[path.length - 1].end,
-            `Отглагольное существительное в роли подлежащего с зависимой событийной цепочкой (${path.length} элементов).`,
+            `Отглагольное существительное в роли подлежащего с зависимой событийной цепочкой (${path.length} элементов). Совет: переведите отглагольное подлежащее в действие с живым субъектом и личным глаголом.`,
             ['dependency:nsubj', 'dependency:nmod', 'morphology:Case=Gen', 'derivational-or-lexical:event-noun'], 'medium');
         }
       }
@@ -377,7 +377,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
       const event = kids.find((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
       if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
         add('chancery.light-verb-event-noun', Math.min(token.start, event.start), Math.max(token.end, event.end),
-          `Действие выражено сочетанием лёгкого глагола «${token.text}» с событийным существительным «${event.text}».`,
+          `Действие выражено сочетанием лёгкого глагола «${token.text}» с событийным существительным «${event.text}». Совет: замените связку «лёгкий глагол + существительное» одним точным глаголом.`,
           [`dependency:${event.deprel}`, 'lexicon:light-verb', 'lexicon-or-suffix:event-noun'], 'medium');
       }
     }
@@ -391,7 +391,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
         const start = Math.min(token.start, event.start, aux ? aux.start : token.start);
         const end = Math.max(token.end, event.end, aux ? aux.end : token.end);
         add('chancery.passive-event-nominal', start, end,
-          `Пассивная конструкция без агенса с событийным существительным «${event.text}».`,
+          `Пассивная конструкция без агенса с событийным существительным «${event.text}». Совет: назовите того, кто действует, и переведите глагол в действительный залог.`,
           ['dependency:aux:pass', 'morphology:Voice=Pass', 'dependency:nsubj:pass', 'lexicon-or-suffix:event-noun'], 'medium');
       }
     }
@@ -407,7 +407,7 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
             && ['в', 'во', 'с', 'со', 'на', 'по', 'при', 'из', 'от'].includes(lemmaOf(c)));
           if (caseChild && validSpan(caseChild, text) && !tokenInSpeech(caseChild, speech)) {
             add('chancery.official-preposition', caseChild.start, token.end,
-              `Официальная предложная формула «${text.slice(caseChild.start, ancestor.end)}» с процессным существительным.`,
+              `Официальная предложная формула «${text.slice(caseChild.start, ancestor.end)}» с процессным существительным. Совет: замените канцелярский оборот простым предлогом или глаголом.`,
               ['dependency:case', 'lexicon:official-preposition', 'lexicon-or-suffix:event-noun'], 'low');
           }
           break;
@@ -482,13 +482,13 @@ function findWeak(text, sentence, speech = speechRanges(text)) {
       if (!noun) continue;
       const hasCase = (children.get(noun.id) || []).some((c) => c.deprel === 'case');
       add('weak.support-verb-abstract-noun', Math.min(token.start, noun.start), Math.max(token.end, noun.end),
-        `Поддерживающий глагол «${token.text}» с абстрактным существительным «${noun.text}»; точное действие выражено именем, а не глаголом.`,
+        `Поддерживающий глагол «${token.text}» с абстрактным существительным «${noun.text}»; точное действие выражено именем, а не глаголом. Совет: замените связку одним точным глаголом.`,
         [`dependency:${noun.deprel}`, 'lexicon:support-verb', 'lexicon:abstract-noun', ...(hasCase ? ['dependency:case'] : [])],
         hasCase ? 'low' : 'medium');
     } else if (WEAK_PREPOSITION_VERBS.has(lemma) && prepared) {
       const hasCase = (children.get(prepared.id) || []).some((c) => c.deprel === 'case');
       add('weak.prepositional-abstract-noun', Math.min(token.start, prepared.start), Math.max(token.end, prepared.end),
-        `Глагол «${token.text}» образует описательную конструкцию с абстрактным существительным «${prepared.text}».`,
+        `Глагол «${token.text}» образует описательную конструкцию с абстрактным существительным «${prepared.text}». Совет: назовите действие или состояние напрямую, без глагола-связки.`,
         ['dependency:obl', ...(hasCase ? ['dependency:case'] : []), 'lexicon:support-verb', 'lexicon:abstract-noun'], 'low');
     }
   }
@@ -561,7 +561,7 @@ function findOwn(text, sentence, speech = speechRanges(text)) {
     if (possessive.some((t) => !validSpan(t, text) || tokenInSpeech(t, speech))) continue;
     const start = Math.min(...possessive.map((t) => t.start));
     add('own.duplicate-possessive', start, noun.end,
-      `В одной именной группе стоят два притяжательных определителя: «${possessive.map((t) => t.text).join('», «')}».`,
+      `В одной именной группе стоят два притяжательных определителя: «${possessive.map((t) => t.text).join('», «')}». Совет: оставьте один определитель, а второй уберите, если смысл не теряется.`,
       ['dependency:det', 'morphology:possessive', 'construction:duplicate-possessive']);
   }
 
@@ -585,7 +585,7 @@ function findOwn(text, sentence, speech = speechRanges(text)) {
     if ((children.get(noun.id) || []).some((c) => isPossessiveDet(c) && c.id !== pronoun.id)) continue;
     if (hasContrastNear(tokens, pronoun.start, noun.end)) continue;
     add('own.reflexive-body-part', pronoun.start, noun.end,
-      `Возвратно-притяжательное «${pronoun.text}» при телесном существительном «${noun.text}» дублирует очевидного обладателя-подлежащее.`,
+      `Возвратно-притяжательное «${pronoun.text}» при телесном существительном «${noun.text}» дублирует очевидного обладателя-подлежащее. Совет: уберите лишнее притяжательное слово — из контекста и так ясно, чья это часть тела.`,
       ['dependency:det', 'dependency:nsubj', `dependency:${noun.deprel}`, 'morphology:Case', 'lexicon:body-part']);
   }
   return out.sort((a, b) => a.start - b.start || a.end - b.end);
@@ -640,7 +640,7 @@ function findRedund(text, sentence, speech = speechRanges(text)) {
         && validSpan(child, text) && !tokenInSpeech(child, speech));
       if (adverb) {
         add('redund.directional-pleonasm', Math.min(token.start, adverb.start), Math.max(token.end, adverb.end),
-          `Направление уже выражено глаголом «${token.text}»; «${adverb.text}» дублирует его.`,
+          `Направление уже выражено глаголом «${token.text}»; «${adverb.text}» дублирует его. Совет: уберите лишнее наречие, если оно не добавляет нового оттенка.`,
           [`dependency:${adverb.deprel}`, `lexicon:directional-pair:${lemmaOf(token)}+${lemmaOf(adverb)}`]);
       }
     }
@@ -657,7 +657,7 @@ function findRedund(text, sentence, speech = speechRanges(text)) {
         if (pair.deprel === 'amod' && hasDegreeEmphasis(dependent, children)) continue;
         if (pair.deprel === 'nmod' && dependent.feats.Case !== 'Gen') continue;
         add('redund.tautological-pair', Math.min(token.start, dependent.start), Math.max(token.end, dependent.end),
-          `«${dependent.text}» и «${token.text}» образуют устойчивую тавтологическую пару.`,
+          `«${dependent.text}» и «${token.text}» образуют устойчивую тавтологическую пару. Совет: оставьте одно слово или замените общую пару точной деталью.`,
           [`dependency:${pair.deprel}`, 'lexicon:tautological-pair']);
       }
     }
@@ -724,7 +724,7 @@ function findTell(text, sentence, speech = speechRanges(text)) {
       if ((children.get(emotion.id) || []).some((c) => ['conj', 'acl', 'ccomp', 'xcomp'].includes(c.deprel))) continue;
       if (!validSpan(subject, text) || !validSpan(emotion, text) || tokenInSpeech(subject, speech) || tokenInSpeech(emotion, speech)) continue;
       add('tell.experience-emotion-object', Math.min(token.start, emotion.start), Math.max(token.end, emotion.end),
-        `Прямое называние эмоции через «${token.text}» и объект «${emotion.text}».`,
+        `Прямое называние эмоции через «${token.text}» и объект «${emotion.text}». Совет: покажите чувство через жест, взгляд, дыхание, голос или поступок.`,
         ['dependency:obj', 'lexicon:experience-verb', 'lexicon:emotion-noun']);
     }
 
@@ -737,7 +737,7 @@ function findTell(text, sentence, speech = speechRanges(text)) {
       const subject = subjects[0];
       if (!hasKnownNominalFeatures(subject, 'Nom') || !validSpan(subject, text) || tokenInSpeech(subject, speech)) continue;
       add('tell.minimal-emotion-verb', Math.min(token.start, subject.start), Math.max(token.end, subject.end),
-        `Минимальное прямое называние состояния глаголом «${token.text}» с подлежащим «${subject.text}».`,
+        `Минимальное прямое называние состояния глаголом «${token.text}» с подлежащим «${subject.text}». Совет: покажите состояние через внешнее проявление, движение или реакцию героя.`,
         ['dependency:nsubj', 'lexicon:emotion-verb']);
     }
 
@@ -753,7 +753,7 @@ function findTell(text, sentence, speech = speechRanges(text)) {
       if (!validSpan(allCases[0], text) || !validSpan(cops[0], text) || !validSpan(subjects[0], text)) continue;
       if ([allCases[0], cops[0], subjects[0]].some((t) => tokenInSpeech(t, speech))) continue;
       add('tell.emotion-state-noun', Math.min(cops[0].start, token.start), Math.max(token.end, cops[0].end),
-        `Прямое называние состояния через копулу и предложное «${token.text}».`,
+        `Прямое называние состояния через копулу и предложное «${token.text}». Совет: переведите внутреннее состояние в действие, деталь обстановки или физическое ощущение.`,
         ['dependency:cop', 'dependency:case', 'lexicon:emotion-noun']);
     }
   }
@@ -812,7 +812,7 @@ function findRemark(text, sentence, speech = speechRanges(text)) {
         start: a.start,
         end: b.end,
         fragment: text.slice(a.start, b.end),
-        explanation: 'Две минимальные атрибуции подряд с одинаковыми речевым глаголом и субъектом при одной реплике.',
+        explanation: 'Две минимальные атрибуции подряд с одинаковыми речевым глаголом и субъектом при одной реплике. Совет: объедините или сократите пояснение автора, если говорящий и так ясен.',
         method: ['dependency:nsubj', 'lexicon:speech-verb', 'construction:minimal-attribution', 'direct-speech-boundary'],
         confidence: 'low',
         limitations: [
@@ -959,7 +959,7 @@ function findSubordinateAvalanches(text, sentence, speech = []) {
       start: cluster.start,
       end: cluster.end,
       fragment,
-      explanation: `Кластер из ${cluster.items.length} относительных/изъяснительных придаточных; максимальная вложенность — ${cluster.maxDepth}.`,
+      explanation: `Кластер из ${cluster.items.length} относительных/изъяснительных придаточных; максимальная вложенность — ${cluster.maxDepth}. Совет: разбейте длинный период на отдельные предложения или замените часть придаточных причастием.`,
       method: [...deprels, 'clause-cluster', 'sentence-boundary'],
       confidence: cluster.maxDepth >= 3 && cluster.items.length >= 3 ? 'high' : 'medium',
       limitations: [

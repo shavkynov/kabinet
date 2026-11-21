@@ -66,7 +66,7 @@ async function davHome() {
     actions.append(
       davBtn(t('Как это работает'), () => api.dav('info').catch((e) => showError(e.message))),
       davBtn(t('Отключить'), async () => {
-        if (!confirm(t('Отключить синхронизацию? Файлы в облаке и на компьютере останутся, они просто перестанут обновляться.'))) return;
+        if (!(await askConfirm(t('Отключить синхронизацию? Файлы в облаке и на компьютере останутся, они просто перестанут обновляться.'), t('Отключить')))) return;
         try { await flush(); await api.dav('detach'); setStatus('ok', t('Синхронизация отключена')); davClose(); } catch (e) { showError(e.message); }
       }),
       davBtn(t('Синхронизировать сейчас'), async (ev) => {

@@ -17,8 +17,13 @@ function applyAnalysisSettings() {
   $('#tenseMode').value = settings.tenseMode;
   document.querySelectorAll('#viewAnalysis [data-extra]').forEach((row) => { row.hidden = !settings.anShow[row.dataset.extra] && !settings.an[row.dataset.extra]; });
   document.querySelectorAll('#viewAnalysis input[data-anshow]').forEach((box) => { box.checked = !!settings.anShow[box.dataset.anshow]; });
-  $('#btnCheck').classList.toggle('lit', AN_CATS.some((k) => !STYLE_KEYS.includes(k) && settings.an[k]));
-  $('#btnStyle').classList.toggle('lit', STYLE_KEYS.some((k) => settings.an[k]));
+  const hasCheckOn = AN_CATS.some((k) => !STYLE_KEYS.includes(k) && settings.an[k]);
+  const hasStyleOn = STYLE_KEYS.some((k) => settings.an[k]);
+  $('#btnCheck').classList.toggle('lit', hasCheckOn);
+  $('#btnStyle').classList.toggle('lit', hasStyleOn);
+  if ($('#btnStyleNone')) $('#btnStyleNone').disabled = !hasStyleOn;
+  if ($('#btnStyleAll')) $('#btnStyleAll').disabled = STYLE_KEYS.every((k) => settings.an[k]);
+  if ($('#btnAnNone')) $('#btnAnNone').disabled = !hasCheckOn;
   $('#anFillerSpeech').checked = settings.fillerSkipSpeech;
   const sig = JSON.stringify([settings.an, settings.tenseMode, settings.anLongMin, settings.anRepeatWin, settings.fillers, settings.fillerSkipSpeech]);
   if (sig !== lastAn) {
@@ -76,6 +81,35 @@ function showAnalysisStats(st, active) {
     el.textContent = AN_NAMES[k] && st.words ? `${n} · ${Math.round((n / st.words) * 100)}%` : String(n);
   }
   $('#anTotal').textContent = active ? t('Слов в разборе: {0}', st.words || 0) : '';
+  const sumEl = $('#anSummary');
+  if (sumEl) {
+    sumEl.textContent = '';
+    const items = active ? AN_NAV_CATS.filter((k) => settings.an[k] && (st[k] || 0) > 0) : [];
+    sumEl.hidden = !items.length;
+    if (items.length) {
+      const lbl = document.createElement('span');
+      lbl.className = 'an-eg';
+      lbl.style.width = '100%';
+      lbl.textContent = t('Сводка главы — нажмите, чтобы перейти:');
+      sumEl.append(lbl);
+      for (const k of items) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'an-chip';
+        chip.dataset.sumCat = k;
+        const dot = document.createElement('span');
+        dot.className = 'an-chip-dot';
+        dot.style.background = `var(--an-${k})`;
+        const name = document.createElement('span');
+        name.textContent = t(NAV_NAMES[k]);
+        const count = document.createElement('b');
+        count.textContent = String(st[k]);
+        chip.append(dot, name, count);
+        sumEl.append(chip);
+      }
+    }
+  }
+  if (!active) hideAnalysisPop();
   // «‹ ›» нужны только там, где есть что листать
   // кнопки «‹ ›» есть и в «Подсветке» (#viewAnalysis), и в панели «Стиль текста» (#stylePanel)
   document.querySelectorAll('[data-an-nav]').forEach((b) => {
@@ -84,16 +118,123 @@ function showAnalysisStats(st, active) {
   });
 }
 
-// ---------- переход к предыдущему и следующему месту в «Подсветке» ----------
+// ---------- переход к предыдущему и следующему месту и всплывающий совет (#anPop) ----------
 const NAV_NAMES = { adv: 'Наречия', passive: 'Страдательный залог', long: 'Длинные предложения', repeat: 'Повторы слов', filler: 'Слова-паразиты', chancery: 'Канцелярит и штампы', weak: 'Слабые глаголы', tell: 'Назвал, а не показал', chain: 'Цепочки существительных', remark: 'Ремарки при репликах', redund: 'Лишние слова и тавтология', which: 'Лавина «который» и «что»', own: 'Лишнее «свой» и «его»' };
+
+let anPopTimer = 0;
+let anPopHideTimer = 0;
+let anPopPinUntil = 0;
+let anPopState = null;
+
+function clearAnPopTimers() {
+  clearTimeout(anPopTimer);
+  clearTimeout(anPopHideTimer);
+  anPopTimer = 0;
+  anPopHideTimer = 0;
+}
+
+function hideAnalysisPop() {
+  clearAnPopTimers();
+  anPopState = null;
+  const pop = $('#anPop');
+  if (pop) pop.hidden = true;
+}
+
+function scheduleHideAnPop() {
+  clearTimeout(anPopTimer);
+  anPopTimer = 0;
+  clearTimeout(anPopHideTimer);
+  anPopHideTimer = setTimeout(() => {
+    anPopHideTimer = 0;
+    hideAnalysisPop();
+  }, 180);
+}
+
+function analysisCatOf(el) {
+  if (!el || !el.classList) return null;
+  for (const cls of el.classList) {
+    if (cls.startsWith('an-')) {
+      const cat = cls.slice(3);
+      if (AN_NAV_CATS.includes(cat)) return cat;
+    }
+  }
+  return null;
+}
+
+function takeAnalysisTip(el) {
+  if (!el) return '';
+  if (!el.dataset.anTip) {
+    const raw = el.getAttribute('title') || '';
+    if (!raw) return '';
+    el.dataset.anTip = raw;
+    el.removeAttribute('title');
+  }
+  return el.dataset.anTip;
+}
+
+function suppressAncestorTitles(el) {
+  for (let cur = el.parentElement; cur && !cur.classList.contains('ProseMirror'); cur = cur.parentElement) {
+    if (cur.classList.contains('an')) takeAnalysisTip(cur);
+  }
+}
+
+function showAnalysisPopAt({ cat, text, tip, rect, el = null, hover = false }) {
+  const pop = $('#anPop');
+  if (!pop || !tip) return;
+  clearAnPopTimers();
+  anPopState = { cat, text, el, hover };
+  $('#anPopCat').textContent = t(NAV_NAMES[cat] || '');
+  $('#anPopText').textContent = tip;
+  const hasNav = editor ? (analysisRanges(editor.state)[cat] || []).length > 1 : false;
+  $('#anPopPrev').disabled = !hasNav;
+  $('#anPopNext').disabled = !hasNav;
+  $('#anPopSkip').hidden = !(AN_NAV_CATS.includes(cat) && text);
+  pop.hidden = false;
+  const pad = 8;
+  const pw = pop.offsetWidth || 320;
+  const ph = pop.offsetHeight || 120;
+  const left = Math.max(pad, Math.min(rect.left, window.innerWidth - pw - pad));
+  let top = rect.bottom + 8;
+  if (top + ph > window.innerHeight - pad) top = Math.max(pad, rect.top - ph - 8);
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+}
+
+function showAnalysisPopFromRange(cat, from, to) {
+  if (!editor) return;
+  let el = null;
+  let tip = '';
+  try {
+    const probe = to > from ? Math.min(from + 1, editor.state.doc.content.size) : from;
+    const { node } = editor.view.domAtPos(probe);
+    const dom = node.nodeType === 1 ? node : node.parentElement;
+    el = dom && dom.closest ? dom.closest(`.an.an-${cat}`) : null;
+    if (el) suppressAncestorTitles(el);
+    tip = takeAnalysisTip(el);
+  } catch { /* текст успел измениться */ }
+  const text = editor.state.doc.textBetween(from, to, '', '￼').trim();
+  if (!tip) tip = text ? `${t(NAV_NAMES[cat] || '')}: «${text}»` : '';
+  let rect = el ? el.getBoundingClientRect() : null;
+  if (!rect || (!rect.width && !rect.height)) {
+    try {
+      const a = editor.view.coordsAtPos(from);
+      const b = editor.view.coordsAtPos(to);
+      rect = { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) };
+    } catch { return; }
+  }
+  showAnalysisPopAt({ cat, text, tip, rect, el });
+}
 
 function stepAnalysis(cat, dir) {
   if (!editor) return;
   const list = analysisRanges(editor.state)[cat] || [];
   const idx = stepIndex(list, editor.state.selection.from, dir);
   if (idx < 0) { setStatus('ok', t('Нет отмеченных мест')); return; }
-  gotoRhythm(list[idx].from, list[idx].to); // тот же переход, что в «Ритме»
+  anPopPinUntil = Date.now() + 400;
+  const item = list[idx];
+  gotoRhythm(item.from, item.to); // тот же переход, что в «Ритме»
   setStatus('ok', t('{0}: {1} из {2}', t(NAV_NAMES[cat]), idx + 1, list.length));
+  requestAnimationFrame(() => requestAnimationFrame(() => showAnalysisPopFromRange(cat, item.from, item.to)));
 }
 
 // ---------- исключения «Не отмечать здесь» (хранятся в настройках проекта) ----------
@@ -243,6 +384,65 @@ function gotoTense(idx) {
   });
 }
 
+function wireAnalysisPop() {
+  const pop = $('#anPop');
+  const paper = $('#paper');
+  const scroller = $('#paper-area');
+  if (!pop || !paper) return;
+  $('#anPopClose').addEventListener('click', hideAnalysisPop);
+  $('#anPopPrev').addEventListener('click', () => { if (anPopState) stepAnalysis(anPopState.cat, -1); });
+  $('#anPopNext').addEventListener('click', () => { if (anPopState) stepAnalysis(anPopState.cat, 1); });
+  $('#anPopSkip').addEventListener('click', () => {
+    if (!anPopState || !anPopState.text) return;
+    addAnalysisSkip(anPopState.cat, anPopState.text);
+    hideAnalysisPop();
+  });
+  pop.addEventListener('mouseenter', () => { clearTimeout(anPopHideTimer); });
+  pop.addEventListener('mouseleave', () => { if (anPopState && anPopState.hover) scheduleHideAnPop(); });
+  paper.addEventListener('mouseover', (e) => {
+    const el = e.target && e.target.closest ? e.target.closest('.ProseMirror .an') : null;
+    if (!el) return;
+    const cat = analysisCatOf(el);
+    if (!cat) return;
+    suppressAncestorTitles(el);
+    const tip = takeAnalysisTip(el);
+    if (!tip) return;
+    if (anPopState && anPopState.el === el && !pop.hidden) { clearTimeout(anPopHideTimer); return; }
+    clearTimeout(anPopTimer);
+    clearTimeout(anPopHideTimer);
+    anPopTimer = setTimeout(() => {
+      anPopTimer = 0;
+      if (!el.isConnected) return;
+      showAnalysisPopAt({ cat, text: el.textContent.trim(), tip, rect: el.getBoundingClientRect(), el, hover: true });
+    }, 160);
+  });
+  paper.addEventListener('mouseout', (e) => {
+    clearTimeout(anPopTimer);
+    anPopTimer = 0;
+    const rel = e.relatedTarget;
+    if (rel && (pop.contains(rel) || (rel.closest && rel.closest('.ProseMirror .an')))) return;
+    if (anPopState && anPopState.hover) scheduleHideAnPop();
+  });
+  paper.addEventListener('mouseleave', () => {
+    clearTimeout(anPopTimer);
+    anPopTimer = 0;
+    if (anPopState && anPopState.hover) scheduleHideAnPop();
+  });
+  for (const ev of ['keydown', 'input', 'contextmenu']) paper.addEventListener(ev, hideAnalysisPop);
+  if (scroller) scroller.addEventListener('scroll', () => { if (Date.now() > anPopPinUntil) hideAnalysisPop(); }, { passive: true });
+  document.addEventListener('mousedown', (e) => {
+    if (pop.hidden) return;
+    if (e.target.closest('#anPop, [data-an-nav], [data-sum-cat]')) return;
+    hideAnalysisPop();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !pop.hidden) {
+      e.stopPropagation();
+      hideAnalysisPop();
+    }
+  }, true);
+}
+
 function wireAnalysis() {
   const onNavClick = (e) => {
     const b = e.target.closest('button[data-an-nav]');
@@ -252,6 +452,36 @@ function wireAnalysis() {
   };
   $('#viewAnalysis').addEventListener('click', onNavClick);
   $('#stylePanel').addEventListener('click', onNavClick);
+  if ($('#anSummary')) {
+    $('#anSummary').addEventListener('click', (e) => {
+      const chip = e.target.closest('button[data-sum-cat]');
+      if (!chip) return;
+      e.preventDefault();
+      stepAnalysis(chip.dataset.sumCat, 1);
+    });
+  }
+  const setStyleGroup = (on) => {
+    const next = { ...settings.an };
+    for (const k of STYLE_KEYS) {
+      if (on) next[k] = true;
+      else delete next[k];
+    }
+    settings.an = next;
+    applySettings();
+    saveSettings();
+  };
+  if ($('#btnStyleAll')) $('#btnStyleAll').addEventListener('click', () => setStyleGroup(true));
+  if ($('#btnStyleNone')) $('#btnStyleNone').addEventListener('click', () => setStyleGroup(false));
+  if ($('#btnAnNone')) {
+    $('#btnAnNone').addEventListener('click', () => {
+      const next = { ...settings.an };
+      for (const k of AN_CATS) if (!STYLE_KEYS.includes(k)) delete next[k];
+      settings.an = next;
+      applySettings();
+      saveSettings();
+    });
+  }
+  wireAnalysisPop();
   document.querySelectorAll('#viewAnalysis input[data-anshow]').forEach((box) => box.addEventListener('change', () => {
     settings.anShow = { ...settings.anShow, [box.dataset.anshow]: box.checked };
     if (!box.checked) delete settings.anShow[box.dataset.anshow];
@@ -290,8 +520,8 @@ function wireAnalysis() {
   };
   $('#btnFillerAdd').addEventListener('click', addFromInput);
   fin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addFromInput(); } });
-  $('#btnFillerReset').addEventListener('click', () => {
-    if (confirm(t('Вернуть стандартный список? Ваши слова из списка пропадут.'))) setFillers(DEFAULT_FILLERS[LANG] || DEFAULT_FILLERS.ru);
+  $('#btnFillerReset').addEventListener('click', async () => {
+    if (await askConfirm(t('Вернуть стандартный список? Ваши слова из списка пропадут.'), t('Сбросить'))) setFillers(DEFAULT_FILLERS[LANG] || DEFAULT_FILLERS.ru);
   });
   const win = $('#anRepeatWin');
   const commitWin = () => {

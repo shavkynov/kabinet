@@ -601,8 +601,14 @@
 
     <!-- стиль текста -->
     <div id="stylePanel" class="panel" hidden>
-      <h3>Стиль текста</h3>
-      <p class="hint">Места, где слог можно упростить или оживить. Это не ошибки: у каждого приёма бывает законное место. Реплики героев не проверяются. Курсор на отмеченном показывает совет, стрелки ‹ › листают места.</p>
+      <div class="panel-head">
+        <h3>Стиль текста</h3>
+        <div class="panel-head-acts">
+          <button id="btnStyleAll" type="button" class="linkish">Включить все</button>
+          <button id="btnStyleNone" type="button" class="linkish">Снять все</button>
+        </div>
+      </div>
+      <p class="hint">Наведите курсор или листайте ‹ › — появится подсказка с советом и кнопкой «Не отмечать здесь». Реплики героев не проверяются.</p>
       <div id="styleBox">
         <label class="an-row an-row2">
           <input id="an_chancery" type="checkbox" data-an="chancery">
@@ -662,7 +668,8 @@
         </label>
       </div>
       <p class="hint">Только для русского текста. Слова-паразиты, повторы, длинные предложения и части речи — в разделе «Проверка».</p>
-      <div id="styleEngineBox" hidden>
+      <details id="styleEngineBox" class="more" hidden>
+        <summary><span id="styleEngineSummary">Точный разбор</span></summary>
         <label class="an-row">
           <input id="styleEngineToggle" type="checkbox">
           <span class="an-name">Точный синтаксический разбор</span>
@@ -672,7 +679,7 @@
           <button id="btnStylePickModel" type="button" class="secondary wide-btn">Подключить файл модели…</button>
         </div>
         <p class="hint">Локальная модель UD Russian-GSD (CC BY-NC-SA 4.0, russian-gsd-ud-2.5-191206.udpipe). Работает без интернета; без модели используется базовый разбор.</p>
-      </div>
+      </details>
     </div>
 
     <!-- анализ и проверка текста -->
@@ -686,6 +693,11 @@
 
       <div id="viewAnalysis">
         <p class="hint">Выбранные виды слов выделяются цветом, текст не меняется. Разбор приблизительный: по окончаниям, без словаря.</p>
+        <div class="an-actions">
+          <span id="anTotal" class="an-total"></span>
+          <button id="btnAnNone" type="button" class="linkish">Снять все</button>
+        </div>
+        <div id="anSummary" class="an-summary" hidden></div>
         <div id="anRows">
         <label class="an-row an-extra" data-extra="verb" hidden>
           <input id="an_verb" type="checkbox" data-an="verb">
@@ -755,7 +767,6 @@
           <span id="anCount_filler" class="an-count"></span>
         </label>
         </div>
-        <p id="anTotal" class="an-total"></p>
         <details class="more">
           <summary><span>Список слов-паразитов</span> <span id="fillerCount" translate="no"></span></summary>
           <p class="hint">Слова и фразы, которые подсвечиваются. Уберите лишнее крестиком, добавьте свои. Слово можно добавить и из текста: выделите, правый клик.</p>
@@ -929,6 +940,17 @@
     </form>
   </dialog>
 
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <h2 id="confirmDialogTitle">Подтвердите действие</h2>
+      <p id="confirmDialogMsg"></p>
+      <div class="dialog-actions">
+        <button value="cancel" formnovalidate class="secondary">Отмена</button>
+        <button id="confirmDialogOk" value="ok">Да</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="feedbackDialog">
     <form method="dialog" id="feedbackForm">
       <h2>Сообщить об ошибке или идее</h2>
@@ -1024,6 +1046,19 @@
       <div id="linkPopTitle"></div>
       <div id="linkPopText"></div>
       <div class="lp-hint">⌘-клик: открыть карточку</div>
+    </div>
+  </div>
+
+  <div id="anPop" hidden>
+    <div class="an-pop-head">
+      <span id="anPopCat"></span>
+      <button id="anPopClose" type="button" class="an-pop-x" aria-label="Закрыть подсказку" title="Закрыть подсказку">×</button>
+    </div>
+    <div id="anPopText"></div>
+    <div class="an-pop-acts">
+      <button id="anPopPrev" type="button" class="secondary small" title="Предыдущее место" aria-label="Предыдущее место">‹</button>
+      <button id="anPopNext" type="button" class="secondary small" title="Следующее место" aria-label="Следующее место">›</button>
+      <button id="anPopSkip" type="button" class="linkish">Не отмечать здесь</button>
     </div>
   </div>
 

@@ -67,7 +67,7 @@ function renderSrcList(box, { slot, current, def, allLabel, onPick }) {
       del.title = 'Убрать из программы (ваш исходный файл не удаляется)';
       del.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm(t('Убрать «{0}» из программы?', soundLabel(value)))) return;
+        if (!(await askConfirm(t('Убрать «{0}» из программы?', soundLabel(value)), t('Убрать')))) return;
         try {
           await api.removeSound(slot, value);
           soundBufCache.delete(`${slot}/${value}`);

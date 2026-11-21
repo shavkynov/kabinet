@@ -131,8 +131,11 @@ export function createCardView({ root, onChange, onTitle, onAddField, onKey, onP
         label: f.name,
         value: f.value,
         onInput: (v) => { f.value = v; },
-        onRemove: () => {
-          if (f.value.trim() && !confirm(t('Убрать поле «{0}» вместе с его текстом?', f.name))) return;
+        onRemove: async () => {
+          const ask = typeof window !== 'undefined' && window.askConfirm
+            ? () => window.askConfirm(t('Убрать поле «{0}» вместе с его текстом?', f.name), t('Убрать'))
+            : () => Promise.resolve(true);
+          if (f.value.trim() && !(await ask())) return;
           data.fields.splice(i, 1);
           render();
           onChange();

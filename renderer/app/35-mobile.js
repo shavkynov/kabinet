@@ -69,7 +69,7 @@ function mobileBack() {
   if (modal) { modal.dispatchEvent(new Event('mob-cancel')); return true; }
   if (MOB.drawer) { closeDrawers(); return true; }
   const shown = (sel) => { const el = $(sel); return !!el && !el.hidden; };
-  if (shown('#board') || shown('#projPop') || shown('#search') || shown('#goalPop') || shown('#cmtPop')
+  if (shown('#board') || shown('#projPop') || shown('#search') || shown('#goalPop') || shown('#cmtPop') || shown('#anPop')
     || anyPanelOpen() || document.body.classList.contains('focus-mode')) {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return true;

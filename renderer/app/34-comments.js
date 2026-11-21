@@ -298,7 +298,7 @@ function gotoComment(id) {
   renderComments();
 }
 
-function commentAction(id, act) {
+async function commentAction(id, act) {
   const c = cmtList.find((x) => x.id === id);
   if (!c) return;
   if (act === 'edit') { cmtEditing = id; renderComments(); return; }
@@ -312,7 +312,7 @@ function commentAction(id, act) {
     cmtMarkDirty();
     renderComments();
   } else if (act === 'del') {
-    if (!confirm(t('Удалить комментарий?'))) return;
+    if (!(await askConfirm(t('Удалить комментарий?'), t('Удалить')))) return;
     cmtList = cmtList.filter((x) => x.id !== id);
     if (editor) removeCommentRange(editor, id);
     if (cmtActive === id) cmtActive = null;

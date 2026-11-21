@@ -28,11 +28,15 @@ function makeDoc(paragraphs) {
 
 function makeEl() {
   const listeners = new Map();
+  const attrs = {};
   return {
     hidden: false,
     disabled: false,
     checked: false,
+    open: false,
     textContent: '',
+    hasAttribute: (k) => Object.hasOwn(attrs, k),
+    setAttribute: (k, v) => { attrs[k] = String(v); },
     addEventListener(type, fn) {
       if (!listeners.has(type)) listeners.set(type, []);
       listeners.get(type).push(fn);
@@ -88,6 +92,7 @@ async function mountShadow({ storage, docText, apiStub }) {
 
   const els = {
     '#styleEngineBox': makeEl(),
+    '#styleEngineSummary': makeEl(),
     '#styleEngineToggle': makeEl(),
     '#styleEngineStatus': makeEl(),
     '#btnStylePickModel': makeEl(),
@@ -170,6 +175,8 @@ test('полный жизненный цикл UI стилевого движк�
   // 1. Первый запуск без модели: чекбокс выключен, style:parse не вызывается, работает базовый режим.
   const first = await mountShadow({ storage, docText, apiStub: makeApi() });
   assert.equal(first.els['#styleEngineBox'].hidden, false);
+  assert.equal(first.els['#styleEngineBox'].open, true);
+  assert.match(first.els['#styleEngineSummary'].textContent, /Базовый разбор/);
   assert.equal(first.els['#styleEngineToggle'].disabled, true);
   assert.equal(first.els['#styleEngineToggle'].checked, false);
   assert.match(first.els['#styleEngineStatus'].textContent, /Модель не подключена/);
@@ -181,6 +188,7 @@ test('полный жизненный цикл UI стилевого движк�
   await first.els['#btnStylePickModel'].trigger('click');
   assert.equal(first.els['#styleEngineToggle'].disabled, false);
   assert.equal(first.els['#styleEngineToggle'].checked, true);
+  assert.match(first.els['#styleEngineSummary'].textContent, /Точный разбор/);
   assert.match(first.els['#styleEngineStatus'].textContent, /Подключена локальная модель/);
   assert.equal(first.statusCalls.at(-1).msg, 'Языковая модель подключена');
   await new Promise((r) => setTimeout(r, 60));
@@ -194,12 +202,15 @@ test('полный жизненный цикл UI стилевого движк�
   assert.equal(first.editor.state.__an.ranges.tell.length, 1);
   const redDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-redund');
   assert.ok(redDeco && redDeco.attrs.title.length > 0, 'подсветка должна содержать объяснение в title');
+  assert.match(redDeco.attrs.title, /Совет:/);
   const tellDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-tell');
   assert.ok(tellDeco && tellDeco.attrs.title.length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
   assert.equal(first.analysisMod.stepIndex(first.editor.state.__an.ranges.redund, 0, 1), 0);
 
   // 3. Повторный запуск приложения: при том же storage модель остаётся подключённой и запускается автоматически.
   const second = await mountShadow({ storage, docText, apiStub: makeApi() });
+  assert.equal(second.els['#styleEngineBox'].open, false);
+  assert.match(second.els['#styleEngineSummary'].textContent, /Точный разбор/);
   assert.equal(second.els['#styleEngineToggle'].disabled, false);
   assert.equal(second.els['#styleEngineToggle'].checked, true);
   await new Promise((r) => setTimeout(r, 60));
@@ -225,4 +236,15 @@ test('полный жизненный цикл UI стилевого движк�
   assert.match(second.errorCalls[0], /повреждена/);
   assert.equal(second.els['#styleEngineToggle'].disabled, false);
   assert.match(second.els['#styleEngineStatus'].textContent, /Подключена локальная модель/);
+});
+
+test('интерфейс анализа и структурные советы: #anPop, сводка главы, быстрые переключатели и «Совет:» во всех 8 категориях', () => {
+  const structuralSrc = fs.readFileSync(path.join(ROOT, 'src', 'style-engine', 'structural.js'), 'utf8');
+  const adviceMatches = structuralSrc.match(/Совет:/g) || [];
+  assert.equal(adviceMatches.length, 16, 'все 16 шаблонов правил в structural.js должны содержать практический «Совет:»');
+
+  const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
+  for (const needle of ['id="anPop"', 'id="anSummary"', 'id="btnStyleAll"', 'id="btnStyleNone"', 'id="btnAnNone"', '<details id="styleEngineBox"']) {
+    assert.ok(html.includes(needle), `в index.html должен присутствовать ${needle}`);
+  }
 });

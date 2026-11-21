@@ -20,6 +20,26 @@ function askText(title, initial = '') {
   });
 }
 
+// Нативный window.confirm() в Tauri WKWebView и безголовых окнах не работает, поэтому свой диалог.
+function askConfirm(message, okLabel = t('Да'), title = t('Подтвердите действие')) {
+  return new Promise((resolve) => {
+    const dlg = $('#confirmDialog');
+    if (dlg.open) dlg.close();
+    $('#confirmDialogTitle').textContent = title;
+    $('#confirmDialogMsg').textContent = message;
+    const okBtn = $('#confirmDialogOk');
+    okBtn.textContent = okLabel;
+    dlg.returnValue = '';
+    const onClose = () => {
+      dlg.removeEventListener('close', onClose);
+      resolve(dlg.returnValue === 'ok');
+    };
+    dlg.addEventListener('close', onClose);
+    dlg.showModal();
+  });
+}
+window.askConfirm = askConfirm;
+
 // Enter в поле диалога подтверждает его (по умолчанию сработала бы «Отмена»: она первая в форме).
 function enterConfirms(dlg, input) {
   input.addEventListener('keydown', (e) => {

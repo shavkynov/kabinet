@@ -213,7 +213,7 @@ async function replaceAll() {
       t('Главы: {0}, карточки: {1}, заметки: {2}.', sum(['chapter']), sum(['character', 'place', 'item']), sum(['note'])),
       t('Перед заменой делается резервная копия проекта.'),
     ].join('\n');
-    if (!confirm(text)) return;
+    if (!(await askConfirm(text, t('Заменить')))) return;
     const res = await api.replaceProject(q, to, false);
     await reloadOpenDocs();
     await refreshIndex();

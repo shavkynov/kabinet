@@ -45,3 +45,25 @@ test('комментарии: старый проект без поля откр
   assert.ok(restored.includes(id));
   assert.equal(project.readChapterMeta(dir, id).comments[0].id, 'b2');
 });
+
+test('комментарии и диалоги: нативный confirm() больше не используется в renderer', () => {
+  const root = path.resolve(__dirname, '..');
+  const files = [
+    ...fs.readdirSync(path.join(root, 'renderer', 'app')).filter((n) => n.endsWith('.js')).map((n) => path.join(root, 'renderer', 'app', n)),
+    path.join(root, 'renderer', 'cards.js'),
+  ];
+  for (const file of files) {
+    const src = fs.readFileSync(file, 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, ''))
+      .join('\n');
+    assert.equal(/\bconfirm\s*\(/.test(src), false, `${path.relative(root, file)} не должен вызывать нативный confirm()`);
+  }
+  const cmtSrc = fs.readFileSync(path.join(root, 'renderer', 'app', '34-comments.js'), 'utf8');
+  assert.match(cmtSrc, /await askConfirm\(t\('Удалить комментарий\?'\)/);
+  const dlgSrc = fs.readFileSync(path.join(root, 'renderer', 'app', '17-dialogs.js'), 'utf8');
+  assert.match(dlgSrc, /function askConfirm\(/);
+  assert.match(dlgSrc, /window\.askConfirm\s*=\s*askConfirm/);
+  const html = fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8');
+  assert.match(html, /<dialog id="confirmDialog">/);
+});

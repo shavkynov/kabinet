@@ -253,9 +253,19 @@ function renderStyleEngineUi(st) {
   if (!st || !st.supported) { box.hidden = true; return; }
   box.hidden = false;
   styleModelReady = !!st.ready;
+  if (typeof box.hasAttribute === 'function' && !box.hasAttribute('data-init')) {
+    box.open = !styleModelReady;
+    box.setAttribute('data-init', '1');
+  }
+  const summary = document.querySelector('#styleEngineSummary');
   const toggle = document.querySelector('#styleEngineToggle');
   const status = document.querySelector('#styleEngineStatus');
   const btn = document.querySelector('#btnStylePickModel');
+  if (summary) {
+    summary.textContent = styleModelReady
+      ? t('Точный разбор · подключён')
+      : t('Базовый разбор · подключить модель');
+  }
   if (toggle) {
     toggle.disabled = !styleModelReady;
     toggle.checked = styleModelReady && styleShadowEnabled();
