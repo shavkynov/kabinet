@@ -1019,4 +1019,5 @@ module.exports = {
   "Точный разбор": "Precise analysis",
   "Закрыть подсказку": "Close hint",
   "Выбранные виды слов выделяются цветом, текст не меняется. Работает точный разбор (Russian-GSD): части речи, пассив, повторы и времена.": "Selected word types are highlighted without changing text. Precise Russian-GSD parsing is active for parts of speech, passive voice, repeats and tenses.",
+  "Свои звуки": "Custom sounds",
 };

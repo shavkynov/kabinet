@@ -487,14 +487,6 @@
         <button type="button" data-value="mech"><span>🔘</span>Механика</button>
         <button type="button" data-value="pen"><span>🖋️</span>Перо</button>
       </div>
-      <p class="subhead">Свои звуки клавиш</p>
-      <div id="chipKeySlots" class="chips" role="group" aria-label="Клавиша">
-        <button type="button" data-value="key"><span>⌨️</span>Буквы</button>
-        <button type="button" data-value="space"><span>␣</span>Пробел</button>
-        <button type="button" data-value="backspace"><span>⌫</span>Delete</button>
-        <button type="button" data-value="enter"><span>↵</span>Enter</button>
-      </div>
-      <div id="keySrc" class="srclist" hidden></div>
       <div class="row">
         <label for="setVolume">Громкость</label>
         <div class="ctl">
@@ -531,9 +523,22 @@
       </div>
       <div class="row">
         <button id="btnTestSound" type="button" class="secondary small">Проверить клавиши</button>
-        <button id="btnSoundsFolder" type="button" class="secondary small">Папка со своими звуками</button>
       </div>
-      <p class="hint">Нажмите на вариант (например, «Дождь» или «Пробел»): появится список загруженных звуков и кнопка «Загрузить…». Эмбиент играет по кругу. Файлы копируются в папку программы по подпапкам (ambient, keys).</p>
+      <details class="more">
+        <summary><span>Свои звуки</span></summary>
+        <p class="subhead">Свои звуки клавиш</p>
+        <div id="chipKeySlots" class="chips" role="group" aria-label="Клавиша">
+          <button type="button" data-value="key"><span>⌨️</span>Буквы</button>
+          <button type="button" data-value="space"><span>␣</span>Пробел</button>
+          <button type="button" data-value="backspace"><span>⌫</span>Delete</button>
+          <button type="button" data-value="enter"><span>↵</span>Enter</button>
+        </div>
+        <div id="keySrc" class="srclist" hidden></div>
+        <div class="row">
+          <button id="btnSoundsFolder" type="button" class="secondary small">Папка со своими звуками</button>
+        </div>
+        <p class="hint">Нажмите на вариант (например, «Дождь» или «Пробел»): появится список загруженных звуков и кнопка «Загрузить…». Эмбиент играет по кругу. Файлы копируются в папку программы по подпапкам (ambient, keys).</p>
+      </details>
     </div>
 
     <!-- проверки при наборе: своё окно у кнопки на верхней панели -->

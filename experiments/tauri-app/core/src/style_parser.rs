@@ -12,6 +12,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use udpipe_rs::{Model, Word};
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -314,11 +315,16 @@ struct TaskState {
     cancelled: VecDeque<u64>,
 }
 
+struct LoadedModel {
+    model: Arc<Mutex<Model>>,
+    last_used: Instant,
+}
+
 pub struct StyleParser {
     model_path: PathBuf,
     model_version: String,
     model_sha256: String,
-    loaded: Mutex<Option<Arc<Mutex<Model>>>>,
+    loaded: Mutex<Option<LoadedModel>>,
     tasks: Mutex<TaskState>,
 }
 
@@ -331,6 +337,24 @@ impl StyleParser {
             loaded: Mutex::new(None),
             tasks: Mutex::new(TaskState { current: None, cancelled: VecDeque::new() }),
         }
+    }
+
+    pub fn is_loaded(&self) -> bool {
+        self.loaded.lock().map(|g| g.is_some()).unwrap_or(false)
+    }
+
+    /// Выгружает модель из памяти, если с последнего использования прошло не менее `idle_after`
+    /// и прямо сейчас нет активного разбора. При следующем запросе модель загрузится заново.
+    pub fn unload_if_idle(&self, idle_after: Duration) -> bool {
+        let busy = self.tasks.lock().map(|t| t.current.is_some()).unwrap_or(true);
+        if busy { return false; }
+        let Ok(mut guard) = self.loaded.lock() else { return false; };
+        let Some(entry) = guard.as_ref() else { return false; };
+        if Arc::strong_count(&entry.model) > 1 || entry.last_used.elapsed() < idle_after {
+            return false;
+        }
+        *guard = None;
+        true
     }
 
     fn is_model_file_valid(&self) -> bool {
@@ -385,14 +409,17 @@ impl StyleParser {
     /// Модель загружается один раз; хэш проверяется до Model::load.
     fn model(&self) -> Result<Arc<Mutex<Model>>, String> {
         let mut guard = self.loaded.lock().map_err(|_| "Внутренний замок парсера недоступен.".to_string())?;
-        if let Some(model) = guard.as_ref() { return Ok(model.clone()); }
+        if let Some(entry) = guard.as_mut() {
+            entry.last_used = Instant::now();
+            return Ok(entry.model.clone());
+        }
         let (actual, _) = sha256_file(&self.model_path).map_err(|e| format!("Модель стилевого анализа не найдена ({}): {}. Положите файл {} в этот каталог или задайте путь в KABINET_STYLE_MODEL.", self.model_path.display(), e, MODEL_FILE_NAME))?;
         if !self.model_sha256.is_empty() && actual != self.model_sha256 {
             return Err(format!("Модель стилевого анализа повреждена или не та: SHA-256 {} вместо {}.", actual, self.model_sha256));
         }
         let model = Model::load(&self.model_path).map_err(|e| format!("Не удалось загрузить модель стилевого анализа: {}", e))?;
         let model = Arc::new(Mutex::new(model));
-        *guard = Some(model.clone());
+        *guard = Some(LoadedModel { model: model.clone(), last_used: Instant::now() });
         Ok(model)
     }
 
@@ -423,6 +450,11 @@ impl StyleParser {
             if let Some((_, old)) = tasks.current.replace((task_id, flag.clone())) { old.store(true, Ordering::SeqCst); }
         }
         let result = self.parse_inner(task_id, text, &flag);
+        if let Ok(mut guard) = self.loaded.lock() {
+            if let Some(entry) = guard.as_mut() {
+                entry.last_used = Instant::now();
+            }
+        }
         if let Ok(mut tasks) = self.tasks.lock() {
             if tasks.current.as_ref().map(|(id, _)| *id) == Some(task_id) { tasks.current = None; }
         }
@@ -941,5 +973,37 @@ mod tests {
         let p = StyleParser::new(PathBuf::from("/tmp/kabinet-no-model.udpipe"), None, None);
         let err = p.parse(1, "Он пришёл.").unwrap_err();
         assert!(err.contains("не найдена"), "{}", err);
+    }
+
+    #[test]
+    fn unload_if_idle_noop_when_not_loaded() {
+        let p = StyleParser::new(PathBuf::from("/tmp/kabinet-no-model-idle.udpipe"), None, None);
+        assert!(!p.is_loaded());
+        assert!(!p.unload_if_idle(Duration::ZERO));
+        assert!(!p.is_loaded());
+    }
+
+    #[test]
+    #[ignore = "нужна локальная GSD-модель: KABINET_STYLE_MODEL=... cargo test -- --ignored"]
+    fn real_model_unloads_after_idle_and_reloads_transparently() {
+        let path = std::env::var("KABINET_STYLE_MODEL").expect("KABINET_STYLE_MODEL");
+        let p = StyleParser::new(PathBuf::from(path), None, std::env::var("KABINET_STYLE_MODEL_SHA256").ok());
+        assert!(!p.is_loaded());
+        let first = p.parse(1, "Он пришёл.").unwrap();
+        assert_eq!(first["cancelled"], json!(false));
+        assert!(p.is_loaded());
+
+        // Пока время простоя меньше порога — модель остаётся в памяти.
+        assert!(!p.unload_if_idle(Duration::from_secs(600)));
+        assert!(p.is_loaded());
+
+        std::thread::sleep(Duration::from_millis(25));
+        assert!(p.unload_if_idle(Duration::from_millis(10)));
+        assert!(!p.is_loaded());
+
+        // Повторный разбор после выгрузки прозрачно перезагружает модель.
+        let second = p.parse(2, "Она ушла.").unwrap();
+        assert_eq!(second["cancelled"], json!(false));
+        assert!(p.is_loaded());
     }
 }

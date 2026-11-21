@@ -1477,3 +1477,5 @@ button.linkish:disabled { color: var(--muted); opacity: .5; cursor: default; bac
 #anPopText { font-size: 13px; line-height: 1.45; color: var(--text); white-space: pre-wrap; }
 .an-pop-acts { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .an-pop-acts #anPopSkip { margin-left: auto; }
+.cmt-link[data-act="del"] { color: var(--muted); }
+.cmt-link[data-act="del"]:hover { color: var(--danger); }

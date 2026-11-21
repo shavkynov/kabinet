@@ -935,7 +935,15 @@ fn main() {
             // Модель стилевого анализа не входит в установщик до юридической проверки.
             let resource_dir = app.path().resource_dir().ok();
             let style_model = kabinet_core::style_parser::resolve_model_path(std::env::var("KABINET_STYLE_MODEL").ok().map(PathBuf::from), &data, resource_dir.as_deref());
-            app.manage(Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok())));
+            let style_svc = Arc::new(StyleParser::new(style_model, std::env::var("KABINET_STYLE_MODEL_VERSION").ok(), std::env::var("KABINET_STYLE_MODEL_SHA256").ok()));
+            app.manage(style_svc.clone());
+            // Выгружаем загруженную модель после 10 минут простоя, чтобы не держать RAM зря.
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                if style_svc.unload_if_idle(std::time::Duration::from_secs(10 * 60)) {
+                    applog::info("Языковая модель выгружена из памяти после простоя.");
+                }
+            });
             app.set_menu(build_menu(app.handle()).map_err(|e| format!("Не удалось построить меню: {}", e))?).map_err(|e| format!("Не удалось установить меню: {}", e))?;
             // Копия раз в 20 минут. Ошибка копирования не мешает писать.
             let h = app.handle().clone();
