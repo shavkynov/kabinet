@@ -1028,6 +1028,7 @@ body.focus-mode #status { bottom: 12px; }
 .chk-rep:hover { background: var(--accent); color: var(--paper); }
 .chk-link { font: inherit; font-size: 12px; color: var(--muted); background: none; border: none; padding: 2px 4px; text-decoration: underline; }
 .chk-link:hover { color: var(--text); }
+.chk-none { font-size: 12px; color: var(--muted); }
 .chk-more { margin-top: 10px; }
 .chk-more summary { display: flex; align-items: center; gap: 6px; list-style: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 0; }
 .chk-more summary::-webkit-details-marker { display: none; }

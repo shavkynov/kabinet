@@ -2,6 +2,7 @@
 //! Словари лениво загружаются при первом обращении и автоматически выгружаются из RAM при простое.
 //! Позиции замечаний (offset, length) возвращаются строго в единицах UTF-16, как ожидает ProseMirror.
 
+use crate::offline_spell_extra;
 use crate::store::R;
 use serde_json::{json, Value};
 use spellbook::Dictionary;
@@ -13,6 +14,9 @@ use std::time::{Duration, Instant};
 
 const MAX_SUGGESTIONS: usize = 6;
 const MAX_UNIQUE_SUGGEST_WORDS: usize = 500;
+const MAX_SLOW_SUGGEST_WORDS: usize = 25;
+const RU_SUGGEST_ALPHA: &str = "оеёаинтсрвлкмдпуяыьгзбчйхжшюцщэфъ";
+const EN_SUGGEST_ALPHA: &str = "etaoinshrdlcumwfgypbvkjxqz";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DictLang {
@@ -150,6 +154,362 @@ fn is_russian_hyphen_particle(lower: &str) -> bool {
     )
 }
 
+fn is_russian_hyphen_prefix(lower: &str) -> bool {
+    matches!(
+        lower,
+        "пол" | "полу"
+            | "мини"
+            | "макси"
+            | "супер"
+            | "мега"
+            | "экс"
+            | "вице"
+            | "интернет"
+            | "онлайн"
+            | "офлайн"
+            | "видео"
+            | "аудио"
+            | "фото"
+            | "веб"
+            | "пресс"
+            | "бизнес"
+            | "арт"
+            | "топ"
+            | "кибер"
+            | "био"
+            | "эко"
+            | "квази"
+            | "псевдо"
+            | "анти"
+            | "контр"
+            | "темно"
+            | "тёмно"
+            | "светло"
+            | "ярко"
+            | "бледно"
+            | "густо"
+            | "серо"
+            | "красно"
+            | "бело"
+            | "черно"
+            | "чёрно"
+            | "сине"
+            | "зелено"
+            | "зелёно"
+            | "желто"
+            | "жёлто"
+            | "золотисто"
+            | "серебристо"
+            | "тускло"
+            | "мутно"
+            | "нежно"
+            | "иссиня"
+            | "изжелта"
+    )
+}
+
+fn check_ru_dict_or_yo(dict: &Dictionary, orig: &str, lower: &str) -> bool {
+    if offline_spell_extra::contains(lower) {
+        return true;
+    }
+    if dict.check(orig) || (lower != orig && dict.check(lower)) {
+        return true;
+    }
+    if !lower.contains('е') {
+        return false;
+    }
+    let mut chars: Vec<char> = lower.chars().collect();
+    let e_pos: Vec<usize> = chars
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, &c)| (c == 'е').then_some(idx))
+        .collect();
+    // Быстрый прямой перебор 1 и 2 подстановок «е → ё» через dict.check() вместо медленного dict.suggest().
+    for &p in &e_pos {
+        chars[p] = 'ё';
+        let cand: String = chars.iter().collect();
+        chars[p] = 'е';
+        if offline_spell_extra::contains(&cand) || dict.check(&cand) {
+            return true;
+        }
+    }
+    if e_pos.len() <= 4 && e_pos.len() >= 2 {
+        for a in 0..e_pos.len() {
+            for b in (a + 1)..e_pos.len() {
+                chars[e_pos[a]] = 'ё';
+                chars[e_pos[b]] = 'ё';
+                let cand: String = chars.iter().collect();
+                chars[e_pos[a]] = 'е';
+                chars[e_pos[b]] = 'е';
+                if offline_spell_extra::contains(&cand) || dict.check(&cand) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn check_ru_morphology(dict: &Dictionary, lower: &str) -> bool {
+    let char_len = lower.chars().count();
+    // 1. Литературный вариант «-нье/-нья/-нью/-ньем/-ньи» ↔ «-ние/-ния/-нию/-нием/-нии».
+    if char_len >= 6 {
+        for (from, to) in [
+            ("нье", "ние"),
+            ("нья", "ния"),
+            ("нью", "нию"),
+            ("ньем", "нием"),
+            ("ньи", "нии"),
+        ] {
+            if let Some(stem) = lower.strip_suffix(from) {
+                if !stem.is_empty() {
+                    let alt = format!("{}{}", stem, to);
+                    if check_ru_dict_or_yo(dict, &alt, &alt) {
+                        return true;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // 2. Литературные деепричастия «-вши» / «-вшись».
+    if char_len >= 6 {
+        if let Some(stem) = lower.strip_suffix("вши") {
+            let v_form = format!("{}в", stem);
+            let vshiy = format!("{}вший", stem);
+            if check_ru_dict_or_yo(dict, &v_form, &v_form)
+                || check_ru_dict_or_yo(dict, &vshiy, &vshiy)
+            {
+                return true;
+            }
+        }
+    }
+    if char_len >= 7 {
+        if let Some(stem) = lower.strip_suffix("вшись") {
+            let vsh = format!("{}вшийся", stem);
+            if check_ru_dict_or_yo(dict, &vsh, &vsh) {
+                return true;
+            }
+        }
+    }
+    // 3. Продуктивные префиксы «полу-», «свеже-» и «пол-» при слитном написании.
+    if char_len >= 8 {
+        for pref in ["полу", "свеже"] {
+            if let Some(rest) = lower.strip_prefix(pref) {
+                if rest.chars().count() >= 4 && check_ru_dict_or_yo(dict, rest, rest) {
+                    return true;
+                }
+            }
+        }
+    }
+    if char_len >= 7 {
+        if let Some(rest) = lower.strip_prefix("пол") {
+            if rest.chars().count() >= 4
+                && matches!(
+                    rest.chars().next(),
+                    Some(c) if c != 'л' && !matches!(c, 'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я')
+                )
+                && check_ru_dict_or_yo(dict, rest, rest)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn format_like_source(source: &str, cand_lower: &str) -> String {
+    let mut has_alpha = false;
+    let mut all_upper = true;
+    for c in source.chars() {
+        if c.is_alphabetic() {
+            has_alpha = true;
+            if !c.is_uppercase() {
+                all_upper = false;
+                break;
+            }
+        }
+    }
+    if has_alpha && all_upper {
+        return cand_lower.to_uppercase();
+    }
+    if matches!(source.chars().next(), Some(c) if c.is_uppercase()) {
+        let mut chars = cand_lower.chars();
+        if let Some(first) = chars.next() {
+            let mut out: String = first.to_uppercase().collect();
+            out.push_str(chars.as_str());
+            return out;
+        }
+    }
+    cand_lower.to_string()
+}
+
+fn dict_has_candidate(dict: &Dictionary, lang: DictLang, cand_lower: &str, source_upper: bool) -> bool {
+    match lang {
+        DictLang::Ru => {
+            if offline_spell_extra::contains(cand_lower) || dict.check(cand_lower) {
+                return true;
+            }
+            if source_upper {
+                let titled = format_like_source("А", cand_lower);
+                if dict.check(&titled) {
+                    return true;
+                }
+            }
+            false
+        }
+        DictLang::En => {
+            if dict.check(cand_lower) {
+                return true;
+            }
+            if source_upper {
+                let titled = format_like_source("A", cand_lower);
+                if dict.check(&titled) {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+}
+
+fn push_suggest_candidate(
+    dict: &Dictionary,
+    lang: DictLang,
+    source: &str,
+    source_upper: bool,
+    cand_lower: &str,
+    out: &mut Vec<String>,
+) -> bool {
+    if !dict_has_candidate(dict, lang, cand_lower, source_upper) {
+        return false;
+    }
+    let formatted = format_like_source(source, cand_lower);
+    if formatted != source && !out.contains(&formatted) {
+        out.push(formatted);
+    }
+    out.len() >= MAX_SUGGESTIONS
+}
+
+fn fast_suggest(dict: &Dictionary, lang: DictLang, word: &str) -> Vec<String> {
+    let norm_apos: String = word.chars().map(|c| if c == '\u{2019}' { '\'' } else { c }).collect();
+    let lower = norm_apos.to_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    let n = chars.len();
+    if n < 2 || n > 40 {
+        return Vec::new();
+    }
+    let source_upper = matches!(word.chars().next(), Some(c) if c.is_uppercase());
+    let alpha = match lang {
+        DictLang::Ru => RU_SUGGEST_ALPHA,
+        DictLang::En => EN_SUGGEST_ALPHA,
+    };
+    let mut out = Vec::with_capacity(MAX_SUGGESTIONS);
+    let mut buf = chars.clone();
+
+    // 1. Перестановки двух соседних букв.
+    for i in 0..(n - 1) {
+        if buf[i] == buf[i + 1] {
+            continue;
+        }
+        buf.swap(i, i + 1);
+        let cand: String = buf.iter().collect();
+        buf.swap(i, i + 1);
+        if push_suggest_candidate(dict, lang, word, source_upper, &cand, &mut out) {
+            return out;
+        }
+    }
+
+    // 2. Удаление одной буквы.
+    for i in 0..n {
+        if i > 0 && chars[i] == chars[i - 1] {
+            continue;
+        }
+        let mut cand = String::with_capacity(lower.len());
+        for (idx, &c) in chars.iter().enumerate() {
+            if idx != i {
+                cand.push(c);
+            }
+        }
+        if push_suggest_candidate(dict, lang, word, source_upper, &cand, &mut out) {
+            return out;
+        }
+    }
+
+    // 3. Вставка одной буквы.
+    for i in 0..=n {
+        for ch in alpha.chars() {
+            if i < n && chars[i] == ch {
+                continue;
+            }
+            let mut cand = String::with_capacity(lower.len() + ch.len_utf8());
+            for &c in &chars[..i] {
+                cand.push(c);
+            }
+            cand.push(ch);
+            for &c in &chars[i..] {
+                cand.push(c);
+            }
+            if push_suggest_candidate(dict, lang, word, source_upper, &cand, &mut out) {
+                return out;
+            }
+        }
+    }
+
+    // 4. Замена одной буквы.
+    for i in 0..n {
+        let orig_c = buf[i];
+        for ch in alpha.chars() {
+            if ch == orig_c {
+                continue;
+            }
+            buf[i] = ch;
+            let cand: String = buf.iter().collect();
+            if push_suggest_candidate(dict, lang, word, source_upper, &cand, &mut out) {
+                return out;
+            }
+        }
+        buf[i] = orig_c;
+    }
+
+    // 5. Разбиение пробелом на два отдельных слова.
+    if n >= 4 {
+        for i in 2..=(n - 2) {
+            let left: String = chars[..i].iter().collect();
+            let right: String = chars[i..].iter().collect();
+            if dict_has_candidate(dict, lang, &left, source_upper)
+                && dict_has_candidate(dict, lang, &right, false)
+            {
+                let formatted = format!("{} {}", format_like_source(word, &left), right);
+                if !out.contains(&formatted) {
+                    out.push(formatted);
+                    if out.len() >= MAX_SUGGESTIONS {
+                        return out;
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn is_mid_sentence_proper(para: &str, byte_start: usize, token: &str) -> bool {
+    let Some(first) = token.chars().next() else {
+        return false;
+    };
+    if !first.is_uppercase() || !token.chars().any(|c| c.is_lowercase()) {
+        return false;
+    }
+    let before = para[..byte_start].trim_end_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '«' | '„' | '“' | '"' | '\'' | '(' | '—' | '–' | '-')
+    });
+    if before.is_empty() {
+        return false;
+    }
+    !matches!(before.chars().last(), Some('.' | '!' | '?' | '…' | ':'))
+}
+
 fn check_single_word(dict: &Dictionary, lang: DictLang, word: &str, custom: &HashSet<String>) -> bool {
     let norm_apos: String = word.chars().map(|c| if c == '\u{2019}' { '\'' } else { c }).collect();
     let lower = norm_apos.to_lowercase();
@@ -157,20 +517,10 @@ fn check_single_word(dict: &Dictionary, lang: DictLang, word: &str, custom: &Has
     if custom.contains(&lower) || custom.contains(&e_lower) {
         return true;
     }
-    if dict.check(&norm_apos) || (lower != norm_apos && dict.check(&lower)) {
-        return true;
+    match lang {
+        DictLang::Ru => check_ru_dict_or_yo(dict, &norm_apos, &lower) || check_ru_morphology(dict, &lower),
+        DictLang::En => dict.check(&norm_apos) || (lower != norm_apos && dict.check(&lower)),
     }
-    if lang == DictLang::Ru && norm_apos.contains(['е', 'Е']) {
-        let mut sugg = Vec::new();
-        dict.suggest(&lower, &mut sugg);
-        if sugg.iter().any(|cand| {
-            let cand_lower = cand.to_lowercase();
-            cand_lower != lower && yo_to_e(&cand_lower) == e_lower
-        }) {
-            return true;
-        }
-    }
-    false
 }
 
 fn check_token(dict: &Dictionary, lang: DictLang, token: &str, custom: &HashSet<String>) -> bool {
@@ -180,9 +530,12 @@ fn check_token(dict: &Dictionary, lang: DictLang, token: &str, custom: &HashSet<
     if token.contains('-') {
         let parts: Vec<&str> = token.split('-').filter(|p| !p.is_empty()).collect();
         if parts.len() >= 2 {
-            let all_ok = parts.iter().all(|part| {
+            let all_ok = parts.iter().enumerate().all(|(idx, part)| {
                 let low = part.to_lowercase();
-                if lang == DictLang::Ru && is_russian_hyphen_particle(&low) {
+                if lang == DictLang::Ru
+                    && (is_russian_hyphen_particle(&low)
+                        || (idx + 1 < parts.len() && is_russian_hyphen_prefix(&low)))
+                {
                     return true;
                 }
                 if part.chars().count() >= 2 && check_single_word(dict, lang, part, custom) {
@@ -221,6 +574,7 @@ fn build_custom_set(custom_words: &[String]) -> HashSet<String> {
 
 struct TokenSpan<'a> {
     text: &'a str,
+    byte_start: usize,
     u16_start: usize,
     u16_len: usize,
 }
@@ -270,6 +624,7 @@ fn tokenize_paragraph(para: &str) -> Vec<TokenSpan<'_>> {
         if !prev_is_url && !prev_is_domain && !next_is_url {
             out.push(TokenSpan {
                 text: word,
+                byte_start: start_byte,
                 u16_start: start_u16,
                 u16_len: end_u16 - start_u16,
             });
@@ -369,13 +724,55 @@ impl OfflineSpell {
             DictLang::En => loaded.en.as_ref()?,
         };
         let empty = HashSet::new();
-        if check_token(dict, lang, word.trim(), &empty) {
+        let trimmed = word.trim();
+        if check_token(dict, lang, trimmed, &empty) {
             return Some((true, Vec::new()));
         }
+        let fast = fast_suggest(dict, lang, trimmed);
+        if !fast.is_empty() {
+            return Some((false, fast));
+        }
         let mut raw = Vec::new();
-        dict.suggest(word.trim(), &mut raw);
+        dict.suggest(trimmed, &mut raw);
         raw.truncate(MAX_SUGGESTIONS);
         Some((false, raw))
+    }
+
+    /// Подбор вариантов исправления для одного слова (включая полный slow `suggest` по запросу автора).
+    pub fn suggest_word(&self, word: &str, lang: &str) -> R<Vec<String>> {
+        let trimmed = word.trim();
+        if trimmed.is_empty() || trimmed.encode_utf16().count() > 80 {
+            return Ok(Vec::new());
+        }
+        let Some(tlang) = token_lang(trimmed, lang) else {
+            return Ok(Vec::new());
+        };
+        let need_ru = tlang == DictLang::Ru;
+        let need_en = tlang == DictLang::En;
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let loaded = self.ensure_loaded(&mut guard, need_ru, need_en)?;
+        let dict = match tlang {
+            DictLang::Ru => loaded.ru.as_ref(),
+            DictLang::En => loaded.en.as_ref(),
+        };
+        let Some(dict) = dict else {
+            return Ok(Vec::new());
+        };
+        let mut out = fast_suggest(dict, tlang, trimmed);
+        if out.len() < MAX_SUGGESTIONS {
+            let mut raw = Vec::new();
+            dict.suggest(trimmed, &mut raw);
+            for cand in raw {
+                if cand != trimmed && !out.contains(&cand) {
+                    out.push(cand);
+                    if out.len() >= MAX_SUGGESTIONS {
+                        break;
+                    }
+                }
+            }
+        }
+        loaded.last_used = Instant::now();
+        Ok(out)
     }
 
     /// Проверяет массив абзацев и возвращает замечания в том же формате, что LanguageTool.
@@ -399,6 +796,7 @@ impl OfflineSpell {
 
         let mut word_cache: HashMap<(DictLang, String), bool> = HashMap::with_capacity(4096);
         let mut sugg_cache: HashMap<(DictLang, String), Vec<String>> = HashMap::new();
+        let mut slow_suggest_count = 0usize;
         let mut out: Vec<Value> = Vec::new();
         let total = paragraphs.len();
 
@@ -449,14 +847,20 @@ impl OfflineSpell {
                 let replacements = if let Some(s) = sugg_cache.get(&cache_key) {
                     s.clone()
                 } else if sugg_cache.len() < MAX_UNIQUE_SUGGEST_WORDS {
-                    let mut raw = Vec::new();
-                    dict.suggest(tok.text, &mut raw);
-                    let mut clean = Vec::with_capacity(MAX_SUGGESTIONS);
-                    for cand in raw {
-                        if cand != tok.text && !clean.contains(&cand) {
-                            clean.push(cand);
-                            if clean.len() >= MAX_SUGGESTIONS {
-                                break;
+                    let mut clean = fast_suggest(dict, tlang, tok.text);
+                    if clean.is_empty()
+                        && !is_mid_sentence_proper(para, tok.byte_start, tok.text)
+                        && slow_suggest_count < MAX_SLOW_SUGGEST_WORDS
+                    {
+                        slow_suggest_count += 1;
+                        let mut raw = Vec::new();
+                        dict.suggest(tok.text, &mut raw);
+                        for cand in raw {
+                            if cand != tok.text && !clean.contains(&cand) {
+                                clean.push(cand);
+                                if clean.len() >= MAX_SUGGESTIONS {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -549,5 +953,43 @@ mod tests {
         let cancel = AtomicBool::new(true);
         let res = svc.check_paragraphs(&["Првиет".to_string()], "ru", &[], &cancel, &|_, _| {});
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn offline_spell_morphology_prefixes_and_fast_suggest() {
+        let tmp = tmpdir("offline-spell-morph");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(
+            tmp.join("ru.aff"),
+            "SET UTF-8\nTRY еиаостнрвклмпдуяьыбгзчйжхшюцщэфъё\nSFX A Y 1\nSFX A 0 а .\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("ru.dic"),
+            "14\nпривет\nчёрный\nтёплый\nзеленый\nзелёный\nпредвидение\nзакрывший\nвесёлой\nмолотым\nголовы\nмессенджер/A\nмир\nвчера\nвстретил\n",
+        )
+        .unwrap();
+
+        let svc = OfflineSpell::new(tmp);
+        let cancel = AtomicBool::new(false);
+        let paras = vec![
+            // -нье, -вши, полу-, свеже-, пол-, е→ё, дефисный префикс, extra-лексика
+            "Черный теплый зеленый предвиденье закрывши полувеселой свежемолотым полголовы тёмно-зелёный мессенджере.".to_string(),
+            // Реальная опечатка + быстрое исправление + проверка середины предложения (proper name)
+            "Вчера Иванка встретил Првиет мир!".to_string(),
+        ];
+        let issues = svc.check_paragraphs(&paras, "ru", &[], &cancel, &|_, _| {}).unwrap();
+        let bad: Vec<&str> = issues.iter().filter_map(|x| x["text"].as_str()).collect();
+        assert_eq!(bad, vec!["Иванка", "Првиет"], "получено: {:?}", bad);
+        // Для настоящей опечатки fast_suggest должен сразу вернуть "Привет" без медленного suggest()
+        assert!(issues[1]["replacements"].as_array().unwrap().iter().any(|v| v == "Привет"));
+        assert!(is_mid_sentence_proper(&paras[1], paras[1].find("Иванка").unwrap(), "Иванка"));
+        assert!(!is_mid_sentence_proper("Иванка дома.", 0, "Иванка"));
+
+        // Ленивый подбор вариантов по запросу
+        let sugg = svc.suggest_word("мессенжир", "ru").unwrap();
+        assert!(!sugg.is_empty() || svc.suggest_word("Првиет", "ru").unwrap().iter().any(|w| w == "Привет"));
+        assert!(svc.suggest_word("Првиет", "ru").unwrap().iter().any(|w| w == "Привет"));
+        assert!(svc.suggest_word("", "ru").unwrap().is_empty());
     }
 }

@@ -4,14 +4,72 @@
 // части речи, страдательный залог, повторы (по леммам и PROPN) и несогласованность времён.
 // Вычисляется по уже полученному разбору без повторного запуска модели.
 
-const { norm, NOT_AGENT_RE, STATE_PART_STEMS } = require('../morph');
+const { norm, NOT_AGENT_RE, STATE_PART_STEMS, REFLEXIVE_STEMS, SHORT_ADJ_WORDS } = require('../morph');
 const { speechRanges } = require('../speech');
-const { ATTRIB, MEMORY } = require('../tense');
+const { ATTRIB, MEMORY, isFuturePerfective } = require('../tense');
 
 const STATE_PASSIVE_LEMMAS = new Set([
   'влюбить', 'влюбленный', 'знакомый', 'занять', 'занятый',
   'обязать', 'обязанный', 'женатый', 'удивить', 'удивленный',
+  'уверить', 'уверенный', 'убедить', 'убежденный', 'растерять', 'растерянный',
+  'напугать', 'напуганный', 'испугать', 'испуганный', 'встревожить', 'встревоженный',
+  'одеть', 'одетый', 'устать', 'усталый', 'поразить', 'пораженный',
+  'смутить', 'смущенный', 'взволновать', 'взволнованный', 'рассердить', 'рассерженный',
+  'раздражить', 'раздраженный', 'огорчить', 'огорченный', 'оскорбить', 'оскорбленный',
+  'обидеть', 'обиженный', 'разочаровать', 'разочарованный', 'довольный',
+  'полон', 'полный', 'привычный', 'настроить', 'настроенный', 'озаботить', 'озабоченный',
+  'погрузить', 'погруженный', 'поглотить', 'поглощенный', 'растрогать', 'растроганный',
+  'привязать', 'привязанный', 'образовать', 'образованный', 'заострить', 'заостренный',
+  'научить', 'наученный', 'возбудить', 'возбужденный', 'закрыть', 'закрытый',
+  'открыть', 'открытый', 'покрыть', 'покрытый', 'окружить', 'окруженный',
+  'осветить', 'освещенный', 'наполнить', 'наполненный', 'запереть', 'запертый',
+  'отворить', 'отворенный', 'расстроить', 'расстроенный', 'написать', 'написанный',
+  'уложить', 'уложенный',
 ]);
+
+const SHORT_ADJ_PASSIVE_STOP = new Set([
+  ...SHORT_ADJ_WORDS,
+  'искренен', 'искренна', 'искренно', 'искренни',
+  'уверен', 'уверена', 'уверено', 'уверены',
+  'склонен', 'склонна', 'склонно', 'склонны',
+  'достоин', 'достойна', 'достойно', 'достойны',
+  'способен', 'способна', 'способно', 'способны',
+  'должен', 'должна', 'должно', 'должны',
+  'согласен', 'согласна', 'согласно', 'согласны',
+  'полон', 'полна', 'полно', 'полны',
+  'свободен', 'свободна', 'свободно', 'свободны',
+  'доволен', 'довольна', 'довольно', 'довольны',
+  'виновен', 'виновна', 'виновно', 'виновны',
+  'благодарен', 'благодарна', 'благодарно', 'благодарны',
+  'верен', 'верна', 'верно', 'верны',
+  'равен', 'равна', 'равно', 'равны',
+  'болен', 'больна', 'больно', 'больны',
+  'виден', 'видна', 'видно', 'видны',
+  'слышен', 'слышна', 'слышно', 'слышны',
+  'приятен', 'приятна', 'приятно', 'приятны',
+  'страшен', 'страшна', 'страшно', 'страшны',
+  'громаден', 'громадна', 'громадно', 'громадны',
+  'опасен', 'опасна', 'опасно', 'опасны',
+  'ужасен', 'ужасна', 'ужасно', 'ужасны',
+  'прекрасен', 'прекрасна', 'прекрасно', 'прекрасны',
+  'интересен', 'интересна', 'интересно', 'интересны',
+  'понятен', 'понятна', 'понятно', 'понятны',
+  'заметен', 'заметна', 'заметно', 'заметны',
+  'известен', 'известна', 'известно', 'известны',
+]);
+
+const SHORT_PASSIVE_END_RE = /(?:[аяе]н[аоы]?|[аяеиоуыюэр]т[аоы]?)$/u;
+const NON_PART_ADJ_LEMMA_RE = /(?:[^н]ный|ной|ний)$/u;
+
+const PRES_VALID_END_RE = /(?:[еиуюая]т|[еи]шь|ем|им|ете|ите|[ую])(?:ся|сь)?$/u;
+const PRES_PARTICIPLE_BUGS = new Set(['одет', 'раздет', 'надет', 'согрет', 'заперт', 'прогрет', 'отпет', 'выбрит']);
+const PRES_NOUN_HOMONYMS = new Set(['краем', 'путем', 'боем', 'роем', 'слоем', 'строем', 'чаем', 'лаем', 'маем', 'раем', 'паем']);
+const PRES_NON_NARRATIVE = new Set([
+  'нет', 'есть', 'кажется', 'думается', 'помнится', 'случается', 'бывает', 'касается',
+  'признаюсь', 'знаешь', 'знаете', 'видишь', 'видите', 'понимаешь', 'понимаете',
+  'скажем', 'допустим', 'предположим', 'оказывается', 'выходит', 'значит', 'разумеется',
+]);
+const PRES_IDIOM_KNOW_SUBJ = new Set(['черт', 'бог', 'господь', 'бес', 'леший', 'кто']);
 
 const PERSONAL_PRS = new Set(['я', 'ты', 'он', 'она', 'мы', 'вы', 'они']);
 const SUBORDINATE_DEPRELS = new Set(['ccomp', 'xcomp', 'advcl', 'acl', 'acl:relcl', 'csubj', 'csubj:pass']);
@@ -60,10 +118,57 @@ function mapUdPos(token) {
   }
 }
 
+function isPlausibleShortPassiveParticiple(token) {
+  const n = norm(token.text || '');
+  if (!n || n.includes('-') || SHORT_ADJ_PASSIVE_STOP.has(n)) return false;
+  const lem = norm(token.lemma || '');
+  if (lem && NON_PART_ADJ_LEMMA_RE.test(lem)) return false;
+  return SHORT_PASSIVE_END_RE.test(n);
+}
+
 function isStatePassive(token) {
   const n = norm(token.text || '');
   if (STATE_PASSIVE_LEMMAS.has(norm(token.lemma || ''))) return true;
   return STATE_PART_STEMS.some((st) => n.startsWith(st));
+}
+
+function isNonPassiveReflexive(token) {
+  const low = norm(token.text || '');
+  return REFLEXIVE_STEMS.some((st) => low.startsWith(st));
+}
+
+function isIgnoredPresentVerb(token, byId, children) {
+  const low = norm(token.text || '');
+  if (!low || isFuturePerfective(low) || PRES_NON_NARRATIVE.has(low)) return true;
+  if (!PRES_VALID_END_RE.test(low)) return true;
+  if (PRES_PARTICIPLE_BUGS.has(low) || PRES_NOUN_HOMONYMS.has(low)) return true;
+  const kids = children.get(token.id) || [];
+  const head = byId.get(token.head);
+  const prevTok = byId.get(token.id - 1);
+  const nextTok = byId.get(token.id + 1);
+  if (low === 'может' && (
+    kids.some((c) => norm(c.text || '') === 'быть')
+    || (head && norm(head.text || '') === 'быть')
+    || (nextTok && norm(nextTok.text || '') === 'быть')
+  )) {
+    return true;
+  }
+  if (low === 'водится' && (
+    kids.some((c) => norm(c.text || '') === 'как')
+    || (prevTok && norm(prevTok.text || '') === 'как')
+  )) {
+    return true;
+  }
+  if (low === 'знает' && (
+    kids.some((c) => c.deprel === 'nsubj' && PRES_IDIOM_KNOW_SUBJ.has(norm(c.text || '')))
+    || (prevTok && PRES_IDIOM_KNOW_SUBJ.has(norm(prevTok.text || '')))
+  )) {
+    return true;
+  }
+  if (token.deprel === 'conj' && head && head.feats && head.feats.Mood === 'Imp' && /(?:ите|ьте)$/.test(low)) {
+    return true;
+  }
+  return false;
 }
 
 function findAgent(kids, children) {
@@ -99,7 +204,10 @@ function findUdPassive(sentence, text) {
 
     // Аналитический пассив: «был построен», «была освещена», «будет сделано»
     if ((token.upos === 'VERB' || token.upos === 'ADJ') && f.VerbForm === 'Part' && f.Voice === 'Pass'
-      && token.deprel !== 'amod' && !isStatePassive(token)) {
+      && token.deprel !== 'amod') {
+      if (!isPlausibleShortPassiveParticiple(token)) continue;
+      const ag = findAgent(kids, children);
+      if (!ag && isStatePassive(token)) continue;
       const aux = kids.find((c) => c.deprel === 'aux:pass' || (c.deprel === 'cop' && norm(c.lemma || c.text) === 'быть'));
       if (aux) {
         if (Math.abs(aux.id - token.id) <= 3) pushSpan(Math.min(aux.start, token.start), Math.max(aux.end, token.end));
@@ -107,18 +215,16 @@ function findUdPassive(sentence, text) {
         continue;
       }
       // Краткое страдательное причастие без «быть» с творительным деятеля: «прижаты мечом»
-      if (token.upos === 'VERB' && f.Variant === 'Short') {
-        const ag = findAgent(kids, children);
-        if (ag) {
-          if (Math.abs(ag.id - token.id) <= 3) pushSpan(Math.min(token.start, ag.start), Math.max(token.end, ag.end));
-          else pushSpan(token.start, token.end);
-        }
+      if (token.upos === 'VERB' && f.Variant === 'Short' && ag) {
+        if (Math.abs(ag.id - token.id) <= 3) pushSpan(Math.min(token.start, ag.start), Math.max(token.end, ag.end));
+        else pushSpan(token.start, token.end);
       }
       continue;
     }
 
     // Возвратный пассив: «дом строился рабочими»
     if (token.upos === 'VERB' && f.VerbForm === 'Fin' && /(?:ся|сь)$/i.test(token.text || '')) {
+      if (isNonPassiveReflexive(token)) continue;
       const passiveSignal = f.Voice === 'Pass' || kids.some((c) => c.deprel === 'nsubj:pass' || c.deprel === 'obl:agent');
       if (!passiveSignal) continue;
       const subjects = kids.filter((c) => c.deprel === 'nsubj' || c.deprel === 'nsubj:pass');
@@ -222,18 +328,19 @@ function analyzeUdTenseBlock(blockText, sentences, segStart = 0) {
     const sEnd = Math.min(blockText.length, sent.end - segStart);
     const sentText = blockText.slice(sStart, sEnd);
 
+    const { byId, children } = indexTokens(tokens);
     const mem = MEMORY.test(norm(sentText));
     const hasPresentNarrative = tokens.some((t) => {
       const f = t.feats || {};
       const relStart = t.start - segStart;
       return !inSpeech(relStart) && (t.upos === 'VERB' || t.upos === 'AUX')
-        && f.VerbForm === 'Fin' && f.Tense === 'Pres' && f.Aspect !== 'Perf';
+        && f.VerbForm === 'Fin' && f.Tense === 'Pres' && f.Aspect !== 'Perf'
+        && !isIgnoredPresentVerb(t, byId, children);
     });
     const inMem = mem || (scope && !hasPresentNarrative);
     scope = inMem;
     if (inMem) continue;
 
-    const { byId, children } = indexTokens(tokens);
     const thought = collectThoughtIds(sent, sentText, segStart, inSpeech);
 
     const actor = tokens.some((t) => {
@@ -262,7 +369,7 @@ function analyzeUdTenseBlock(blockText, sentences, segStart = 0) {
 
       let kind = null;
       if (f.Tense === 'Past') kind = 'past';
-      else if (f.Tense === 'Pres' && f.Aspect !== 'Perf') kind = 'present';
+      else if (f.Tense === 'Pres' && f.Aspect !== 'Perf' && !isIgnoredPresentVerb(token, byId, children)) kind = 'present';
       if (!kind) continue;
       verbs.push({ token, kind });
     }

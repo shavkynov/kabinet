@@ -3,7 +3,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {validAuthorizationCode}=require('../src/yandex-oauth');
 const source=fs.readFileSync(path.join(__dirname,'../docs/oauth/yandex/return.js'),'utf8');
 const state='a'.repeat(43);
-function run(query){const message={textContent:''},button={hidden:true,addEventListener:(_e,f)=>{button.click=f;}};let assigned,cleared;const u=new URL('https://callback.example/oauth/yandex/'+query);vm.runInNewContext(source,{URL,document:{getElementById:(id)=>id==='message'?message:button},window:{location:{href:u.href,pathname:u.pathname,assign:(x)=>{assigned=x;}},history:{replaceState:(_a,_b,x)=>{cleared=x;}}}});return {message,button,cleared,assigned:()=>assigned};}
+function run(query, documentElement){const message={textContent:''},button={hidden:true,addEventListener:(_e,f)=>{button.click=f;}};let assigned,cleared;const u=new URL('https://callback.example/oauth/yandex/'+query);vm.runInNewContext(source,{URL,document:{documentElement,getElementById:(id)=>id==='message'?message:button},window:{location:{href:u.href,pathname:u.pathname,assign:(x)=>{assigned=x;}},history:{replaceState:(_a,_b,x)=>{cleared=x;}}}});return {message,button,cleared,assigned:()=>assigned};}
 test('page and main agree on bounded opaque-code validation',()=>{
   for(const code of ['x','1234567','0123456789012345','AbCdEf0123456789','x'.repeat(2048),'','x'.repeat(2049),'bad\ncode','\0code','\x7f']){
     const x=run('?'+new URLSearchParams({code,state}));assert.equal(!x.button.hidden,validAuthorizationCode(code));
@@ -15,3 +15,20 @@ test('fragments, duplicate parameters and contradictory responses remain blocked
 test('diagnostic output does not expose code, state or error_description',()=>{const secret='private-control\nvalue',x=run('?'+new URLSearchParams({code:secret,state,error_description:'private-description'}));assert.equal(x.message.textContent.includes(secret),false);assert.equal(x.message.textContent.includes(state),false);assert.equal(x.message.textContent.includes('private-description'),false);});
 test('known error without state is explained but not forwarded',()=>{const x=run('?error=invalid_scope');assert.equal(x.button.hidden,true);assert.ok(x.message.textContent.includes('права доступа'));});
 test('address bar is cleared for success and failure',()=>{for(const q of ['', '?code=AbCdEf0123456789&state='+state,'#access_token=secret'])assert.equal(run(q).cleared,'/oauth/yandex/');});
+
+test('callback page keeps strict CSP, assets and sets UI state attribute',()=>{
+  const dir=path.join(__dirname,'../docs/oauth/yandex');
+  const html=fs.readFileSync(path.join(dir,'index.html'),'utf8');
+  assert.ok(html.includes('<meta name="referrer" content="no-referrer">'));
+  assert.ok(html.includes("default-src 'none'"));
+  assert.ok(html.includes("script-src 'self'"));
+  assert.ok(html.includes("style-src 'self'"));
+  assert.ok(!html.includes('unsafe-inline'));
+  assert.ok(html.includes('id="message"'));
+  assert.ok(html.includes('id="return"'));
+  assert.ok(fs.existsSync(path.join(dir,'style.css')));
+  assert.ok(fs.existsSync(path.join(dir,'icon.svg')));
+  const readyEl={dataset:{}};run('?code=AbCdEf0123456789&state='+state,readyEl);assert.equal(readyEl.dataset.state,'ready');
+  const deniedEl={dataset:{}};run('?error=access_denied&state='+state,deniedEl);assert.equal(deniedEl.dataset.state,'denied');
+  const errEl={dataset:{}};run('?error=invalid_scope',errEl);assert.equal(errEl.dataset.state,'error');
+});

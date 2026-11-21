@@ -6,7 +6,24 @@ const RELATIVE_CLAUSE = 'acl:relcl';
 const WHAT_CLAUSE_RELATIONS = new Set(['ccomp', 'acl']);
 const NOMINALIZATION_ENDINGS = /(?:ание|ение|яние|тие|ие|ция)$/u;
 // Лексикализованные существительные с «отглагольным» суффиксом, но без процессного значения.
-const NOMINALIZATION_STOP = new Set(['здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление', 'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение', 'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие']);
+const NOMINALIZATION_STOP = new Set([
+  'здание', 'мгновение', 'мнение', 'условие', 'знание', 'строение', 'воскресение', 'явление',
+  'событие', 'сознание', 'влияние', 'значение', 'внимание', 'ощущение', 'поведение', 'движение',
+  'положение', 'отношение', 'содержание', 'применение', 'изделие', 'оружие',
+  'имение', 'впечатление', 'соединение', 'состояние', 'настроение', 'поместье', 'предместье',
+  'помещение', 'учреждение', 'заведение', 'селение', 'произведение', 'изображение', 'выражение',
+  'дыхание', 'молчание', 'воспоминание', 'расстояние', 'название', 'создание',
+]);
+const PLURAL_ADJ_NIE_STOP = new Set([
+  'осенние', 'зимние', 'летние', 'весенние', 'утренние', 'вечерние', 'последние', 'передние',
+  'верхние', 'нижние', 'средние', 'внешние', 'внутренние', 'дальние', 'ближние', 'давние',
+  'прежние', 'нынешние', 'здешние', 'тамошние', 'домашние', 'соседние', 'ранние', 'поздние',
+  'синие', 'искренние', 'древние', 'лишние', 'крайние',
+  'осенний', 'зимний', 'летний', 'весенний', 'утренний', 'вечерний', 'последний', 'передний',
+  'верхний', 'нижний', 'средний', 'внешний', 'внутренний', 'дальний', 'ближний', 'давний',
+  'прежний', 'нынешний', 'здешний', 'тамошний', 'домашний', 'соседний', 'ранний', 'поздний',
+  'синий', 'искренний', 'древний', 'лишний', 'крайний',
+]);
 
 // Только эти лёгкие глаголы сохраняют канцелярское значение при iobj:
 // «оказал ему помощь» — да, «дал ему сведения» — literal transfer.
@@ -31,7 +48,12 @@ const EVENT_NOUN_LEMMAS = new Set([
   'утверждение', 'подписание', 'заключение', 'финансирование', 'управление',
   'координация', 'взаимодействие', 'решение', 'заявление', 'предложение',
 ]);
-const NON_EVENT_NOUNS = new Set(['безопасность', 'документ', 'информация', 'сведения', 'оборудование', 'здание', 'мнение']);
+const NON_EVENT_NOUNS = new Set([
+  'безопасность', 'документ', 'информация', 'сведения', 'оборудование', 'здание', 'мнение',
+  'имение', 'впечатление', 'соединение', 'состояние', 'настроение', 'поместье', 'предместье',
+  'помещение', 'учреждение', 'заведение', 'селение', 'произведение', 'изображение', 'выражение',
+  'дыхание', 'молчание', 'воспоминание', 'расстояние', 'название', 'создание',
+]);
 const NON_PROCESS_NOUNS = new Set([...NON_EVENT_NOUNS, 'требование']);
 const OFFICIAL_PREPOSITION_NOUNS = new Set([
   'цель', 'связь', 'соответствие', 'отношение', 'рамка', 'порядок', 'область',
@@ -126,9 +148,15 @@ const ABSTRACT_NOUN_LEMMAS = new Set([
 ]);
 
 
+function surfaceOf(token) {
+  return String((token && token.text) || '').toLowerCase().replace(/ё/g, 'е');
+}
+
 function isEventNoun(token) {
   if (!token || token.upos !== 'NOUN' || !token.feats || Object.keys(token.feats).length === 0) return false;
   const lemma = lemmaOf(token);
+  const surface = surfaceOf(token);
+  if (PLURAL_ADJ_NIE_STOP.has(lemma) || PLURAL_ADJ_NIE_STOP.has(surface)) return false;
   if (NON_EVENT_NOUNS.has(lemma)) return false;
   if (EVENT_NOUN_LEMMAS.has(lemma)) return true;
   return EVENT_SUFFIX.test(lemma) && !NOMINALIZATION_STOP.has(lemma);
@@ -170,6 +198,8 @@ function isGenitiveNoun(token) {
 
 function isNominalization(token) {
   const lemma = String(token.lemma || '').toLowerCase().replace(/ё/g, 'е');
+  const surface = surfaceOf(token);
+  if (PLURAL_ADJ_NIE_STOP.has(lemma) || PLURAL_ADJ_NIE_STOP.has(surface)) return false;
   return token.upos === 'NOUN' && NOMINALIZATION_ENDINGS.test(lemma) && !NOMINALIZATION_STOP.has(lemma);
 }
 
@@ -374,8 +404,16 @@ function findChancery(text, sentence, speech = speechRanges(text)) {
     if (token.upos === 'VERB' && LIGHT_VERB_LEMMAS.has(lemmaOf(token))
       && token.feats && token.feats.Voice !== 'Pass' && !kids.some((c) => c.deprel === 'aux:pass')
       && !(hasIobj && !LIGHT_VERBS_ALLOWING_IOBJ.has(lemmaOf(token)))) {
-      const event = kids.find((child) => ['obj', 'obl', 'nsubj'].includes(child.deprel) && isEventNoun(child));
-      if (event && validSpan(event, text) && !tokenInSpeech(event, speech)) {
+      const event = kids.find((child) => {
+        if (!['obj', 'obl', 'nsubj'].includes(child.deprel) || !isEventNoun(child)) return false;
+        if (child.deprel === 'obl' && (children.get(child.id) || []).some((gc) => gc.deprel === 'case')) return false;
+        return true;
+      });
+      const marriageProposal = event
+        && (lemmaOf(token) === 'делать' || lemmaOf(token) === 'сделать')
+        && lemmaOf(event) === 'предложение'
+        && !(children.get(event.id) || []).some((gc) => gc.deprel === 'nmod' || gc.deprel === 'amod');
+      if (event && !marriageProposal && validSpan(event, text) && !tokenInSpeech(event, speech)) {
         add('chancery.light-verb-event-noun', Math.min(token.start, event.start), Math.max(token.end, event.end),
           `Действие выражено сочетанием лёгкого глагола «${token.text}» с событийным существительным «${event.text}». Совет: замените связку «лёгкий глагол + существительное» одним точным глаголом.`,
           [`dependency:${event.deprel}`, 'lexicon:light-verb', 'lexicon-or-suffix:event-noun'], 'medium');

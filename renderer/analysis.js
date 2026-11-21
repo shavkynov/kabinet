@@ -57,8 +57,8 @@ function wordsPhrase(n) {
 const emptyRanges = () => ({ adv: [], passive: [], long: [], repeat: [], filler: [], chancery: [], weak: [], tell: [], chain: [], remark: [], redund: [], which: [], own: [] });
 
 const styleCache = new WeakMap();
-function styleOf(node, text, words, cats, sentences) {
-  const sig = STYLE_CATS.map((k) => (cats[k] ? 1 : 0)).join('');
+function styleOf(node, text, words, cats, sentences, udTag = 0) {
+  const sig = `${udTag}|${STYLE_CATS.map((k) => (cats[k] ? 1 : 0)).join('')}`;
   const c = styleCache.get(node);
   if (c && c.sig === sig) return c.res;
   const res = scanStyle(text, words, cats, sentences);
@@ -300,7 +300,8 @@ function build(doc, cfg, engine = null) {
       }
     }
     if ((!engineActive || engineHybrid) && LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
-      const st = styleOf(node, blockText, r.words, cats, r.sentences);
+      const hasUdWords = !!(ud && Array.isArray(ud.words));
+      const st = styleOf(node, blockText, hasUdWords ? ud.words : r.words, cats, r.sentences, hasUdWords ? 1 : 0);
       for (const cat of STYLE_CATS) {
         if (!cats[cat]) continue;
         if (engineActive && !HYBRID_LEXICAL_CATS.has(cat)) continue;

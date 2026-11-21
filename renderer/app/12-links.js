@@ -124,6 +124,9 @@ function onNativeContext(p) {
       const sp = d.spec;
       const g = [{ label: sp.short || sp.message, disabled: true, raw: true }];
       for (const r of sp.replacements.slice(0, 5)) g.push({ label: r === '' ? t('(удалить)') : r, raw: true, onClick: () => checker.applyIssue(sp.id, r) });
+      if (!sp.replacements.length && sp.kind === 'spelling' && sp.ruleId === 'OFFLINE_SPELL' && !sp.suggested && api.suggestCheckWord && checker.suggestIssue) {
+        g.push({ label: t('Подобрать варианты'), onClick: () => checker.suggestIssue(sp.id) });
+      }
       g.push({ label: t('Пропустить'), onClick: () => checker.skipIssue(sp.id) });
       if (sp.kind === 'spelling') g.push({ label: t('В словарь'), onClick: () => checker.addWord(sp.id) });
       else g.push({ label: t('Не проверять такое'), onClick: () => checker.ignoreRule(sp.id) });

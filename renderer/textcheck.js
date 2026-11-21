@@ -6,6 +6,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { t } from './i18n.js';
+import { expandWords, wordKey } from '../src/dict.js';
 
 export const issuesKey = new PluginKey('langIssues');
 
@@ -25,6 +26,17 @@ export const LangIssues = Extension.create({
           if (meta) {
             if (meta.clear) return DecorationSet.empty;
             if (meta.remove) return set.remove(set.find().filter((d) => d.spec.id === meta.remove));
+            if (meta.update) {
+              const key = String(meta.update.text || '').toLowerCase();
+              const hits = set.find().filter((d) => d.spec.kind === 'spelling' && d.spec.text.toLowerCase() === key);
+              if (!hits.length) return set;
+              const nextDecos = hits.map((d) => Decoration.inline(
+                d.from, d.to,
+                { class: `lt-issue lt-${d.spec.kind}`, 'data-issue': String(d.spec.id) },
+                { ...d.spec, replacements: meta.update.replacements, suggested: true },
+              ));
+              return set.remove(hits).add(tr.doc, nextDecos);
+            }
             if (meta.set) {
               return DecorationSet.create(tr.doc, meta.set.map((i) => Decoration.inline(
                 i.from, i.to,
@@ -84,7 +96,7 @@ const KIND_LABEL = {
 
 /**
  * ctx: { api, $, getEditor, canCheck(), cardNames(), showError, setStatus, openConsent() -> Promise<boolean> }
- * Возвращает { open(), run(), clear(), issueFromElement(el), applyIssue(id, text), ignoreIssue(id), addWord(id), ignoreRule(id) }
+ * Возвращает { open(), run(), clear(), issueFromElement(el), applyIssue(id, text), ignoreIssue(id), addWord(id), ignoreRule(id), suggestIssue(id) }
  */
 export function initTextCheck(ctx) {
   const { api, $ } = ctx;
@@ -170,6 +182,15 @@ export function initTextCheck(ctx) {
         if (title) b.title = t(title);
         acts.append(b);
       };
+      if (!s.replacements.length && s.kind === 'spelling' && s.ruleId === 'OFFLINE_SPELL' && cfg.offlineAvailable && api.suggestCheckWord) {
+        if (!s.suggested) addBtn('suggest', 'Варианты', 'Подобрать варианты исправления');
+        else {
+          const none = document.createElement('span');
+          none.className = 'chk-none';
+          none.textContent = t('Вариантов нет');
+          acts.append(none);
+        }
+      }
       addBtn('skip', 'Пропустить');
       if (s.kind === 'spelling') addBtn('word', 'В словарь', 'Больше не считать это слово ошибкой');
       else addBtn('rule', 'Не проверять такое', 'Отключить это правило проверки насовсем');
@@ -415,10 +436,35 @@ export function initTextCheck(ctx) {
       await api.addCheckWord(word);
       loadDict();
       window.dispatchEvent(new Event('kabinet:dict-changed'));
-      // убираем все такие же подчёркивания
-      for (const x of decos().filter((y) => y.spec.kind === 'spelling' && y.spec.text.toLowerCase() === word.toLowerCase())) dispatch({ remove: x.spec.id });
+      // убираем все такие же подчёркивания и падежные формы добавленного слова
+      const forms = new Set(expandWords([word]).map((w) => wordKey(w)));
+      for (const x of decos().filter((y) => y.spec.kind === 'spelling' && forms.has(wordKey(y.spec.text)))) dispatch({ remove: x.spec.id });
       ctx.setStatus('ok', t('«{0}» добавлено в словарь', word));
     } catch (err) { ctx.showError(err.message); }
+  }
+
+  async function suggestIssue(id, btnEl) {
+    const d = byId(id);
+    if (!d || !api.suggestCheckWord) return;
+    const word = d.spec.text;
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.textContent = t('Ищу…');
+    }
+    try {
+      const raw = await api.suggestCheckWord(word);
+      const clean = Array.isArray(raw) ? raw.filter((x) => typeof x === 'string' && x && x !== word).slice(0, 6) : [];
+      dispatch({ update: { text: word, replacements: clean } });
+      if ($('#checkPanel').hidden) {
+        ctx.setStatus('ok', clean.length ? t('Варианты: {0}', clean.slice(0, 4).join(', ')) : t('Вариантов нет'));
+      }
+    } catch (err) {
+      if (btnEl && btnEl.isConnected) {
+        btnEl.disabled = false;
+        btnEl.textContent = t('Варианты');
+      }
+      ctx.showError(err.message);
+    }
   }
 
   async function ignoreRule(id) {
@@ -440,6 +486,7 @@ export function initTextCheck(ctx) {
     if (!btn) { gotoIssue(id); return; }
     const act = btn.dataset.act;
     if (act === 'rep') applyIssue(id, btn.dataset.value);
+    else if (act === 'suggest') suggestIssue(id, btn);
     else if (act === 'skip') skipIssue(id);
     else if (act === 'word') addWord(id);
     else if (act === 'rule') ignoreRule(id);
@@ -454,6 +501,7 @@ export function initTextCheck(ctx) {
     skipIssue,
     addWord,
     ignoreRule,
+    suggestIssue,
     issueAtPoint(x, y) {
       const el = document.elementFromPoint(x, y);
       const hit = el && el.closest ? el.closest('.lt-issue') : null;

@@ -1,0 +1,205 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f3ee;
+  --paper: #fbfaf7;
+  --side: #ebe8e1;
+  --text: #2a2926;
+  --muted: #6a665d;
+  --line: #d9d5cb;
+  --accent: #7a5c3e;
+  --accent-hover: #634930;
+  --accent-text: #fbfaf7;
+  --ok: #4a6c3f;
+  --ok-bg: #eef3ea;
+  --danger: #b3382c;
+  --danger-bg: #f8ecea;
+  --shadow: 0 10px 30px rgba(42, 41, 38, 0.08), 0 1px 3px rgba(42, 41, 38, 0.05);
+  --font-text: "Iowan Old Style", "Palatino", "Palatino Linotype", Cambria, Georgia, "Times New Roman", serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a18;
+    --paper: #232220;
+    --side: #171614;
+    --text: #dedad0;
+    --muted: #999589;
+    --line: #34322e;
+    --accent: #c9a27a;
+    --accent-hover: #d8b58f;
+    --accent-text: #1b1a18;
+    --ok: #8bb37a;
+    --ok-bg: #232d22;
+    --danger: #e0685a;
+    --danger-bg: #312120;
+    --shadow: 0 16px 40px rgba(0, 0, 0, 0.38), 0 1px 3px rgba(0, 0, 0, 0.28);
+  }
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 28px 28px 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.brand-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.brand-title {
+  margin: 0;
+  font-family: var(--font-text);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.brand-sub {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.status {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  background: var(--side);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+:root[data-state="ready"] .status {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  border-left-color: var(--ok);
+  background: var(--ok-bg);
+}
+
+:root[data-state="denied"] .status {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  border-left-color: var(--accent);
+  background: var(--side);
+}
+
+:root[data-state="error"] .status {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 16px;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.08s ease;
+}
+
+.action:hover {
+  background: var(--accent-hover);
+}
+
+.action:active {
+  transform: translateY(1px);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.noscript-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+  border-left: 3px solid var(--danger);
+  background: var(--danger-bg);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.meta {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.72;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 22px 20px 20px;
+    border-radius: 14px;
+  }
+}

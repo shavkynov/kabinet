@@ -891,7 +891,7 @@ function createBackend(host, { session } = {}) {
         lang: cfg.lang,
         disabledRules: cfg.disabledRules,
         hiddenKinds: langcheck.cleanKinds(cfg.hiddenKinds),
-        words: [...dict.effective(projectWordsNow(), cfg.words), ...strList(extraWords)],
+        words: [...dict.expandWords(dict.effective(projectWordsNow(), cfg.words)), ...strList(extraWords)],
         fetchImpl: (u, init) => fetch(u, init),
         signal: ctl.signal,
         onProgress: (done, total) => emit('check:progress', { done, total }),
@@ -901,6 +901,7 @@ function createBackend(host, { session } = {}) {
     }
   });
   handle('check:cancel', () => { if (checkCtl) checkCtl.abort(); return true; });
+  handle('check:suggest', () => []);
   // Словарь: у проекта свой список в project.json (переезжает вместе с проектом), общий список остаётся запасным.
   function projectWordsNow() {
     try { return currentDir ? project.projectWords(currentDir) : null; } catch { return null; }
@@ -1015,6 +1016,7 @@ function createBackend(host, { session } = {}) {
     setCheckConfig: (patch) => call('check:setConfig', patch),
     runCheck: (paragraphs, extraWords) => call('check:run', paragraphs, extraWords),
     cancelCheck: () => call('check:cancel'),
+    suggestCheckWord: (w) => call('check:suggest', w),
     addCheckWord: (w) => call('check:addWord', w),
     getDictionary: () => call('check:getDictionary'),
     setDictionary: (words) => call('check:setDictionary', words),

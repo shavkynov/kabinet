@@ -6,6 +6,24 @@
 
 const MAX_WORDS = 5000;
 const MAX_LEN = 80;
+const { dictWordForms, wordKey } = require('./declension');
+
+/** Расширяет пользовательский словарь («Мой словарь») падежными и множественными формами слов. */
+function expandWords(words) {
+  if (!Array.isArray(words)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of words) {
+    for (const form of dictWordForms(raw)) {
+      const low = form.toLowerCase();
+      if (!seen.has(low)) {
+        seen.add(low);
+        out.push(form);
+      }
+    }
+  }
+  return out;
+}
 
 /** Список слов: строки без пробелов по краям, без пустых и повторов, не длиннее MAX_LEN, не больше MAX_WORDS. */
 function cleanWords(raw) {
@@ -57,4 +75,4 @@ function mergeMetaWords(localText, remoteText) {
   return Buffer.from(JSON.stringify({ ...local, words }, null, 2), 'utf8');
 }
 
-module.exports = { cleanWords, effective, withWord, mergeShared, mergeMetaWords, MAX_WORDS, MAX_LEN };
+module.exports = { cleanWords, effective, withWord, mergeShared, mergeMetaWords, expandWords, wordKey, MAX_WORDS, MAX_LEN };

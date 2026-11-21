@@ -229,6 +229,9 @@ function caseForms(name, opts = {}) {
   return forms;
 }
 
+const ADJ_PLURAL_SKIP = /(?:ая|яя|ое|ее|ые|ие|ый|ой|ий)$/u;
+const CYR_WORD = /^[а-яё]+$/iu;
+
 /**
  * Все сгенерированные формы для названия карточки и «Имён в тексте»: массив строк.
  * Имена в «Имена в тексте», которые уже являются формой предыдущего имени («Анны» при названии «Анна»),
@@ -251,4 +254,43 @@ function nameForms(title, aliases = [], opts = {}) {
   return out;
 }
 
-module.exports = { caseForms, nameForms };
+/** Падежные и множественные формы одного слова из «Моего словаря» (включая исходное и ё→е). */
+function dictWordForms(rawWord) {
+  const w = typeof rawWord === 'string' ? rawWord.trim() : '';
+  if (!w) return [];
+  const out = [];
+  const push = (form) => {
+    const t = String(form || '').trim();
+    if (!t) return;
+    out.push(t);
+    if (/[ёЁ]/.test(t)) out.push(yo(t));
+  };
+  push(w);
+  for (const f of caseForms(w, { kind: 'place' })) push(f);
+  if (w.length < 4 || !CYR_WORD.test(w) || w === w.toUpperCase()) return out;
+  const low = lower(w);
+  if (ADJ_PLURAL_SKIP.test(low)) return out;
+  const stem = w.slice(0, -1);
+  const last = low.slice(-1);
+  if (/[бвгджзклмнпрстфхцчшщ]/.test(last)) {
+    const nom = /[гкхжчшщ]/.test(last) ? 'и' : 'ы';
+    const gen = /[жчшщ]/.test(last) ? 'ей' : 'ов';
+    for (const sfx of [nom, gen, 'ам', 'ами', 'ах']) push(`${w}${sfx}`);
+  } else if (last === 'а' || last === 'о') {
+    for (const sfx of ['ам', 'ами', 'ах']) push(`${stem}${sfx}`);
+  } else if (last === 'я' || last === 'е') {
+    for (const sfx of ['ям', 'ями', 'ях']) push(`${stem}${sfx}`);
+  } else if (last === 'ь') {
+    for (const sfx of ['ей', 'ям', 'ями', 'ях']) push(`${stem}${sfx}`);
+  } else if (last === 'й') {
+    for (const sfx of ['ев', 'ям', 'ями', 'ях']) push(`${stem}${sfx}`);
+  }
+  return out;
+}
+
+/** Ключ слова без учёта регистра и различия «ё/е». */
+function wordKey(s) {
+  return yo(lower(String(s ?? '').trim()));
+}
+
+module.exports = { caseForms, nameForms, dictWordForms, wordKey };

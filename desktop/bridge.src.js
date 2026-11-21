@@ -67,6 +67,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
     setCheckConfig: (p) => call('check:setConfig', p),
     runCheck: (paragraphs, extra) => call('check:run', paragraphs, extra),
     cancelCheck: () => call('check:cancel'),
+    suggestCheckWord: (w) => call('check:suggest', w),
     addCheckWord: (w) => call('check:addWord', w),
     getDictionary: () => call('check:getDictionary'),
     setDictionary: (w) => call('check:setDictionary', w),

@@ -2,6 +2,9 @@
   'use strict';
   const message = document.getElementById('message');
   const button = document.getElementById('return');
+  const setState = (s) => {
+    if (document.documentElement && document.documentElement.dataset) document.documentElement.dataset.state = s;
+  };
   button.hidden = true;
   const source = new URL(window.location.href);
   window.history.replaceState(null, '', window.location.pathname);
@@ -20,6 +23,7 @@
   };
   const providerHint = Object.prototype.hasOwnProperty.call(errors, error) ? ` ${errors[error]}` : '';
   const fail = (reason) => {
+    setState('error');
     message.textContent = `Не удалось завершить вход. ${reason}${providerHint} Вернитесь в Кабинет и начните подключение заново.`;
   };
   if (source.hash) {
@@ -50,6 +54,7 @@
   target.searchParams.set('state', state);
   if (code) target.searchParams.set('code', code);
   else target.searchParams.set('error', 'access_denied');
+  setState(code ? 'ready' : 'denied');
   message.textContent = code ? 'Яндекс ответил. Вернитесь в Кабинет, чтобы завершить подключение.' : `Доступ не предоставлен.${providerHint} Можно вернуться в Кабинет.`;
   button.hidden = false;
   button.addEventListener('click', () => window.location.assign(target.href));

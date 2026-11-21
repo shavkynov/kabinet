@@ -6,6 +6,7 @@ use crate::offline_spell::OfflineSpell;
 use crate::store::{self, write_atomic, R};
 use crate::http::{Http, Req};
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -115,12 +116,27 @@ pub fn clean_kinds(list: &Value) -> Vec<String> {
     CHECK_KINDS.iter().filter(|k| set.iter().any(|s| s == *k)).map(|k| k.to_string()).collect()
 }
 
+fn yo_to_e_lower(s: &str) -> String {
+    let low = s.to_lowercase();
+    if low.contains('ё') { low.replace('ё', "е") } else { low }
+}
+
 pub fn filter_issues(issues: Vec<Value>, disabled: &[String], words: &[String], hidden: &[String]) -> Vec<Value> {
-    let known: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+    let mut known: HashSet<String> = HashSet::with_capacity(words.len() * 2);
+    for w in words {
+        let low = w.to_lowercase();
+        if low.contains('ё') {
+            known.insert(low.replace('ё', "е"));
+        }
+        known.insert(low);
+    }
     issues.into_iter().filter(|i| {
         if disabled.iter().any(|d| Some(d.as_str()) == i["ruleId"].as_str()) { return false; }
         if hidden.iter().any(|h| Some(h.as_str()) == i["kind"].as_str()) { return false; }
-        !(i["kind"] == "spelling" && known.contains(&i["text"].as_str().unwrap_or("").to_lowercase()))
+        !(i["kind"] == "spelling" && {
+            let low = i["text"].as_str().unwrap_or("").to_lowercase();
+            known.contains(&low) || (low.contains('ё') && known.contains(&yo_to_e_lower(&low)))
+        })
     }).collect()
 }
 
@@ -285,7 +301,8 @@ impl CheckApi {
                     if let Some(off) = &self.offline {
                         let cancel = Arc::new(AtomicBool::new(false));
                         if let Some(old) = self.running.lock().unwrap().replace(cancel.clone()) { old.store(true, Ordering::SeqCst); }
-                        let mut words = dict::effective(Self::project_words(project).as_deref(), &Self::shared_words(&cfg));
+                        let user_words = dict::effective(Self::project_words(project).as_deref(), &Self::shared_words(&cfg));
+                        let mut words = dict::expand_words(&user_words);
                         words.extend(strs(a.get(1).unwrap_or(&Value::Null)));
                         let lang = cfg["lang"].as_str().unwrap_or("ru").to_string();
                         let res = off.check_paragraphs(&paragraphs, &lang, &words, &cancel, progress);
@@ -300,7 +317,8 @@ impl CheckApi {
                 if cfg["consent"] != json!(true) && !is_local_server(&server) { return Err("Сначала нужно разрешить отправку текста службе проверки.".into()); }
                 let cancel = Arc::new(AtomicBool::new(false));
                 if let Some(old) = self.running.lock().unwrap().replace(cancel.clone()) { old.store(true, Ordering::SeqCst); }
-                let mut words = dict::effective(Self::project_words(project).as_deref(), &Self::shared_words(&cfg));
+                let user_words = dict::effective(Self::project_words(project).as_deref(), &Self::shared_words(&cfg));
+                let mut words = dict::expand_words(&user_words);
                 words.extend(strs(a.get(1).unwrap_or(&Value::Null)));
                 let o = Opts {
                     server, lang: cfg["lang"].as_str().unwrap_or("ru").to_string(), disabled_rules: strs(&cfg["disabledRules"]),
@@ -313,6 +331,20 @@ impl CheckApi {
                 Ok(Value::Array(res?))
             }
             "cancel" => { if let Some(c) = self.running.lock().unwrap().as_ref() { c.store(true, Ordering::SeqCst); } Ok(json!(true)) }
+            "suggest" => {
+                let word = a.first().and_then(|v| v.as_str()).unwrap_or("").trim();
+                if word.is_empty() || word.encode_utf16().count() > dict::MAX_LEN {
+                    return Ok(json!([]));
+                }
+                let cfg = self.load();
+                let lang = cfg["lang"].as_str().unwrap_or("ru");
+                if let Some(off) = &self.offline {
+                    if off.has_lang(lang) {
+                        return Ok(json!(off.suggest_word(word, lang)?));
+                    }
+                }
+                Ok(json!([]))
+            }
             "addWord" => {
                 let w = a.first().and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
                 if w.is_empty() || w.encode_utf16().count() > dict::MAX_LEN { return Ok(json!(false)); }
@@ -432,7 +464,7 @@ mod tests {
         let data = tmpdir("chk-off-data");
         let dicts = tmpdir("chk-off-dicts");
         std::fs::write(dicts.join("ru.aff"), "SET UTF-8\n").unwrap();
-        std::fs::write(dicts.join("ru.dic"), "1\nпривет\n").unwrap();
+        std::fs::write(dicts.join("ru.dic"), "2\nпривет\nно\n").unwrap();
 
         let off = Arc::new(OfflineSpell::new(dicts));
         let api = CheckApi::with_offline(
@@ -452,6 +484,34 @@ mod tests {
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["text"], json!("првиет"));
         assert_eq!(arr[0]["ruleId"], json!("OFFLINE_SPELL"));
+
+        // Ленивый подбор вариантов по запросу
+        assert_eq!(api.call("suggest", &[json!("првиет")], None, &none).unwrap(), json!(["привет"]));
+        assert_eq!(api.call("suggest", &[json!("")], None, &none).unwrap(), json!([]));
+
+        // Падежные формы и множественное число из «Моего словаря» принимаются автоматически
+        let proj = tmpdir("chk-off-proj").join("p");
+        store::create_project(&proj, "П", None).unwrap();
+        api.call("addWord", &[json!("астралит")], Some(&proj), &none).unwrap();
+        let res_decl = api.call("run", &[json!(["Привет астралитом и астралитов, но првиет."])], Some(&proj), &none).unwrap();
+        let decl_arr = res_decl.as_array().unwrap();
+        assert_eq!(decl_arr.len(), 1);
+        assert_eq!(decl_arr[0]["text"], json!("првиет"));
+
+        // filter_issues учитывает ё/е и падежные формы
+        let expanded = dict::expand_words(&["Семён".to_string(), "астралит".to_string()]);
+        let filtered = filter_issues(
+            vec![
+                json!({ "kind": "spelling", "ruleId": "X", "text": "Семен" }),
+                json!({ "kind": "spelling", "ruleId": "X", "text": "астралитом" }),
+                json!({ "kind": "spelling", "ruleId": "X", "text": "првиет" }),
+            ],
+            &[],
+            &expanded,
+            &[],
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0]["text"], json!("првиет"));
 
         // Явное переключение в онлайн-режим требует согласия, как раньше
         let cfg2 = api.call("setConfig", &[json!({ "mode": "online" })], None, &none).unwrap();

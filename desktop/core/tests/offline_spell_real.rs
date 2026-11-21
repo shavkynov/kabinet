@@ -28,15 +28,27 @@ fn real_dicts_check_ru_en_custom_yo_and_60k_benchmark() {
     let cancel = AtomicBool::new(false);
     let custom = vec!["Кабинет".to_string(), "Слизерин".to_string(), "Илья".to_string()];
 
-    // 1. Русский текст: ё/е, дефис, карточки, реальная опечатка.
+    // 1. Русский текст: ё/е, дефис, карточки, современная и литературная лексика, реальные опечатки и быстрые подсказки.
     let ru = vec![
         "Привет Илья, черный кот шел через зеленый луг, кто-то сказал что Слизерин рядом. Првиет мир!".to_string(),
+        "Теченье несло предвиденье, темно-серый экран мессенджере показывал скриншот, круассаны и американо у барной стойки, свежемолотым кофе пахло полголовы закрывши полувеселой улыбкой офлайн.".to_string(),
+        "Неверные слова: сегдня карандш ошибкка челвек закрытта.".to_string(),
         "ПРИВЕТ МОСКВА".to_string(),
     ];
     let issues = svc.check_paragraphs(&ru, "ru", &custom, &cancel, &|_, _| {}).unwrap();
     let bad: Vec<&str> = issues.iter().filter_map(|x| x["text"].as_str()).collect();
-    assert_eq!(bad, vec!["Првиет"], "неожиданные замечания в русском тексте: {:?}", bad);
-    assert!(!issues[0]["replacements"].as_array().unwrap().is_empty(), "должны быть варианты исправления");
+    assert_eq!(
+        bad,
+        vec!["Првиет", "сегдня", "карандш", "ошибкка", "челвек", "закрытта"],
+        "неожиданные замечания в русском тексте: {:?}",
+        bad
+    );
+    assert_eq!(issues[0]["replacements"][0], serde_json::json!("Привет"));
+    assert_eq!(issues[1]["replacements"][0], serde_json::json!("сегодня"));
+    assert_eq!(issues[2]["replacements"][0], serde_json::json!("карандаш"));
+    assert_eq!(issues[3]["replacements"][0], serde_json::json!("ошибка"));
+    assert_eq!(issues[4]["replacements"][0], serde_json::json!("человек"));
+    assert_eq!(issues[5]["replacements"][0], serde_json::json!("закрыта"));
 
     // 2. Английский текст и автоопределение.
     let en = vec!["Hello, don't stop now, this is a helo typo.".to_string()];
@@ -67,6 +79,11 @@ fn real_dicts_check_ru_en_custom_yo_and_60k_benchmark() {
     assert!(elapsed < Duration::from_secs(3), "проверка 60 000 слов заняла {:?} (> 3s)", elapsed);
     println!("offline_spell 60k words elapsed: {:?}", elapsed);
 
-    // 4. Выгрузка словарей по простою.
+    // 4. Ленивый подбор вариантов для отдельного слова.
+    assert!(svc.suggest_word("апельсен", "ru").unwrap().iter().any(|w| w == "апельсин"));
+    assert!(svc.suggest_word("здраствуйте", "ru").unwrap().iter().any(|w| w == "здравствуйте"));
+    assert!(svc.suggest_word("коллегаг", "ru").unwrap().iter().any(|w| w == "коллегам" || w == "коллега" || w == "коллегах"));
+
+    // 5. Выгрузка словарей по простою.
     assert!(svc.unload_if_idle(Duration::from_secs(0)));
 }

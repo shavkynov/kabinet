@@ -16,6 +16,7 @@ pub mod media;
 pub mod mentions;
 pub mod namematch;
 pub mod offline_spell;
+mod offline_spell_extra;
 pub mod remote;
 pub mod searchreplace;
 pub mod stats;
