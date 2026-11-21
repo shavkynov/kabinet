@@ -479,7 +479,11 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
             app.state::<Arc<StyleParser>>().cancel(task_id);
             Ok(json!(true))
         }
-        "style:status" => Ok(app.state::<Arc<StyleParser>>().status()),
+        "style:status" => {
+            let svc = app.state::<Arc<StyleParser>>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || svc.status())
+                .await.map_err(|e| format!("Поток проверки модели завершился: {}", e))
+        }
         "style:pickModel" => {
             let Some(f) = rfd::AsyncFileDialog::new()
                 .set_title("Выберите файл языковой модели")
