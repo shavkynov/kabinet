@@ -224,3 +224,59 @@ test('движок: при inactive ranges возвращается старый
   assert.equal(result.stats.chancery, oldFallback.stats.chancery);
   assert.equal(byClass(result.set, 'an-chancery').length, byClass(oldFallback.set, 'an-chancery').length);
 });
+
+test('движок (гибрид): chain/which только от UDPipe, остальные категории дополняются src/style.js с приоритетом UDPipe и учётом analysisSkip', () => {
+  // Текст с: пересечением chancery («осуществляет» vs UDPipe «осуществляет контроль»),
+  // непересекающимися лексическими находками («является», «начал идти», «был зол», «прошипел он, скалясь», «в феврале месяце», «свою шляпу»),
+  // и кандидатом для chain/which без вывода UDPipe (не должны браться из src/style.js).
+  const text = 'Он является другом, осуществляет контроль, начал идти, был зол, в феврале месяце снял свою шляпу и сказал, что дом стоял, что сад шумел, что лес спал.';
+  const remarkPara = '— Уходи! — прошипел он, скалясь.';
+  const udpStart = text.indexOf('осуществляет контроль');
+  const udpEnd = udpStart + 'осуществляет контроль'.length;
+  const febStart = text.indexOf('в феврале месяце');
+  const cfgEngine = {
+    cats: { chancery: true, weak: true, tell: true, chain: true, remark: true, redund: true, which: true, own: true },
+    longMin: 30,
+    fillers: [],
+    repeatWin: 25,
+    skip: { redund: [skipKey('в феврале месяце')] },
+  };
+  const engine = {
+    active: true,
+    hybrid: true,
+    ranges: [
+      {
+        category: 'chancery',
+        from: 1 + udpStart,
+        to: 1 + udpEnd,
+        fragment: 'осуществляет контроль',
+        finding: { explanation: 'Канцелярит (UDPipe).' },
+      },
+      {
+        category: 'redund',
+        from: 1 + febStart,
+        to: 1 + febStart + 'в феврале месяце'.length,
+        fragment: 'в феврале месяце',
+        finding: { explanation: 'Плеоназм (UDPipe).' },
+      },
+    ],
+  };
+  const { result, state } = runBuild(mod, [text, remarkPara], cfgEngine, engine);
+  // chain/which без UDPipe не подтягивают эвристику src/style.js
+  assert.equal(result.stats.chain, 0);
+  assert.equal(result.stats.which, 0);
+  // chancery: «осуществляет контроль» от UDPipe + «является» от src/style.js; «осуществляет» не дублируется
+  assert.equal(result.stats.chancery, 2);
+  const chDecos = byClass(result.set, 'an-chancery');
+  assert.equal(chDecos.length, 2);
+  assert.ok(chDecos.some((d) => d.from === 1 + udpStart && d.to === 1 + udpEnd && d.attrs.title === 'Канцелярит (UDPipe).'));
+  // лексические дополнения от src/style.js доходят с подсказками и попадают в счётчики и навигацию
+  assert.ok(result.stats.weak >= 1 && byClass(result.set, 'an-weak').every((d) => !!d.attrs.title));
+  assert.ok(result.stats.tell >= 1 && byClass(result.set, 'an-tell').every((d) => !!d.attrs.title));
+  assert.ok(result.stats.remark >= 1 && byClass(result.set, 'an-remark').every((d) => !!d.attrs.title));
+  assert.ok(result.stats.own >= 1 && byClass(result.set, 'an-own').every((d) => !!d.attrs.title));
+  assert.equal(mod.analysisRanges(state).chancery.length, 2);
+  // analysisSkip убирает «в феврале месяце» и у UDPipe, и у src/style.js
+  assert.equal(result.stats.redund, 0);
+  assert.equal(byClass(result.set, 'an-redund').length, 0);
+});

@@ -129,20 +129,21 @@ async function mountShadow({ storage, docText, apiStub }) {
 }
 
 test('полный жизненный цикл UI стилевого движка: без модели, подключение, повторный запуск, базовый режим и ошибка замены', async () => {
-  const docText = 'Он вернулся обратно.';
+  const docText = 'Он вернулся обратно. Он был зол.';
   const storage = makeStorage();
   let modelReady = false;
   let failPick = false;
   let parseCalls = 0;
 
-  // Синтетический разбор предложения «Он вернулся обратно.» по контракту.
+  // Синтетический разбор первого предложения «Он вернулся обратно.» по контракту;
+  // второе («Он был зол.») в гибридном режиме дополняется из src/style.js.
   const fakeParse = {
     schemaVersion: 1,
     parser: { name: 'udpipe-rs', version: '0.2', modelVersion: 'russian-gsd-ud-2.5-191206', modelSha256: 'ba63' },
     sentences: [{
       start: 0,
       end: 20,
-      text: docText,
+      text: 'Он вернулся обратно.',
       tokens: [
         { id: 1, text: 'Он', lemma: 'он', upos: 'PRON', feats: { Case: 'Nom', Number: 'Sing', Person: '3' }, head: 2, deprel: 'nsubj', start: 0, end: 2 },
         { id: 2, text: 'вернулся', lemma: 'вернуться', upos: 'VERB', feats: { VerbForm: 'Fin' }, head: 0, deprel: 'root', start: 3, end: 11 },
@@ -186,10 +187,15 @@ test('полный жизненный цикл UI стилевого движк�
   assert.equal(parseCalls, 1);
   assert.equal(first.ctx.__styleShadow.status, 'ok');
   assert.equal(first.ctx.__styleShadow.acceptedRanges, 1);
+  assert.equal(first.editor.state.__an.engine.hybrid, true);
   assert.equal(first.editor.state.__an.stats.redund, 1);
+  assert.equal(first.editor.state.__an.stats.tell, 1);
   assert.equal(first.editor.state.__an.ranges.redund.length, 1);
+  assert.equal(first.editor.state.__an.ranges.tell.length, 1);
   const redDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-redund');
   assert.ok(redDeco && redDeco.attrs.title.length > 0, 'подсветка должна содержать объяснение в title');
+  const tellDeco = first.editor.state.__an.set.find((d) => d.attrs.class === 'an an-tell');
+  assert.ok(tellDeco && tellDeco.attrs.title.length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
   assert.equal(first.analysisMod.stepIndex(first.editor.state.__an.ranges.redund, 0, 1), 0);
 
   // 3. Повторный запуск приложения: при том же storage модель остаётся подключённой и запускается автоматически.

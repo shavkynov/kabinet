@@ -26,6 +26,7 @@ export const AN_CATS = ['verb', 'noun', 'adj', 'adv', 'part', 'pron', 'passive',
 export const AN_NAV_CATS = ['adv', 'passive', 'long', 'repeat', 'filler', 'chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 // Стиль текста (src/style.js): только для русского текста.
 const STYLE_CATS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
+const HYBRID_LEXICAL_CATS = new Set(['chancery', 'weak', 'tell', 'remark', 'redund', 'own']);
 
 // Подсказки к подсвеченным словам (атрибут title; цвет и форма подсветки не меняются). Шаблоны переводятся один раз:
 // подсветка пересчитывается при наборе, а подсказок в тексте тысячи.
@@ -167,6 +168,7 @@ export function scanRhythm(doc) {
 function build(doc, cfg, engine = null) {
   const cats = cfg.cats || {};
   const engineActive = !!(engine && engine.active);
+  const engineHybrid = engineActive && !!engine.hybrid;
   const any = AN_CATS.some((k) => cats[k]);
   const stats = { words: 0, verb: 0, noun: 0, adj: 0, adv: 0, part: 0, pron: 0, passive: 0, long: 0, filler: 0, repeat: 0, tense: 0, rhythm: 0, chancery: 0, weak: 0, tell: 0, chain: 0, remark: 0, redund: 0, which: 0, own: 0 };
   if (!any) return { set: DecorationSet.empty, stats, active: false, ranges: emptyRanges(), engine: null };
@@ -175,6 +177,21 @@ function build(doc, cfg, engine = null) {
   const ranges = emptyRanges(); // места по категориям, в порядке текста: для «‹ ›» и меню «Не отмечать здесь»
   const skip = {}; // исключения «Не отмечать здесь» (настройки проекта)
   for (const cat of AN_NAV_CATS) skip[cat] = new Set((cfg.skip && cfg.skip[cat]) || []);
+  const engineSpans = Object.fromEntries(STYLE_CATS.map((k) => [k, []]));
+  if (engineActive) {
+    for (const range of (Array.isArray(engine.ranges) ? engine.ranges : [])) {
+      const cat = range.category;
+      if (!STYLE_CATS.includes(cat) || !cats[cat]) continue;
+      const fragment = range.fragment || doc.textBetween(range.from, range.to, '', '￼');
+      if (skip[cat].size && skip[cat].has(skipKey(fragment))) continue;
+      stats[cat] += 1;
+      const tip = (range.finding && range.finding.explanation) || range.explanation || range.tip || '';
+      const attrs = tip ? { class: `an an-${cat}`, title: tip } : { class: `an an-${cat}` };
+      decos.push(Decoration.inline(range.from, range.to, attrs));
+      ranges[cat].push({ from: range.from, to: range.to });
+      engineSpans[cat].push([range.from, range.to]);
+    }
+  }
   if (cats.tense) {
     const ts = scanTense(doc, cfg.tenseMode);
     stats.tense = ts.items.length;
@@ -252,33 +269,24 @@ function build(doc, cfg, engine = null) {
         }
       }
     }
-    if (!engineActive && LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
+    if ((!engineActive || engineHybrid) && LANG === 'ru' && STYLE_CATS.some((k) => cats[k])) {
       const st = styleOf(node, blockText, r.words, cats, r.sentences);
       for (const cat of STYLE_CATS) {
         if (!cats[cat]) continue;
+        if (engineActive && !HYBRID_LEXICAL_CATS.has(cat)) continue;
         for (const h of st[cat]) {
+          const from = base + h.start;
+          const to = base + h.end;
           if (skip[cat].size && skip[cat].has(skipKey(blockText.slice(h.start, h.end)))) continue;
+          if (engineActive && engineSpans[cat].some(([a, b]) => from < b && to > a)) continue;
           stats[cat] += 1;
-          decos.push(Decoration.inline(base + h.start, base + h.end, { class: `an an-${cat}`, title: h.tip }));
-          ranges[cat].push({ from: base + h.start, to: base + h.end });
+          decos.push(Decoration.inline(from, to, { class: `an an-${cat}`, title: h.tip }));
+          ranges[cat].push({ from, to });
         }
       }
     }
     return false;
   });
-  if (engineActive) {
-    for (const range of (Array.isArray(engine.ranges) ? engine.ranges : [])) {
-      const cat = range.category;
-      if (!STYLE_CATS.includes(cat) || !cats[cat]) continue;
-      const fragment = range.fragment || doc.textBetween(range.from, range.to, '', '￼');
-      if (skip[cat].size && skip[cat].has(skipKey(fragment))) continue;
-      stats[cat] += 1;
-      const tip = (range.finding && range.finding.explanation) || range.explanation || range.tip || '';
-      const attrs = tip ? { class: `an an-${cat}`, title: tip } : { class: `an an-${cat}` };
-      decos.push(Decoration.inline(range.from, range.to, attrs));
-      ranges[cat].push({ from: range.from, to: range.to });
-    }
-  }
   if (cats.repeat) {
     const prev = new Map(); // слово -> предыдущее такое же (индекс и расстояние)
     const next = new Map();

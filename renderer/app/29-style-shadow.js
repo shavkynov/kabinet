@@ -63,7 +63,10 @@ function fallbackStyleAnalysis() {
 function applyStyleAnalysis(ranges) {
   if (!editor) return false;
   try {
-    applyEngineAnalysis(editor, { active: true, ranges: Array.isArray(ranges) ? ranges : [] });
+    let shadowFlag = false;
+    try { shadowFlag = localStorage.getItem('kabinet.styleEngineShadow') === '1'; } catch { /* нет хранилища */ }
+    const hybrid = styleModelReady && !shadowFlag;
+    applyEngineAnalysis(editor, { active: true, ranges: Array.isArray(ranges) ? ranges : [], hybrid });
     return true;
   } catch {
     fallbackStyleAnalysis();
