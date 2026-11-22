@@ -304,7 +304,6 @@ function applyParsedSnapshot({ snapshot, parse, task, epoch, t0, styleCats, ling
     || (!shadowFlag && styleModelReady && lingCats.length > 0 && blocks === null);
   if (docChanged) {
     shadowPrev = 0;
-    fallbackStyleAnalysis();
     setShadowState(task, epoch, {
       status: 'stale', ok: false, categories, reason: 'document-changed',
       diagnostics: rangeResult.diagnostics, analysisMs: Math.round(performance.now() - t0),
@@ -416,7 +415,6 @@ async function runStyleShadow() {
           throw new Error('Некорректный ответ style:parse.');
         }
         if (res.cancelled) {
-          fallbackStyleAnalysis();
           setShadowState(task, epoch, { status: 'cancelled', ok: false, cancelled: true, categories, ms: Math.round(performance.now() - t0) });
           return;
         }

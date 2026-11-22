@@ -56,6 +56,23 @@ function wordsPhrase(n) {
 
 const emptyRanges = () => ({ adv: [], passive: [], long: [], repeat: [], filler: [], chancery: [], weak: [], tell: [], chain: [], remark: [], redund: [], which: [], own: [] });
 
+function mapRanges(ranges, mapping) {
+  if (!ranges || !mapping || typeof mapping.map !== 'function') return ranges;
+  const out = {};
+  for (const cat of AN_NAV_CATS) {
+    const list = ranges[cat];
+    if (!Array.isArray(list) || !list.length) { out[cat] = []; continue; }
+    const mapped = [];
+    for (const r of list) {
+      const from = mapping.map(r.from, 1);
+      const to = mapping.map(r.to, -1);
+      if (from < to) mapped.push({ from, to });
+    }
+    out[cat] = mapped;
+  }
+  return out;
+}
+
 const styleCache = new WeakMap();
 function styleOf(node, text, words, cats, sentences, udTag = 0) {
   const sig = `${udTag}|${STYLE_CATS.map((k) => (cats[k] ? 1 : 0)).join('')}`;
@@ -351,14 +368,21 @@ export const TextAnalysis = Extension.create({
       key: analysisKey,
       state: {
         init: (_, state) => build(state.doc, opts.getConfig()),
-        apply: (tr, old, _o, state) => {
+        apply: (tr, old, oldState, state) => {
           const engine = tr.getMeta(ENGINE_META);
           if (engine !== undefined) return build(state.doc, opts.getConfig(), engine);
           if (tr.getMeta(analysisKey)) return build(state.doc, opts.getConfig(), old.engine || null);
           if (!tr.docChanged) return old;
-          // большая глава: пока идёт ввод, сдвигаем прежнюю разметку, не перестраивая всю главу на каждую клавишу.
-          // Результат движка относился к прошлому снимку, поэтому сбрасываем его до отложенного пересчёта.
-          if (old.active && isBig(state.doc)) return { ...old, set: old.set.map(tr.mapping, tr.doc), engine: null, stale: true };
+          const wholeReplace = tr.getMeta('addToHistory') === false
+            && oldState && oldState.doc && tr.steps && tr.steps.length === 1
+            && tr.steps[0].from === 0 && tr.steps[0].to === oldState.doc.content.size;
+          // Пока активен точный грамматический движок (UDPipe), при наборе не сбрасываем разметку
+          // в приблизительный разбор (иначе подсветка мерцает между клавишами и паузой): сдвигаем текущую до нового снимка.
+          if (old.active && old.engine && old.engine.active && !wholeReplace) {
+            return { ...old, set: old.set.map(tr.mapping, tr.doc), ranges: mapRanges(old.ranges, tr.mapping), stale: false };
+          }
+          // большая глава в базовом режиме: пока идёт ввод, сдвигаем прежнюю разметку до отложенного пересчёта.
+          if (old.active && isBig(state.doc) && !wholeReplace) return { ...old, set: old.set.map(tr.mapping, tr.doc), engine: null, stale: true };
           return build(state.doc, opts.getConfig(), null);
         },
       },

@@ -59,9 +59,54 @@ test('60 000 слов: TextAnalysis при активном движке не п
   const next = plugin.spec.state.apply(tr, prevState, null, { doc });
   const dt = performance.now() - t0;
   assert.equal(mapped, true);
-  assert.equal(next.stale, true);
-  assert.equal(next.engine, null);
+  assert.equal(next.stale, false);
+  assert.equal(next.engine, prevState.engine);
   assert.ok(dt < 25, `apply при наборе занял ${dt.toFixed(1)} мс`);
+});
+
+test('TextAnalysis при активном движке не мерцает (не сбрасывается в базовый разбор) при наборе и сбрасывается при смене главы', async () => {
+  const { EditorState } = require('prosemirror-state');
+  const analysisMod = await loadAnalysis(ROOT, 'ru');
+  const [plugin] = analysisMod.TextAnalysis.plugins({
+    getConfig: () => ({ cats: { adv: true }, longMin: 30, fillers: [], repeatWin: 25 }),
+  });
+  const makeParaDoc = (txt) => schema.node('doc', null, [schema.node('paragraph', null, [schema.text(txt)])]);
+  const doc = makeParaDoc('Вечером они вышли в сад.');
+  let pm = EditorState.create({ doc });
+  let cur = plugin.spec.state.init(null, { doc });
+
+  // Имитируем точный разбор UDPipe: слово «Вечером» (pos 1..8) помечено как наречие (adv).
+  const blocks = new Map([[1, {
+    words: [{ from: 1, to: 8, text: 'Вечером', lemma: 'вечером', pos: 'adv', proper: false }],
+    passive: [],
+    tense: { past: 1, present: 0, items: [] },
+  }]]);
+  const trEngine = pm.tr.setMeta('styleEngineRanges', { active: true, hybrid: true, ranges: [], blocks });
+  cur = plugin.spec.state.apply(trEngine, cur, pm, pm);
+  assert.equal(cur.set.filter((d) => d.attrs.class === 'an an-adv').length, 1);
+
+  // В analysis-harness DecorationSet — это массив; добавим ему map() для имитации ProseMirror DecorationSet.map().
+  let mapCalls = 0;
+  cur.set.map = () => { mapCalls += 1; return cur.set; };
+
+  // Пользователь печатает в конце предложения: подсветка «Вечером» должна остаться без мерцания.
+  const prevPm = pm;
+  const trType = pm.tr.insertText(' Тепло.', pm.doc.content.size - 1);
+  pm = pm.apply(trType);
+  cur = plugin.spec.state.apply(trType, cur, prevPm, pm);
+  assert.equal(mapCalls, 1);
+  assert.equal(cur.stale, false);
+  assert.equal(cur.engine.active, true);
+  assert.equal(cur.set.filter((d) => d.attrs.class === 'an an-adv').length, 1);
+
+  // Полная замена документа (переключение главы через setContent) должна сбросить старый движок.
+  const nextChapter = makeParaDoc('Новая глава без наречий.');
+  const prevPm2 = pm;
+  const trSwitch = pm.tr.replaceWith(0, pm.doc.content.size, nextChapter.content).setMeta('addToHistory', false);
+  pm = pm.apply(trSwitch);
+  cur = plugin.spec.state.apply(trSwitch, cur, prevPm2, pm);
+  assert.equal(cur.engine, null);
+  assert.equal(cur.set.filter((d) => d.attrs.class === 'an an-adv').length, 0);
 });
 
 test('60 000 слов: поабзацный LRU-кэш и порционный разбор style:parse в 29-style-shadow.js', async () => {
