@@ -194,10 +194,10 @@ test('жизненный цикл встроенного стилевого дв
   assert.equal(second.editor.state.__an.ranges.redund.length, 1);
   assert.equal(second.editor.state.__an.ranges.tell.length, 1);
   const redDeco = second.editor.state.__an.set.find((d) => d.attrs.class === 'an an-redund');
-  assert.ok(redDeco && redDeco.attrs.title.length > 0, 'подсветка должна содержать объяснение в title');
-  assert.match(redDeco.attrs.title, /Совет:/);
+  assert.ok(redDeco && redDeco.attrs['data-an-tip'].length > 0, 'подсветка должна содержать объяснение в title');
+  assert.match(redDeco.attrs['data-an-tip'], /Совет:/);
   const tellDeco = second.editor.state.__an.set.find((d) => d.attrs.class === 'an an-tell');
-  assert.ok(tellDeco && tellDeco.attrs.title.length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
+  assert.ok(tellDeco && tellDeco.attrs['data-an-tip'].length > 0, 'лексическое дополнение tell тоже должно подсвечиваться с title');
   assert.equal(second.analysisMod.stepIndex(second.editor.state.__an.ranges.redund, 0, 1), 0);
 
   // 3. Переключение в базовый режим (даже если ранее стоял флаг тени kabinet.styleEngineShadow='1').

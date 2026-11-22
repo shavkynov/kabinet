@@ -28,7 +28,7 @@ export const AN_NAV_CATS = ['adv', 'passive', 'long', 'repeat', 'filler', 'chanc
 const STYLE_CATS = ['chancery', 'weak', 'tell', 'chain', 'remark', 'redund', 'which', 'own'];
 const HYBRID_LEXICAL_CATS = new Set(['chancery', 'weak', 'tell', 'remark', 'redund', 'own']);
 
-// Подсказки к подсвеченным словам (атрибут title; цвет и форма подсветки не меняются). Шаблоны переводятся один раз:
+// Подсказки к подсвеченным словам (атрибут data-an-tip, не title: правка атрибутов на лету ломает двойной клик; цвет и форма подсветки не меняются). Шаблоны переводятся один раз:
 // подсветка пересчитывается при наборе, а подсказок в тексте тысячи.
 let TPL = null;
 function tpl() {
@@ -218,7 +218,7 @@ function build(doc, cfg, engine = null) {
       if (skip[cat].size && skip[cat].has(skipKey(fragment))) continue;
       stats[cat] += 1;
       const tip = (range.finding && range.finding.explanation) || range.explanation || range.tip || '';
-      const attrs = tip ? { class: `an an-${cat}`, title: tip } : { class: `an an-${cat}` };
+      const attrs = tip ? { class: `an an-${cat}`, 'data-an-tip': tip } : { class: `an an-${cat}` };
       decos.push(Decoration.inline(range.from, range.to, attrs));
       ranges[cat].push({ from: range.from, to: range.to });
       engineSpans[cat].push([range.from, range.to]);
@@ -268,7 +268,7 @@ function build(doc, cfg, engine = null) {
         const to = w.to ?? (base + w.end);
         const attrs = { class: `an an-${w.pos}` };
         if (w.pos === 'adv') {
-          attrs.title = fill(T.adv, w.text);
+          attrs['data-an-tip'] = fill(T.adv, w.text);
           ranges.adv.push({ from, to });
         }
         decos.push(Decoration.inline(from, to, attrs));
@@ -291,7 +291,7 @@ function build(doc, cfg, engine = null) {
       stats.filler += 1;
       const from = base + f.start;
       const to = base + f.end;
-      decos.push(Decoration.inline(from, to, { class: 'an an-filler', title: fill(T.filler, blockText.slice(f.start, f.end)) }));
+      decos.push(Decoration.inline(from, to, { class: 'an an-filler', 'data-an-tip': fill(T.filler, blockText.slice(f.start, f.end)) }));
       ranges.filler.push({ from, to });
     }
     const passiveSpans = ud && Array.isArray(ud.passive) ? ud.passive : r.passive;
@@ -302,7 +302,7 @@ function build(doc, cfg, engine = null) {
       if (cats.passive) {
         const from = p.from ?? (base + p.start);
         const to = p.to ?? (base + p.end);
-        decos.push(Decoration.inline(from, to, { class: 'an an-passive', title: fill(T.passive, text) }));
+        decos.push(Decoration.inline(from, to, { class: 'an an-passive', 'data-an-tip': fill(T.passive, text) }));
         ranges.passive.push({ from, to });
       }
     }
@@ -311,7 +311,7 @@ function build(doc, cfg, engine = null) {
         if (skip.long.size && skip.long.has(skipKey(blockText.slice(s.start, s.end)))) continue;
         stats.long += 1;
         if (cats.long) {
-          decos.push(Decoration.inline(base + s.start, base + s.end, { class: 'an an-long', title: fill(T.long, wordsPhrase(s.words), String(cfg.longMin || 30)) }));
+          decos.push(Decoration.inline(base + s.start, base + s.end, { class: 'an an-long', 'data-an-tip': fill(T.long, wordsPhrase(s.words), String(cfg.longMin || 30)) }));
           ranges.long.push({ from: base + s.start, to: base + s.end });
         }
       }
@@ -328,7 +328,7 @@ function build(doc, cfg, engine = null) {
           if (skip[cat].size && skip[cat].has(skipKey(blockText.slice(h.start, h.end)))) continue;
           if (engineActive && engineSpans[cat].some(([a, b]) => from < b && to > a)) continue;
           stats[cat] += 1;
-          decos.push(Decoration.inline(from, to, { class: `an an-${cat}`, title: h.tip }));
+          decos.push(Decoration.inline(from, to, { class: `an an-${cat}`, 'data-an-tip': h.tip }));
           ranges[cat].push({ from, to });
         }
       }
@@ -349,7 +349,7 @@ function build(doc, cfg, engine = null) {
       stats.repeat += 1;
       const p = prev.get(i);
       const title = p ? fill(T.repeatPrev, seq[p.j].text, wordsPhrase(p.dist)) : fill(T.repeatNext, seq[next.get(i).i].text, wordsPhrase(next.get(i).dist));
-      decos.push(Decoration.inline(seq[i].from, seq[i].to, { class: 'an an-repeat', title }));
+      decos.push(Decoration.inline(seq[i].from, seq[i].to, { class: 'an an-repeat', 'data-an-tip': title }));
       ranges.repeat.push({ from: seq[i].from, to: seq[i].to });
     }
   }

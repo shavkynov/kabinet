@@ -161,21 +161,10 @@ function analysisCatOf(el) {
   return null;
 }
 
+// Совет лежит в data-an-tip прямо в разметке подсветки. Атрибуты внутри листа на лету не трогаем:
+// ProseMirror видит такую правку, перерисовывает слово, и двойной клик по нему не успевает выделить текст.
 function takeAnalysisTip(el) {
-  if (!el) return '';
-  if (!el.dataset.anTip) {
-    const raw = el.getAttribute('title') || '';
-    if (!raw) return '';
-    el.dataset.anTip = raw;
-    el.removeAttribute('title');
-  }
-  return el.dataset.anTip;
-}
-
-function suppressAncestorTitles(el) {
-  for (let cur = el.parentElement; cur && !cur.classList.contains('ProseMirror'); cur = cur.parentElement) {
-    if (cur.classList.contains('an')) takeAnalysisTip(cur);
-  }
+  return el && el.getAttribute ? el.getAttribute('data-an-tip') || '' : '';
 }
 
 function showAnalysisPopAt({ cat, text, tip, rect, el = null, hover = false }) {
@@ -209,7 +198,6 @@ function showAnalysisPopFromRange(cat, from, to) {
     const { node } = editor.view.domAtPos(probe);
     const dom = node.nodeType === 1 ? node : node.parentElement;
     el = dom && dom.closest ? dom.closest(`.an.an-${cat}`) : null;
-    if (el) suppressAncestorTitles(el);
     tip = takeAnalysisTip(el);
   } catch { /* текст успел измениться */ }
   const text = editor.state.doc.textBetween(from, to, '', '￼').trim();
@@ -407,7 +395,6 @@ function wireAnalysisPop() {
     if (!el) return;
     const cat = analysisCatOf(el);
     if (!cat) return;
-    suppressAncestorTitles(el);
     const tip = takeAnalysisTip(el);
     if (!tip) return;
     if (anPopState && anPopState.el === el && !pop.hidden) { clearTimeout(anPopHideTimer); return; }

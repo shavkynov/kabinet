@@ -1354,7 +1354,9 @@ body.plat-win, body.plat-other { --chrome-left: 12px; }
 :root { --dock-w: 240px; }
 #statusDock {
   position: fixed; right: 0; bottom: 0; z-index: 4;
-  box-sizing: border-box; height: var(--foot-h); width: max(var(--dock-w), min(var(--notes-w, 280px), 30vw));
+  /* Ширина ровно по правой панели (та же формула, что у #notesbar): плашка не заезжает на нижнюю панель редактора и значок «Машинки».
+     Если места мало, сжимается облачная подпись, а «Сохранено» остаётся. */
+  box-sizing: border-box; height: var(--foot-h); width: min(var(--notes-w, 280px), 30vw);
   padding: 0 12px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; overflow: hidden;
   border-top: 1px solid var(--line); background: var(--side); font-size: 12px; color: var(--muted);
 }
@@ -1363,6 +1365,8 @@ body.notes-hidden #statusDock { width: var(--dock-w); }
 .ds { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; background: none; border: none; padding: 3px 6px; color: inherit; font: inherit; border-radius: 6px; }
 .ds svg { flex: none; }
 .ds .ds-t { overflow: hidden; text-overflow: ellipsis; }
+#statusDock .ds { flex: 0 1 auto; overflow: hidden; }
+#statusDock #saveState { flex: none; }
 button.ds { cursor: pointer; }
 button.ds:hover { background: var(--sel); color: var(--text); }
 button.ds:focus-visible { outline: 1.5px solid var(--accent); }

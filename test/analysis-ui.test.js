@@ -17,7 +17,7 @@ test.before(async () => { mod = await loadAnalysis(ROOT, 'ru'); });
 
 test('подсветка: подсказки во всех пяти категориях, цвет и форма (классы) прежние', () => {
   const { result } = runBuild(mod, TEXT, cfg());
-  const title = (cls) => byClass(result.set, cls).map((d) => d.attrs.title);
+  const title = (cls) => byClass(result.set, cls).map((d) => d.attrs['data-an-tip']);
   assert.deepEqual(title('an-adv'), ['Наречие: «медленно»', 'Наречие: «вдруг»']);
   assert.deepEqual(title('an-passive'), ['Страдательный залог: «была открыта»']);
   assert.deepEqual(title('an-filler'), ['Слово-паразит из списка: «просто»']);
@@ -39,7 +39,7 @@ test('подсветка: остальные виды (глаголы, суще�
 test('подсказки: число слов склоняется («1 слово», «2 слова», «5 слов», «11 слов», «21 слово»)', () => {
   const sentence = (n) => `${Array.from({ length: n }, (_, i) => `слово${'абвгд'[i % 5]}`).join(' ')}.`;
   const { result } = runBuild(mod, [1, 2, 5, 11, 21].map(sentence), { cats: { long: true }, longMin: 1, fillers: [], repeatWin: 25 });
-  assert.deepEqual(byClass(result.set, 'an-long').map((d) => d.attrs.title), [
+  assert.deepEqual(byClass(result.set, 'an-long').map((d) => d.attrs['data-an-tip']), [
     'Длинное предложение: 1 слово (порог 1)', 'Длинное предложение: 2 слова (порог 1)', 'Длинное предложение: 5 слов (порог 1)',
     'Длинное предложение: 11 слов (порог 1)', 'Длинное предложение: 21 слово (порог 1)',
   ]);
@@ -48,7 +48,7 @@ test('подсказки: число слов склоняется («1 слов
 test('подсказки на английском: число слов с «word/words»', async () => {
   const en = await loadAnalysis(ROOT, 'en');
   const { result } = runBuild(en, ['Один. Два слова.'], { cats: { long: true }, longMin: 1, fillers: [], repeatWin: 25 });
-  assert.deepEqual(byClass(result.set, 'an-long').map((d) => d.attrs.title), ['Длинное предложение: 1 word (порог 1)', 'Длинное предложение: 2 words (порог 1)']);
+  assert.deepEqual(byClass(result.set, 'an-long').map((d) => d.attrs['data-an-tip']), ['Длинное предложение: 1 word (порог 1)', 'Длинное предложение: 2 words (порог 1)']);
 });
 
 test('переход «‹ ›»: места по категориям в порядке текста, в счётчиках те же числа', () => {
@@ -88,7 +88,7 @@ test('исключения: слово в категории больше не �
     long: [skipKey('Он медленно подошёл к двери и вдруг просто остановился.')],
   };
   const { result } = runBuild(mod, TEXT, cfg({ skip }));
-  assert.deepEqual(byClass(result.set, 'an-adv').map((d) => d.attrs.title), ['Наречие: «вдруг»']);
+  assert.deepEqual(byClass(result.set, 'an-adv').map((d) => d.attrs['data-an-tip']), ['Наречие: «вдруг»']);
   for (const cls of ['an-passive', 'an-filler', 'an-repeat', 'an-long']) assert.equal(byClass(result.set, cls).length, 0, cls);
   assert.equal(result.stats.adv, base.stats.adv - 1);
   assert.equal(result.stats.passive, 0);
@@ -111,7 +111,7 @@ test('исключение повтора: расстояния до други�
   assert.equal(plain.stats.repeat, 4);
   const skipped = runBuild(mod, paras, cfg({ cats: { repeat: true }, skip: { repeat: ['туман'] } })).result;
   assert.equal(skipped.stats.repeat, 2);
-  assert.deepEqual(byClass(skipped.set, 'an-repeat').map((d) => d.attrs.title), ['Повтор: слово «Дорога» встретится снова через 4 слова', 'Повтор: слово «Дорога» уже было 4 слова назад']);
+  assert.deepEqual(byClass(skipped.set, 'an-repeat').map((d) => d.attrs['data-an-tip']), ['Повтор: слово «Дорога» встретится снова через 4 слова', 'Повтор: слово «Дорога» уже было 4 слова назад']);
 });
 
 test('переход «‹ ›»: следующее и предыдущее место по кругу, пусто: -1', () => {
@@ -136,7 +136,7 @@ test('переход «‹ ›»: следующее и предыдущее м�
 test('слова-паразиты: «слово*» и «слово~» работают в подсветке, смена списка не залипает в кэше абзацев', () => {
   const paras = ['Он почувствовал холод, она почувствовала страх, а они почувствуют всё.'];
   const only = { cats: { filler: true }, longMin: 30, repeatWin: 25 };
-  const titles = (fillers) => byClass(runBuild(mod, paras, { ...only, fillers }).result.set, 'an-filler').map((d) => d.attrs.title);
+  const titles = (fillers) => byClass(runBuild(mod, paras, { ...only, fillers }).result.set, 'an-filler').map((d) => d.attrs['data-an-tip']);
   assert.deepEqual(titles(['почувствовал']), ['Слово-паразит из списка: «почувствовал»']);
   assert.deepEqual(titles(['почувствова*']), ['Слово-паразит из списка: «почувствовал»', 'Слово-паразит из списка: «почувствовала»']);
   assert.equal(titles(['почувствовал~']).length, 3, 'все формы: почувствовал, почувствовала, почувствуют');
@@ -169,12 +169,12 @@ test('стиль текста: все восемь категорий доход
     assert.equal(cls(`an-${cat}`).length, n, `${cat}: подсветка`);
     assert.equal(result.stats[cat], n, `${cat}: счётчик`);
   }
-  assert.match(cls('an-chancery')[0].attrs.title, /осуществлять/);
-  assert.match(cls('an-weak')[0].attrs.title, /фазовый глагол/);
-  assert.match(cls('an-tell')[0].attrs.title, /названо чувство/);
-  assert.match(cls('an-redund')[0].attrs.title, /лишнее уточнение/);
-  assert.match(cls('an-which')[0].attrs.title, /3 придаточных/);
-  assert.match(cls('an-own')[0].attrs.title, /«свой»/);
+  assert.match(cls('an-chancery')[0].attrs['data-an-tip'], /осуществлять/);
+  assert.match(cls('an-weak')[0].attrs['data-an-tip'], /фазовый глагол/);
+  assert.match(cls('an-tell')[0].attrs['data-an-tip'], /названо чувство/);
+  assert.match(cls('an-redund')[0].attrs['data-an-tip'], /лишнее уточнение/);
+  assert.match(cls('an-which')[0].attrs['data-an-tip'], /3 придаточных/);
+  assert.match(cls('an-own')[0].attrs['data-an-tip'], /«свой»/);
   // «является» внутри реплики не считается; ремарка при этом отмечается
   assert.equal(result.stats.chancery, 1);
   const r = mod.analysisRanges(state);
@@ -201,7 +201,7 @@ test('движок: ranges заменяют старые стилевые кат
   assert.equal(mod.analysisRanges(state).chain.length, 1);
   const decos = byClass(result.set, 'an-chain');
   assert.deepEqual(decos.map((d) => [d.from, d.to]), [[1, 1 + text.length]]);
-  assert.equal(decos[0].attrs.title, 'Цепочка из 4 существительных подряд.');
+  assert.equal(decos[0].attrs['data-an-tip'], 'Цепочка из 4 существительных подряд.');
   assert.equal(byClass(result.set, 'an-chancery').length, 0);
 });
 
@@ -269,12 +269,12 @@ test('движок (гибрид): chain/which только от UDPipe, ост�
   assert.equal(result.stats.chancery, 2);
   const chDecos = byClass(result.set, 'an-chancery');
   assert.equal(chDecos.length, 2);
-  assert.ok(chDecos.some((d) => d.from === 1 + udpStart && d.to === 1 + udpEnd && d.attrs.title === 'Канцелярит (UDPipe).'));
+  assert.ok(chDecos.some((d) => d.from === 1 + udpStart && d.to === 1 + udpEnd && d.attrs['data-an-tip'] === 'Канцелярит (UDPipe).'));
   // лексические дополнения от src/style.js доходят с подсказками и попадают в счётчики и навигацию
-  assert.ok(result.stats.weak >= 1 && byClass(result.set, 'an-weak').every((d) => !!d.attrs.title));
-  assert.ok(result.stats.tell >= 1 && byClass(result.set, 'an-tell').every((d) => !!d.attrs.title));
-  assert.ok(result.stats.remark >= 1 && byClass(result.set, 'an-remark').every((d) => !!d.attrs.title));
-  assert.ok(result.stats.own >= 1 && byClass(result.set, 'an-own').every((d) => !!d.attrs.title));
+  assert.ok(result.stats.weak >= 1 && byClass(result.set, 'an-weak').every((d) => !!d.attrs['data-an-tip']));
+  assert.ok(result.stats.tell >= 1 && byClass(result.set, 'an-tell').every((d) => !!d.attrs['data-an-tip']));
+  assert.ok(result.stats.remark >= 1 && byClass(result.set, 'an-remark').every((d) => !!d.attrs['data-an-tip']));
+  assert.ok(result.stats.own >= 1 && byClass(result.set, 'an-own').every((d) => !!d.attrs['data-an-tip']));
   assert.equal(mod.analysisRanges(state).chancery.length, 2);
   // analysisSkip убирает «в феврале месяце» и у UDPipe, и у src/style.js
   assert.equal(result.stats.redund, 0);
