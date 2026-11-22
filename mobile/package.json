@@ -1,7 +1,7 @@
 {
   "name": "kabinet-android",
   "private": true,
-  "version": "0.42.1",
+  "version": "0.42.2",
   "description": "Кабинет для Android (оболочка Capacitor вокруг того же интерфейса)",
   "scripts": {
     "web": "node build.js",
