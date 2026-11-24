@@ -211,6 +211,7 @@ function enterProject(proj) {
   $('#projectName').setAttribute('translate', 'no');
   $('#projectName').textContent = proj.name;
   showScreen('workspace');
+  refreshSaveState();
   refreshLists();
   if (proj.chapters.length > 0) {
     openDoc('chapter', proj.chapters[0].id);

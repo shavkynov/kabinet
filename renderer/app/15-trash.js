@@ -79,6 +79,8 @@ function cardMenu(item, x, y, kind) {
     );
   }
   entries.push(
+    ...reorderMenuEntries(kind, item),
+    { separator: true },
     { label: 'Переименовать', onClick: () => ctl.renameById(item.id) },
     { label: 'Переместить в Корзину', onClick: () => (kind === 'note' ? deleteNote(item.id) : deleteDoc(kind, item.id)) },
   );

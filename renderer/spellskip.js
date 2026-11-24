@@ -6,6 +6,7 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { isBig, lazyView } from './lazy.js';
+import { expandWords } from '../src/dict.js';
 
 const skipKey = new PluginKey('spellSkip');
 const WORD = /[\p{L}\p{M}][\p{L}\p{M}'’-]*/gu;
@@ -71,7 +72,7 @@ function redraw(editor) {
 
 /** Заменить список слов словаря и перерисовать. */
 export function setSpellSkipWords(editor, words) {
-  dict = new Set((words || []).map(norm).filter(Boolean));
+  dict = new Set(expandWords(words || []).map(norm).filter(Boolean));
   dictVer += 1;
   redraw(editor);
 }

@@ -25,7 +25,8 @@ function refreshSaveState() {
   el.classList.toggle('err', failed);
   const cloudErr = !!(DOCK.cloud && DOCK.cloud.error);
   dock.classList.toggle('has-err', failed || cloudErr);
-  dock.hidden = !project || (el.hidden && $('#cloudState').hidden);
+  dock.classList.toggle('empty', el.hidden && $('#cloudState').hidden);
+  dock.hidden = !project;
 }
 
 function refreshCloudState() {

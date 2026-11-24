@@ -355,10 +355,15 @@ export function initTextCheck(ctx) {
     const modeRow = $('#checkModeRow');
     const modeSel = $('#setCheckMode');
     const serverRow = $('#checkServerRow');
+    const kindsBox = $('#checkKindsBox');
+    const ltHint = $('#checkLtHint');
     if (modeRow) modeRow.hidden = !avail;
     const mode = avail && cfg.mode !== 'online' ? 'offline' : 'online';
     if (modeSel) modeSel.value = mode;
-    if (serverRow) serverRow.hidden = avail && mode === 'offline';
+    const offline = avail && mode === 'offline';
+    if (serverRow) serverRow.hidden = offline;
+    if (kindsBox) kindsBox.hidden = offline;
+    if (ltHint) ltHint.hidden = offline;
   }
 
   async function open() {

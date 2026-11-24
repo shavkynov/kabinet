@@ -6,8 +6,9 @@
 const AUTO_TITLE = /^(Глава|Рассказ|Chapter|Story) \d+$/;
 
 export function createList(opts) {
-  const { el, numbered = false, showNumbers = () => true } = opts;
-  let dragId = null;
+  const { el, numbered = false, showNumbers = () => true, reorderable = true } = opts;
+  let drag = null;
+  let suppressClickUntil = 0;
 
   function items() {
     return opts.getItems() || [];
@@ -23,6 +24,7 @@ export function createList(opts) {
   }
 
   function render() {
+    if (drag) drag.cleanup(false);
     el.textContent = '';
     items().forEach((item, i) => el.append(makeRow(item, i)));
     updateSelection();
@@ -37,11 +39,91 @@ export function createList(opts) {
     }
   }
 
+  function startDrag(e, row, item) {
+    if (e.button !== 0 || e.pointerType === 'touch' || e.target.closest('input') || row.querySelector('input')) return;
+    if (drag) drag.cleanup(false);
+    const d = { id: item.id, row, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, active: false, to: -1 };
+    const onMove = (ev) => {
+      if (ev.pointerId !== d.pointerId) return;
+      if (!d.active) {
+        if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < 5) return;
+        d.active = true;
+        row.classList.add('dragging');
+        document.body.classList.add('reordering');
+        try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+      }
+      ev.preventDefault();
+      const scroller = el.closest('#binder') || el;
+      const sr = scroller.getBoundingClientRect();
+      if (ev.clientY < sr.top + 28) scroller.scrollTop -= 10;
+      else if (ev.clientY > sr.bottom - 28) scroller.scrollTop += 10;
+
+      const er = el.getBoundingClientRect();
+      if (ev.clientX < er.left - 80 || ev.clientX > er.right + 80 || ev.clientY < er.top - 48 || ev.clientY > er.bottom + 48) {
+        clearDropMarks();
+        d.to = -1;
+        return;
+      }
+      const rows = [...el.querySelectorAll('.ch')];
+      if (!rows.length) return;
+      let hit = rows[0];
+      let best = Infinity;
+      for (const rEl of rows) {
+        const rr = rEl.getBoundingClientRect();
+        const dist = ev.clientY >= rr.top && ev.clientY <= rr.bottom ? 0 : Math.abs(ev.clientY - (rr.top + rr.height / 2));
+        if (dist < best) { best = dist; hit = rEl; if (dist === 0) break; }
+      }
+      const hr = hit.getBoundingClientRect();
+      const after = ev.clientY > hr.top + hr.height / 2;
+      const from = indexOf(d.id);
+      const idx = indexOf(hit.dataset.id);
+      let to = idx + (after ? 1 : 0);
+      if (from < to) to -= 1;
+      clearDropMarks();
+      if (from < 0 || idx < 0 || to === from) {
+        d.to = -1;
+      } else {
+        d.to = to;
+        hit.classList.add(after ? 'drop-after' : 'drop-before');
+      }
+    };
+    const onUp = (ev) => { if (ev.pointerId === d.pointerId) d.cleanup(true); };
+    const onCancel = (ev) => { if (ev.pointerId === undefined || ev.pointerId === d.pointerId) d.cleanup(false); };
+    const onKey = (ev) => { if (ev.key === 'Escape') d.cleanup(false); };
+    const onBlur = () => d.cleanup(false);
+    d.cleanup = async (commit) => {
+      if (drag !== d) return;
+      drag = null;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('keydown', onKey);
+      clearDropMarks();
+      row.classList.remove('dragging');
+      document.body.classList.remove('reordering');
+      if (d.active) suppressClickUntil = Date.now() + 250;
+      if (commit && d.active && d.to >= 0) {
+        try {
+          await opts.onReorder(d.id, d.to);
+        } catch (err) {
+          opts.onError(err);
+        }
+        render();
+      }
+    };
+    drag = d;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('keydown', onKey);
+  }
+
   function makeRow(item, i) {
     const row = document.createElement('div');
     row.className = 'ch' + (numbered ? '' : ' card');
     row.dataset.id = item.id;
-    row.draggable = true;
 
     if (numbered) {
       // цветовой маркер главы: полоса слева
@@ -78,6 +160,7 @@ export function createList(opts) {
     }
 
     row.addEventListener('click', () => {
+      if (Date.now() < suppressClickUntil) return;
       opts.onOpen(item.id);
       el.focus();
     });
@@ -86,45 +169,7 @@ export function createList(opts) {
       e.preventDefault();
       opts.onContext(item, e.clientX, e.clientY);
     });
-
-    row.addEventListener('dragstart', (e) => {
-      dragId = item.id;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', item.id);
-      row.classList.add('dragging');
-    });
-    row.addEventListener('dragend', () => {
-      dragId = null;
-      row.classList.remove('dragging');
-      clearDropMarks();
-    });
-    row.addEventListener('dragover', (e) => {
-      if (!dragId) return;
-      e.preventDefault();
-      const r = row.getBoundingClientRect();
-      const after = e.clientY > r.top + r.height / 2;
-      clearDropMarks();
-      row.classList.add(after ? 'drop-after' : 'drop-before');
-    });
-    row.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      const id = dragId;
-      if (!id) return;
-      const r = row.getBoundingClientRect();
-      const after = e.clientY > r.top + r.height / 2;
-      const from = indexOf(id);
-      let to = indexOf(item.id) + (after ? 1 : 0);
-      if (from < to) to -= 1;
-      clearDropMarks();
-      dragId = null;
-      if (to === from) return;
-      try {
-        await opts.onReorder(id, to);
-      } catch (err) {
-        opts.onError(err);
-      }
-      render();
-    });
+    if (reorderable) row.addEventListener('pointerdown', (e) => startDrag(e, row, item));
 
     return row;
   }
@@ -138,7 +183,6 @@ export function createList(opts) {
     input.value = item.title;
     input.maxLength = 200;
     titleEl.replaceWith(input);
-    row.draggable = false;
     input.focus();
     input.select();
 

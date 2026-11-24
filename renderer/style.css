@@ -203,6 +203,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ch.selected { background: var(--sel); }
 .list:focus-visible .ch.selected { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .ch.dragging { opacity: .4; }
+body.reordering, body.reordering * { cursor: grabbing !important; user-select: none !important; }
 .ch.drop-before::before, .ch.drop-after::after {
   content: ""; position: absolute; left: 4px; right: 4px; height: 2px; background: var(--accent);
 }
@@ -665,7 +666,7 @@ body.focus-mode .panel { display: none; }
   transition: background-color .12s, color .12s;
 }
 .ctx-item:hover:not(:disabled) { background: var(--sel); }
-.ctx-item:disabled { color: var(--muted); cursor: default; }
+.ctx-item:disabled { color: var(--muted); opacity: .48; cursor: default; }
 .ctx-mark { width: 14px; flex: none; text-align: center; color: var(--accent); }
 .ctx-mark.swatch { height: 10px; width: 10px; border-radius: 50%; margin: 0 2px; }
 .ctx-subwrap { position: relative; }
@@ -673,13 +674,14 @@ body.focus-mode .panel { display: none; }
 .ctx-sub { display: none; position: fixed; max-height: 70vh; overflow-y: auto; z-index: 51; }
 .ctx-sub.open { display: block; }
 .ctx-sep { height: 1px; background: var(--line); margin: 5px 4px; }
-.ctx-icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 4px; width: 264px; }
+.ctx-icons-box { display: flex; flex-direction: column; width: 272px; }
+.ctx-icons { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 4px; max-height: 176px; overflow-y: auto; }
 .ctx-icon { background: none; border: none; padding: 4px 0; font-size: 17px; border-radius: 6px; line-height: 1.2; }
 .ctx-icon:hover { background: var(--sel); }
 .ctx-icon.current { outline: 1.5px solid var(--accent); }
 .ctx-icon-none {
-  grid-column: 1 / -1; background: none; border: none; color: var(--muted);
-  font-size: 12px; padding: 5px; border-radius: 6px;
+  width: 100%; background: none; border: none; border-top: 1px solid var(--line); color: var(--muted);
+  font-size: 12px; padding: 6px 5px; border-radius: 0 0 6px 6px;
 }
 .ctx-icon-none:hover { background: var(--sel); color: var(--text); }
 
@@ -1010,6 +1012,9 @@ body.focus-mode #status { bottom: 12px; }
 
 #checkPanel.wide { width: 416px; max-width: calc(100vw - 24px); }
 #checkPanel { overflow-x: hidden; }
+#checkPanel select { max-width: 230px; }
+#checkPanel input.text { min-width: 0; flex: 1; }
+#viewCheck .row:has(> button) { flex-wrap: wrap; }
 #checkList { max-height: 46vh; overflow-y: auto; margin: 8px 0 0; }
 .chk-item {
   padding: 9px 10px; margin-top: 6px; cursor: pointer; border-radius: 8px;
@@ -1360,7 +1365,14 @@ body.plat-win, body.plat-other { --chrome-left: 12px; }
   padding: 0 12px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; overflow: hidden;
   border-top: 1px solid var(--line); background: var(--side); font-size: 12px; color: var(--muted);
 }
-body.notes-hidden #statusDock { width: var(--dock-w); }
+body.notes-hidden #statusDock {
+  width: var(--dock-w);
+  background: transparent;
+  border-top-color: transparent;
+  pointer-events: none;
+}
+body.notes-hidden #statusDock > * { pointer-events: auto; }
+body.notes-hidden #statusDock.empty { display: none; }
 #statusDock[hidden], .ds[hidden] { display: none; }
 .ds { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; background: none; border: none; padding: 3px 6px; color: inherit; font: inherit; border-radius: 6px; }
 .ds svg { flex: none; }
@@ -1376,6 +1388,10 @@ button.ds:focus-visible { outline: 1.5px solid var(--accent); }
 #notesbar { padding-bottom: var(--foot-h); box-sizing: border-box; }
 body.notes-hidden #toolbar { padding-right: calc(12px + var(--dock-w)); }
 body.focus-mode #statusDock:not(.has-err), body.mob #statusDock { display: none; }
+body.focus-mode #statusDock.has-err {
+  width: auto; max-width: calc(100vw - 24px);
+  background: var(--side); border-top-color: var(--line); pointer-events: auto;
+}
 
 /* Плашка цели в нижней панели: по высоте строго внутри полосы, отступы сверху и снизу равны. */
 :root { --goal-dock-h: 25px; }
@@ -1422,13 +1438,13 @@ body.mob .bar-sep { display: none; }
 body.narrow:not(.mob) #sidebar { position: absolute; left: 0; top: 0; bottom: 0; z-index: 5; box-shadow: 2px 0 14px rgba(0, 0, 0, .16); }
 body.narrow:not(.mob) #notesbar { position: absolute; right: 0; top: 0; bottom: 0; z-index: 5; box-shadow: -2px 0 14px rgba(0, 0, 0, .16); }
 body.narrow:not(.mob) #resizer, body.narrow:not(.mob) #notesResizer { display: none; }
-body.narrow:not(.mob) #statusDock { width: var(--dock-w); }
 body.narrow:not(.mob) #statusDock { z-index: 6; }
 body.narrow:not(.mob) #toolbar { padding-right: calc(12px + var(--dock-w)); }
 
 /* ---------- кнопки гаснут, пока печатаете ---------- */
-.chrome-btn, #chromeRight, #statusDock { transition-property: opacity, left, right; transition-duration: .25s, .15s, .15s; }
-body.typing:not(.focus-mode) .chrome-btn:not(.on), body.typing #statusDock:not(.has-err) { opacity: 0; pointer-events: none; }
+.chrome-btn, #chromeRight { transition-property: opacity, left, right; transition-duration: .25s, .15s, .15s; }
+#statusDock > * { transition: opacity .25s; }
+body.typing:not(.focus-mode) .chrome-btn:not(.on), body.typing #statusDock:not(.has-err) > * { opacity: 0; pointer-events: none; }
 
 /* ---------- панель форматирования на листе ---------- */
 /* Верхняя полоса листа свободна: текст при прокрутке уходит под её край. Кнопки без рамки и фона, чтобы лист не казался зажатым. */

@@ -18,7 +18,7 @@ function getImageUrl(file) {
 async function reloadSpellSkip() {
   let words = [];
   try { words = project ? await api.getDictionary() : []; } catch { /* без словаря */ }
-  if (editor) setSpellSkipWords(editor, words);
+  for (const ed of [editor, editor2]) if (ed) setSpellSkipWords(ed, words);
 }
 window.addEventListener('kabinet:dict-changed', reloadSpellSkip);
 

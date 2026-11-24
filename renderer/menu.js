@@ -178,6 +178,8 @@ function makeItem(e) {
 }
 
 function makeIconGrid(e) {
+  const box = document.createElement('div');
+  box.className = 'ctx-icons-box';
   const wrap = document.createElement('div');
   wrap.className = 'ctx-icons';
 
@@ -217,6 +219,6 @@ function makeIconGrid(e) {
     closeMenu();
     e.onPick(null);
   });
-  wrap.append(none);
-  return wrap;
+  box.append(wrap, none);
+  return box;
 }

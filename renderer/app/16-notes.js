@@ -245,6 +245,7 @@ function wireLists() {
   trashListCtl = createList({
     el: $('#trashList'),
     numbered: false,
+    reorderable: false,
     getItems: () => itemsOf('trash'),
     getSelectedId: () => trashSel,
     onOpen: (id) => { trashSel = id; trashListCtl.updateSelection(); },

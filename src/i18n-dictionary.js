@@ -30,4 +30,6 @@ module.exports = {
   'Подобрать варианты': 'Find suggestions',
   'Ищу…': 'Searching…',
   'Варианты: {0}': 'Suggestions: {0}',
+  'Переместить выше': 'Move up',
+  'Переместить ниже': 'Move down',
 };

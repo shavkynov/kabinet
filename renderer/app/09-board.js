@@ -1,6 +1,101 @@
 // ---------- доска со стикерами ----------
 
 let boardDrag = null;
+let boardSuppressClickUntil = 0;
+
+function clearBoardDropMarks(grid) {
+  grid.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+}
+
+function cancelBoardDrag() {
+  if (boardDrag) boardDrag.cleanup(false);
+}
+
+function startBoardDrag(e, el, card, cards, grid) {
+  if (e.button !== 0 || e.pointerType === 'touch') return;
+  cancelBoardDrag();
+  const d = { id: card.id, el, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, active: false, to: -1 };
+  const onMove = (ev) => {
+    if (ev.pointerId !== d.pointerId) return;
+    if (!d.active) {
+      if (Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < 6) return;
+      d.active = true;
+      el.classList.add('dragging');
+      document.body.classList.add('reordering');
+      try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+    }
+    ev.preventDefault();
+    const scroller = $('#board');
+    if (scroller) {
+      const sr = scroller.getBoundingClientRect();
+      if (ev.clientY < sr.top + 32) scroller.scrollTop -= 12;
+      else if (ev.clientY > sr.bottom - 32) scroller.scrollTop += 12;
+    }
+    const gr = grid.getBoundingClientRect();
+    if (ev.clientX < gr.left - 48 || ev.clientX > gr.right + 48 || ev.clientY < gr.top - 48 || ev.clientY > gr.bottom + 48) {
+      clearBoardDropMarks(grid);
+      d.to = -1;
+      return;
+    }
+    const items = [...grid.querySelectorAll('.sticky:not(.add)')];
+    if (!items.length) return;
+    let hit = items[0];
+    let hitRect = hit.getBoundingClientRect();
+    let best = Infinity;
+    for (const st of items) {
+      const rr = st.getBoundingClientRect();
+      const dx = ev.clientX < rr.left ? rr.left - ev.clientX : ev.clientX > rr.right ? ev.clientX - rr.right : 0;
+      const dy = ev.clientY < rr.top ? rr.top - ev.clientY : ev.clientY > rr.bottom ? ev.clientY - rr.bottom : 0;
+      const dist = dx * dx + dy * dy;
+      if (dist < best) { best = dist; hit = st; hitRect = rr; if (dist === 0) break; }
+    }
+    const after = ev.clientX > hitRect.left + hitRect.width / 2;
+    const from = cards.findIndex((x) => x.id === d.id);
+    const idx = cards.findIndex((x) => x.id === hit.dataset.id);
+    let to = idx + (after ? 1 : 0);
+    if (from < to) to -= 1;
+    clearBoardDropMarks(grid);
+    if (from < 0 || idx < 0 || to === from) {
+      d.to = -1;
+    } else {
+      d.to = to;
+      hit.classList.add(after ? 'drop-after' : 'drop-before');
+    }
+  };
+  const onUp = (ev) => { if (ev.pointerId === d.pointerId) d.cleanup(true); };
+  const onCancel = (ev) => { if (ev.pointerId === undefined || ev.pointerId === d.pointerId) d.cleanup(false); };
+  const onKey = (ev) => { if (ev.key === 'Escape') d.cleanup(false); };
+  const onBlur = () => d.cleanup(false);
+  d.cleanup = async (commit) => {
+    if (boardDrag !== d) return;
+    boardDrag = null;
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('blur', onBlur);
+    window.removeEventListener('keydown', onKey);
+    clearBoardDropMarks(grid);
+    el.classList.remove('dragging');
+    document.body.classList.remove('reordering');
+    if (d.active) boardSuppressClickUntil = Date.now() + 250;
+    if (commit && d.active && d.to >= 0) {
+      try {
+        project = await api.moveChapter(d.id, d.to);
+        refreshLists();
+        fillP2Select();
+      } catch (err) {
+        showError(err.message);
+      }
+      renderBoard();
+    }
+  };
+  boardDrag = d;
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  window.addEventListener('blur', onBlur);
+  window.addEventListener('keydown', onKey);
+}
 
 async function openBoard() {
   if (!project) return;
@@ -11,10 +106,12 @@ async function openBoard() {
 }
 
 function closeBoard() {
+  cancelBoardDrag();
   $('#board').hidden = true;
 }
 
 async function renderBoard() {
+  cancelBoardDrag();
   let cards = [];
   try {
     cards = await api.projectBoard();
@@ -28,12 +125,11 @@ async function renderBoard() {
   const n = (v) => v.toLocaleString(LOCALE);
   $('#boardTitle').textContent = project.name;
   const total = cards.reduce((a, c) => a + c.words, 0);
-  $('#boardInfo').textContent = `${cards.length} гл. · ${n(total)} ${wordsForm(total)}`;
+  $('#boardInfo').textContent = t('{0} гл. · {1} {2}', cards.length, n(total), wordsForm(total));
 
   cards.forEach((c, i) => {
     const el = document.createElement('div');
     el.className = 'sticky';
-    el.draggable = true;
     el.dataset.id = c.id;
     el.style.setProperty('--rot', `${(((i * 37) % 7) - 3) * 0.45}deg`);
     if (c.marker) el.style.setProperty('--tape', MARKER_COLORS[c.marker]);
@@ -55,47 +151,11 @@ async function renderBoard() {
     el.append(num, title, syn, words);
 
     el.addEventListener('click', () => {
+      if (Date.now() < boardSuppressClickUntil) return;
       closeBoard();
       openDoc('chapter', c.id);
     });
-    el.addEventListener('dragstart', (e) => {
-      boardDrag = c.id;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', c.id);
-      el.classList.add('dragging');
-    });
-    el.addEventListener('dragend', () => {
-      boardDrag = null;
-      el.classList.remove('dragging');
-      grid.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
-    });
-    el.addEventListener('dragover', (e) => {
-      if (!boardDrag) return;
-      e.preventDefault();
-      const r = el.getBoundingClientRect();
-      const after = e.clientX > r.left + r.width / 2;
-      grid.querySelectorAll('.drop-before, .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
-      el.classList.add(after ? 'drop-after' : 'drop-before');
-    });
-    el.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      const id = boardDrag;
-      boardDrag = null;
-      if (!id) return;
-      const r = el.getBoundingClientRect();
-      const after = e.clientX > r.left + r.width / 2;
-      const from = cards.findIndex((x) => x.id === id);
-      let to = i + (after ? 1 : 0);
-      if (from < to) to -= 1;
-      if (from < 0 || to === from) { renderBoard(); return; }
-      try {
-        project = await api.moveChapter(id, to);
-        refreshLists();
-      } catch (err) {
-        showError(err.message);
-      }
-      renderBoard();
-    });
+    el.addEventListener('pointerdown', (e) => startBoardDrag(e, el, c, cards, grid));
     grid.append(el);
   });
 

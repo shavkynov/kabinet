@@ -210,6 +210,29 @@ async function renameDoc(kind, id, title) {
 
 async function reorderDoc(kind, id, to) {
   project = kind === 'chapter' ? await api.moveChapter(id, to) : await api.moveItem(kind, id, to);
+  if (kind === 'chapter') fillP2Select();
+}
+
+async function moveDocBy(kind, id, delta) {
+  const list = itemsOf(kind);
+  const from = indexIn(kind, id);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= list.length) return;
+  try {
+    await reorderDoc(kind, id, to);
+  } catch (err) {
+    showError(err.message);
+  }
+  listCtl(kind).render();
+}
+
+function reorderMenuEntries(kind, item) {
+  const list = itemsOf(kind);
+  const i = indexIn(kind, item.id);
+  return [
+    { label: 'Переместить выше', disabled: i <= 0, onClick: () => moveDocBy(kind, item.id, -1) },
+    { label: 'Переместить ниже', disabled: i < 0 || i >= list.length - 1, onClick: () => moveDocBy(kind, item.id, 1) },
+  ];
 }
 
 async function setMarker(id, marker) {
@@ -248,6 +271,9 @@ function chapterMenu(item, x, y) {
       disabled: item.id === currentId && currentKind === 'chapter',
       onClick: () => openPane2(item.id),
     },
+    { separator: true },
+    ...reorderMenuEntries('chapter', item),
+    { separator: true },
     { label: 'Переименовать', onClick: () => chapterListCtl.renameById(item.id) },
     { label: 'Переместить в Корзину', onClick: () => deleteDoc('chapter', item.id) },
   ]);

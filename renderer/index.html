@@ -847,7 +847,7 @@
           </select>
         </div>
         <div class="row">
-          <button id="btnRunCheck" type="button" class="secondary small">Проверить текст</button>
+          <button id="btnRunCheck" type="button" class="small">Проверить текст</button>
           <button id="btnCancelCheck" type="button" class="secondary small" hidden>Остановить</button>
           <button id="btnCheckClear" type="button" class="secondary small" hidden>Убрать подчёркивания</button>
         </div>
@@ -855,16 +855,18 @@
         <div id="checkList" hidden></div>
         <details class="chk-more">
           <summary>Настройки проверки</summary>
-          <p class="hint">Показывать замечания:</p>
-          <div id="chkKinds" class="chk-kinds">
-            <label class="row-check"><input type="checkbox" data-chk-kind="spelling"> <span>Орфография</span></label>
-            <label class="row-check"><input type="checkbox" data-chk-kind="punctuation"> <span>Пунктуация</span></label>
-            <label class="row-check"><input type="checkbox" data-chk-kind="grammar"> <span>Грамматика</span></label>
-            <label class="row-check"><input type="checkbox" data-chk-kind="style"> <span>Стиль</span></label>
-            <label class="row-check"><input type="checkbox" data-chk-kind="typography"> <span>Типографика</span></label>
-            <label class="row-check"><input type="checkbox" data-chk-kind="other"> <span>Другое</span></label>
+          <div id="checkKindsBox">
+            <p class="hint">Показывать замечания:</p>
+            <div id="chkKinds" class="chk-kinds">
+              <label class="row-check"><input type="checkbox" data-chk-kind="spelling"> <span>Орфография</span></label>
+              <label class="row-check"><input type="checkbox" data-chk-kind="punctuation"> <span>Пунктуация</span></label>
+              <label class="row-check"><input type="checkbox" data-chk-kind="grammar"> <span>Грамматика</span></label>
+              <label class="row-check"><input type="checkbox" data-chk-kind="style"> <span>Стиль</span></label>
+              <label class="row-check"><input type="checkbox" data-chk-kind="typography"> <span>Типографика</span></label>
+              <label class="row-check"><input type="checkbox" data-chk-kind="other"> <span>Другое</span></label>
+            </div>
+            <p class="hint">Скрытый вид пропадает из списка сразу и при следующих проверках не появляется. Включить его обратно можно здесь, замечания вернутся при следующей проверке.</p>
           </div>
-          <p class="hint">Скрытый вид пропадает из списка сразу и при следующих проверках не появляется. Включить его обратно можно здесь, замечания вернутся при следующей проверке.</p>
           <div id="checkServerRow" class="row">
             <label for="setCheckServer">Свой сервер</label>
             <input id="setCheckServer" class="text" type="text" placeholder="по умолчанию languagetool.org" autocomplete="off" spellcheck="false" translate="no">
@@ -878,7 +880,7 @@
           <div class="row">
             <button id="btnCheckReset" type="button" class="secondary small">Сбросить исключения и согласие</button>
           </div>
-          <p class="hint">Правок сама программа не вносит: каждое замечание вы принимаете или пропускаете. Пунктуацию в русском проверяют правила LanguageTool, они находят не всё и иногда ошибаются, поэтому решение всегда за вами.</p>
+          <p id="checkLtHint" class="hint">Правок сама программа не вносит: каждое замечание вы принимаете или пропускаете. Пунктуацию в русском проверяют правила LanguageTool, они находят не всё и иногда ошибаются, поэтому решение всегда за вами.</p>
         </details>
       </div>
     </div>
