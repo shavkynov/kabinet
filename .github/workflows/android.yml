@@ -32,7 +32,7 @@ jobs:
 
       - name: Зависимости
         run: |
-          npm install --ignore-scripts
+          npm ci --ignore-scripts
           cd mobile && npm install
 
       - name: Тесты (прерывают сборку, если что-то сломано)
@@ -72,6 +72,28 @@ jobs:
       - name: APK
         working-directory: mobile/android
         run: ./gradlew assembleRelease --no-daemon
+
+      - name: Проверить подпись
+        env:
+          EXPECTED_CERT_SHA256: 8703ed4e9f4cd67775750fa7ef56efee515b441aa279ce478d0ca73dd851bf96
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          APK=$(ls mobile/android/app/build/outputs/apk/release/*.apk | head -n1)
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SIGNER=$(ls -d "$SDK"/build-tools/*/apksigner | sort -V | tail -n1)
+          "$SIGNER" verify --print-certs "$APK" > signer.txt
+          grep -v '^WARNING: META-INF' signer.txt || true
+          ACTUAL=$(grep -m1 'certificate SHA-256 digest:' signer.txt | sed 's/.*digest: *//' | tr -d '[:space:]' | tr 'A-F' 'a-f' || true)
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::Не удалось прочитать отпечаток подписи APK."
+            exit 1
+          fi
+          echo "Отпечаток подписи APK: $ACTUAL"
+          if { [ -n "$RELEASE_TAG" ] || [ "${GITHUB_REF_TYPE}" = "tag" ]; } && [ "$ACTUAL" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::APK подписан не рабочим ключом (ожидался $EXPECTED_CERT_SHA256). В выпуск он не попадёт."
+            exit 1
+          fi
 
       - name: Переименовать
         run: |

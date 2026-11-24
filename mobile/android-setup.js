@@ -29,9 +29,22 @@ const javaDir = path.join(android, 'app', 'src', 'main', 'java', 'ru', 'kabinet'
 fs.mkdirSync(javaDir, { recursive: true });
 for (const f of ['HwKeyboardPlugin.java', 'SafPlugin.java', 'DavPlugin.java', 'SecretsPlugin.java', 'MainActivity.java']) fs.copyFileSync(path.join(here, 'android-src', f), path.join(javaDir, f));
 
-// WebDAV: плагин Dav использует OkHttp (в шаблоне Capacitor его может не быть).
+// WebDAV: плагин Dav использует OkHttp (в шаблоне Capacitor его может не быть), а versionCode/versionName синхронизируем с package.json.
 {
+  const pkgPath = fs.existsSync(path.join(here, 'package.json'))
+    ? path.join(here, 'package.json')
+    : path.join(here, '..', 'package.json');
+  const pkgVersion = String(JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || '').trim();
+  const verParts = /^(\d+)\.(\d+)\.(\d+)$/.exec(pkgVersion);
+  if (!verParts) throw new Error(`Некорректная версия приложения для Android: «${pkgVersion}».`);
+  const [, maj, min, pat] = verParts.map(Number);
+  if (min >= 100 || pat >= 100) throw new Error(`Компоненты версии для Android (minor/patch) должны быть < 100: «${pkgVersion}».`);
+  const versionCode = maj * 10000 + min * 100 + pat;
+  if (versionCode < 1) throw new Error(`Некорректный versionCode для Android: ${versionCode}`);
+
   const appGradle = path.join(android, 'app', 'build.gradle');
+  patch(appGradle, /\bversionCode\s+\d+/, `versionCode ${versionCode}`, 'versionCode');
+  patch(appGradle, /\bversionName\s+"[^"]*"/, `versionName "${pkgVersion}"`, 'versionName');
   const text = fs.readFileSync(appGradle, 'utf8');
   if (!text.includes('com.squareup.okhttp3:okhttp')) {
     patch(appGradle, /dependencies\s*\{/, "dependencies {\n    implementation 'com.squareup.okhttp3:okhttp:4.12.0'", 'dependencies');

@@ -32,10 +32,16 @@ for (const f of modules) syntax(path.join(rdir, f), true);
 // id в коде должны быть в index.html
 const html = fs.readFileSync(path.join(rdir, 'index.html'), 'utf8');
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]));
-for (const f of modules) {
-  const code = fs.readFileSync(path.join(rdir, f), 'utf8');
+const mdir = path.join(root, 'mobile');
+const idFiles = [
+  ...modules.filter((f) => f !== 'app.gen.js').map((f) => path.join(rdir, f)),
+  ...fs.readdirSync(path.join(rdir, 'app')).filter((f) => f.endsWith('.js')).map((f) => path.join(rdir, 'app', f)),
+  ...fs.readdirSync(mdir).filter((f) => f.endsWith('.js')).map((f) => path.join(mdir, f)),
+];
+for (const file of idFiles) {
+  const code = fs.readFileSync(file, 'utf8');
   const used = new Set([...code.matchAll(/(?:\$|querySelector|getElementById)\(\s*['"]#([A-Za-z][\w-]*)['"]\s*\)/g)].map((m) => m[1]));
-  for (const id of used) if (!ids.has(id)) fail(`${f}: в index.html нет #${id}`);
+  for (const id of used) if (!ids.has(id)) fail(`${path.relative(root, file)}: в index.html нет #${id}`);
 }
 
 // каждый api.метод(), который зовёт окно, есть в мосте Tauri (desktop/bridge.src.js)

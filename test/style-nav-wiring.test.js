@@ -96,3 +96,10 @@ test('Нижняя полоса #statusDock и оформление панеле
   assert.ok(checkJs.includes('#checkKindsBox'));
   assert.ok(checkJs.includes('#checkLtHint'));
 });
+
+test('Android: mobileBack закрывает .ctx-menu, а свайп не перехватывается поверх .ctx-menu', () => {
+  const mob = fs.readFileSync(path.join(ROOT, 'renderer', 'app', '35-mobile.js'), 'utf8');
+  assert.match(mob, /mobileBack[\s\S]*document\.querySelector\('\.ctx-menu'\)[\s\S]*closeMenu\(\)/);
+  assert.match(mob, /closest\([^)]*\.ctx-menu[^)]*\)/);
+  assert.doesNotMatch(mob, /closest\([^)]*#menu[^)]*\)/);
+});

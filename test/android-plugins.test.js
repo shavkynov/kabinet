@@ -128,6 +128,7 @@ function prepare() {
   fs.mkdirSync(appMain, { recursive: true });
   fs.writeFileSync(path.join(appMain, 'AndroidManifest.xml'), TEMPLATE_MANIFEST);
   fs.writeFileSync(path.join(mobile, 'android', 'app', 'build.gradle'), TEMPLATE_GRADLE);
+  fs.copyFileSync(path.join(root, 'mobile', 'package.json'), path.join(mobile, 'package.json'));
   fs.copyFileSync(path.join(root, 'mobile', 'android-setup.js'), path.join(mobile, 'android-setup.js'));
   fs.cpSync(srcDir, path.join(mobile, 'android-src'), { recursive: true });
   return { dir, mobile, appMain };
@@ -152,16 +153,24 @@ test('android-setup patches a Capacitor template: Java files, OAuth return filte
   assert.ok(activity.includes('android.intent.category.BROWSABLE'));
   assert.ok(activity.includes(`<data android:scheme="${u.protocol.slice(0, -1)}" android:host="${u.host}" android:pathPrefix="${u.pathname}" />`));
   assert.ok(activity.includes('android:launchMode="singleTask"'));
-  assert.ok(fs.readFileSync(path.join(mobile, 'android', 'app', 'build.gradle'), 'utf8').includes('signingConfigs.debug'));
+  const pkg = JSON.parse(read('mobile', 'package.json'));
+  const [, maj, min, pat] = /^(\d+)\.(\d+)\.(\d+)$/.exec(pkg.version).map(Number);
+  const gradle = fs.readFileSync(path.join(mobile, 'android', 'app', 'build.gradle'), 'utf8');
+  assert.ok(gradle.includes('signingConfigs.debug'));
+  assert.ok(gradle.includes(`versionCode ${maj * 10000 + min * 100 + pat}`));
+  assert.ok(gradle.includes(`versionName "${pkg.version}"`));
 });
 
 test('android-setup is idempotent: a second run does not duplicate the filter', skipWindows, (t) => {
-  const { dir, appMain } = prepare();
+  const { dir, mobile, appMain } = prepare();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   runSetup(dir);
   const first = fs.readFileSync(path.join(appMain, 'AndroidManifest.xml'), 'utf8');
+  const gradlePath = path.join(mobile, 'android', 'app', 'build.gradle');
+  const firstGradle = fs.readFileSync(gradlePath, 'utf8');
   runSetup(dir);
   assert.equal(fs.readFileSync(path.join(appMain, 'AndroidManifest.xml'), 'utf8'), first);
+  assert.equal(fs.readFileSync(gradlePath, 'utf8'), firstGradle);
 });
 
 test('SecretsPlugin never stores readable values and handles a lost key', () => {

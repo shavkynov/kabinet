@@ -67,6 +67,7 @@ function mobileBack() {
   if (dlg) { dlg.close(); return true; }
   const modal = document.querySelector('.mob-modal');
   if (modal) { modal.dispatchEvent(new Event('mob-cancel')); return true; }
+  if (document.querySelector('.ctx-menu')) { closeMenu(); return true; }
   if (MOB.drawer) { closeDrawers(); return true; }
   const shown = (sel) => { const el = $(sel); return !!el && !el.hidden; };
   if (shown('#board') || shown('#projPop') || shown('#search') || shown('#goalPop') || shown('#cmtPop') || shown('#anPop')
@@ -163,7 +164,7 @@ function wireMobile() {
     if (!fast || Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.6) return;
     if (MOB.drawer === 'l') { if (dx < 0) setDrawer('l', false); return; }
     if (MOB.drawer === 'r') { if (dx > 0) setDrawer('r', false); return; }
-    if (target && target.closest && target.closest('.panel, #search, #board, #projPop, dialog, .mob-modal, input, select, #menu')) return;
+    if (target && target.closest && target.closest('.panel, #search, #board, #projPop, dialog, .mob-modal, input, select, .ctx-menu')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // идёт выделение текста
     if (dx > 0 && b.classList.contains('m-dl')) setDrawer('l', true);
