@@ -59,6 +59,18 @@ const seen = new Map();
 for (const m of app.matchAll(/^(?:async )?function ([A-Za-z0-9_]+)/gm)) seen.set(m[1], (seen.get(m[1]) || 0) + 1);
 for (const [name, n] of seen) if (n > 1) fail(`app: функция ${name} объявлена ${n} раза (части renderer/app/)`);
 
+// версия должна совпадать во всех 5 манифестах (пакеты, Tauri, Rust и Android)
+const rootVer = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const verChecks = [
+  ['mobile/package.json', JSON.parse(fs.readFileSync(path.join(root, 'mobile', 'package.json'), 'utf8')).version],
+  ['desktop/src-tauri/tauri.conf.json', JSON.parse(fs.readFileSync(path.join(root, 'desktop', 'src-tauri', 'tauri.conf.json'), 'utf8')).version],
+  ['desktop/core/Cargo.toml', (/^version\s*=\s*"([^"]+)"/m.exec(fs.readFileSync(path.join(root, 'desktop', 'core', 'Cargo.toml'), 'utf8')) || [])[1]],
+  ['desktop/src-tauri/Cargo.toml', (/^version\s*=\s*"([^"]+)"/m.exec(fs.readFileSync(path.join(root, 'desktop', 'src-tauri', 'Cargo.toml'), 'utf8')) || [])[1]],
+];
+for (const [rel, ver] of verChecks) {
+  if (ver !== rootVer) fail(`версия в ${rel} (${ver || '?'}) не совпадает с package.json (${rootVer})`);
+}
+
 const tests = fs.readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'test', f));
 const t = spawnSync(process.execPath, ['--test', ...tests], { encoding: 'utf8' });
 const pass = /(?:#|ℹ) pass (\d+)/.exec(t.stdout);
