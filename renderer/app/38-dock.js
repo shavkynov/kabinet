@@ -27,6 +27,12 @@ function refreshSaveState() {
   dock.classList.toggle('has-err', failed || cloudErr);
   dock.classList.toggle('empty', el.hidden && $('#cloudState').hidden);
   dock.hidden = !project;
+  const saveBtn = $('#btnSave');
+  if (saveBtn) {
+    saveBtn.classList.toggle('dirty', !!project && !failed && saveIsPending());
+    saveBtn.classList.toggle('err', !!project && failed);
+    saveBtn.disabled = !project;
+  }
 }
 
 function refreshCloudState() {

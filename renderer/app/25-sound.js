@@ -36,8 +36,10 @@ function wireRadioChips(sel) {
 }
 
 let ambientToken = 0;
+let ambientNeedsRestart = false;
 
 async function applyAmbient() {
+  ambientNeedsRestart = false;
   ambient.setVolume(settings.ambientVol / 100);
   const token = ++ambientToken;
   if (!(settings.ambientOn && project)) {
@@ -85,16 +87,22 @@ function wireChips() {
     renderMySounds();
   });
 
-  // звук в браузере можно запустить только после действия пользователя
-  const unlock = () => {
-    const ctx = sounds.getContext();
-    if (ctx && ctx.state === 'running') {
-      document.removeEventListener('pointerdown', unlock, true);
-      document.removeEventListener('keydown', unlock, true);
-    }
+  if (typeof sounds !== 'undefined' && sounds && typeof sounds.onReset === 'function') {
+    sounds.onReset(() => {
+      ambient.reset();
+      ambientNeedsRestart = !!(settings.ambientOn && project);
+    });
+  }
+
+  // Будим звуковой контекст на любом жесте пользователя, в том числе после долгого сворачивания.
+  const wakeAudio = () => {
+    const needAudio = settings.soundOn || (settings.ambientOn && project);
+    if (!needAudio) return;
+    if (!sounds.ctx || sounds.ctx.state !== 'running') sounds.warmUp(true);
+    if (ambientNeedsRestart && settings.ambientOn && project) applyAmbient();
   };
-  document.addEventListener('pointerdown', unlock, true);
-  document.addEventListener('keydown', unlock, true);
+  document.addEventListener('pointerdown', wakeAudio, true);
+  document.addEventListener('keydown', wakeAudio, true);
 }
 
 function toggleFocusMode(force) {

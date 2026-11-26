@@ -23,12 +23,28 @@ export class Ambient {
 
   _ctx() {
     const ctx = this.sounds.getContext();
+    if (this.bus && (!ctx || this.bus.context !== ctx)) this.reset();
     if (ctx && !this.bus) {
       this.bus = ctx.createGain();
       this.bus.gain.value = this._gain();
       this.bus.connect(ctx.destination);
     }
     return ctx;
+  }
+
+  /** Сбрасывает узлы эмбиента при пересоздании звукового контекста. */
+  reset() {
+    const cur = this.current;
+    this.current = null;
+    if (cur) {
+      cur.timers.forEach((t) => clearTimeout(t));
+      cur.timers.length = 0;
+      cur.stops.forEach((fn) => { try { fn(); } catch { /* уже остановлено */ } });
+      try { cur.out.disconnect(); } catch { /* ignore */ }
+    }
+    if (this.bus) { try { this.bus.disconnect(); } catch { /* ignore */ } }
+    this.bus = null;
+    this.buffers = null;
   }
 
   _gain() {

@@ -308,7 +308,7 @@ impl CheckApi {
                         let res = off.check_paragraphs(&paragraphs, &lang, &words, &cancel, progress);
                         let mut guard = self.running.lock().unwrap();
                         if guard.as_ref().map(|c| Arc::ptr_eq(c, &cancel)).unwrap_or(false) { *guard = None; }
-                        let mut all = filter_issues(res?, &strs(&cfg["disabledRules"]), &words, &clean_kinds(&cfg["hiddenKinds"]));
+                        let mut all = filter_issues(res?, &strs(&cfg["disabledRules"]), &words, &[]);
                         for (n, x) in all.iter_mut().enumerate() { x["id"] = json!(n + 1); }
                         return Ok(Value::Array(all));
                     }
@@ -520,5 +520,15 @@ mod tests {
             api.call("run", &[json!(["текст"])], None, &none).unwrap_err(),
             "Сначала нужно разрешить отправку текста службе проверки."
         );
+
+        // В офлайн-режиме правило заглавной буквы не гасится старым hiddenKinds, но отключается через disabledRules
+        api.call("setConfig", &[json!({ "mode": "offline", "hiddenKinds": ["typography"] })], None, &none).unwrap();
+        let cap_res = api.call("run", &[json!(["привет но."])], None, &none).unwrap();
+        let cap_arr = cap_res.as_array().unwrap();
+        assert_eq!(cap_arr.len(), 1);
+        assert_eq!(cap_arr[0]["ruleId"], json!("OFFLINE_UPPERCASE_SENTENCE_START"));
+        api.call("ignoreRule", &[json!("OFFLINE_UPPERCASE_SENTENCE_START")], None, &none).unwrap();
+        let cap_after = api.call("run", &[json!(["привет но."])], None, &none).unwrap();
+        assert!(cap_after.as_array().unwrap().is_empty());
     }
 }

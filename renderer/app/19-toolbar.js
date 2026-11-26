@@ -37,6 +37,7 @@ function wireToolbar() {
     if (!btn || !project) return;
     switch (btn.dataset.act) {
       case 'typewriter': toggleTypewriter(); break;
+      case 'save': saveNow(); break;
       case 'sound': toggleSound(); break;
       case 'ambient': toggleAmbient(); break;
       case 'notes': applyNotesHidden(notesShown()); break;

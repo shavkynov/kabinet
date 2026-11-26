@@ -1501,7 +1501,19 @@ body:not(.mob) #barTotal.pgoal { gap: 6px; }
 body:not(.mob) .mob-only { display: none !important; }
 body.mob #btnTypewriter .ic { display: none; }
 body:not(.mob) #btnTypewriter .txt { display: none; }
-body:not(.mob) #toolbar .bar-btns #btnTypewriter { padding: 3px 7px; min-width: 0; display: inline-flex; align-items: center; }
+body:not(.mob) #toolbar .bar-btns #btnTypewriter,
+body:not(.mob) #toolbar .bar-btns #btnSave { padding: 3px 7px; min-width: 0; display: inline-flex; align-items: center; position: relative; }
+#toolbar .bar-btns #btnSave { min-width: 0; display: inline-flex; align-items: center; position: relative; }
+#btnSave.dirty { color: var(--accent); }
+#btnSave.dirty::after {
+  content: ""; position: absolute; top: 4px; right: 4px;
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+}
+#btnSave.saved { color: var(--accent); }
+#btnSave.saved svg { animation: save-pop .4s ease; }
+#btnSave.err { color: var(--danger); }
+#btnSave.saving { opacity: .55; pointer-events: none; }
+@keyframes save-pop { 0% { transform: scale(1); } 40% { transform: scale(1.22); } 100% { transform: scale(1); } }
 
 /* печатная машинка: значок оживает, пока режим включён */
 #btnTypewriter .tw-paper { transition: transform .25s ease; }
@@ -1510,7 +1522,7 @@ body:not(.mob) #toolbar .bar-btns #btnTypewriter { padding: 3px 7px; min-width: 
 #btnTypewriter.pop svg { animation: tw-pop .55s cubic-bezier(.3, 1.6, .5, 1); }
 @keyframes tw-pop { 0% { transform: scale(1); } 35% { transform: scale(1.28) rotate(-6deg); } 100% { transform: scale(1) rotate(0); } }
 @keyframes tw-keys { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { #btnTypewriter.pop svg, #btnTypewriter.active .tw-keys { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #btnTypewriter.pop svg, #btnTypewriter.active .tw-keys, #btnSave.saved svg { animation: none; } }
 
 /* ---------- значки справа вверху: инструменты | вид ---------- */
 .chrome-sep { align-self: center; width: 1px; height: 16px; margin: 0 6px; background: var(--line); flex: none; }

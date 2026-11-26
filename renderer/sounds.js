@@ -29,15 +29,37 @@ export class TypeSounds {
     this.last = 0;
     this.noteIdx = 2;
     this.wasRunning = false; // контекст хотя бы раз работал: если он перестал, это сбой, а не «ещё не разрешили звук»
-    this.hiddenAt = 0;
-    // WKWebView после сворачивания оставляет контекст «живым» (даже running после resume), но звука нет:
-    // после заметного времени в фоне контекст всегда создаётся заново.
-    if (typeof document !== 'undefined') {
+    this.awayAt = 0;
+    this.stuckSince = 0;
+    this.lastResumeAt = 0;
+    this.tick = null;
+    this._resetListeners = new Set();
+
+    // После долгого сворачивания или смены звукового устройства WKWebView/WebView2 может оставить контекст
+    // в «живом» состоянии без реального вывода звука — при возвращении пересоздаём его.
+    const markAway = () => { if (!this.awayAt) this.awayAt = Date.now(); };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) this.hiddenAt = Date.now();
-        else if (this.hiddenAt && Date.now() - this.hiddenAt > 10000) { this.hiddenAt = 0; this._drop(); }
+        if (document.hidden) markAway();
+        else this.revive();
       });
     }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('blur', markAway);
+      window.addEventListener('focus', () => {
+        if (typeof document === 'undefined' || !document.hidden) this.revive();
+      });
+    }
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+      navigator.mediaDevices.addEventListener('devicechange', () => {
+        if (this.ctx) this._drop();
+      });
+    }
+  }
+
+  onReset(fn) {
+    if (typeof fn === 'function') this._resetListeners.add(fn);
+    return () => this._resetListeners.delete(fn);
   }
 
   setProfile(name) {
@@ -81,42 +103,66 @@ export class TypeSounds {
     for (const [kind, ms] of seq) setTimeout(() => this.play(kind), ms);
   }
 
-  _ensure() {
-    if (!this.ctx) {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return null;
-      this.ctx = new AC();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = this.volume * this.volume;
-      this.master.connect(this.ctx.destination);
+  _createContext() {
+    const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+    if (!AC) return null;
+    const ctx = new AC();
+    this.ctx = ctx;
+    this.master = ctx.createGain();
+    this.master.gain.value = this.volume * this.volume;
+    this.master.connect(ctx.destination);
 
-      const len = this.ctx.sampleRate; // секунда белого шума, из неё нарезаются щелчки
-      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-      this.noise = buf;
+    const len = ctx.sampleRate; // секунда белого шума, из неё нарезаются щелчки
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    this.noise = buf;
+    if (typeof ctx.addEventListener === 'function') {
+      ctx.addEventListener('statechange', () => {
+        if (this.ctx === ctx && (ctx.state === 'closed' || ctx.state === 'interrupted')) this._drop();
+      });
     }
+    return ctx;
+  }
+
+  _ensure(depth = 0) {
+    if (!this.ctx && !this._createContext()) return null;
+    const now = performance.now();
+    const state = this.ctx.state;
     // После долгого сворачивания/сна звуковое устройство может уйти: контекст остаётся «suspended»,
-    // «interrupted» или «closed» и сам не оживает. Пробуем resume, а если не помогло — строим заново.
-    if (this.ctx.state === 'running') this.wasRunning = true;
-    if (this.ctx.state === 'closed' || (this.ctx.state !== 'running' && this.wasRunning)) { this._drop(); return this._ensure(); }
-    if (this.ctx.state !== 'running') {
-      this.stuck = (this.stuck || 0) + 1;
-      if (this.stuck === 1) this._note(`ctx not running: ${this.ctx.state}`);
-      if (this.stuck > 3) { this._drop(); return this._ensure(); }
-      try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* повторим при следующем звуке */ }
-    } else {
-      this.stuck = 0;
-      // Контекст числится «running», но его часы стоят: звука нет (так «засыпает» звук в свёрнутом окне на macOS).
-      // Сверяем время контекста с настоящим временем с прошлого звука; если не идёт, строим контекст заново.
-      const now = performance.now();
+    // «interrupted» или «closed» и сам не оживает. Пробуем resume с задержкой, при долгом зависании — строим заново.
+    if (state === 'closed' || state === 'interrupted') {
+      this._drop();
+      return depth < 1 ? this._ensure(depth + 1) : null;
+    }
+    if (state === 'running') {
+      this.wasRunning = true;
+      this.stuckSince = 0;
+      this.lastResumeAt = 0;
+      // Контекст числится «running», но его часы стоят: звука нет (так «засыпает» звук в свёрнутом окне).
+      // Продвигаем опорную отметку только когда currentTime реально вырос — так зависание ловится даже при непрерывном быстром наборе.
       const ct = this.ctx.currentTime;
-      if (this.tick && now - this.tick.at > 1500 && (ct - this.tick.ct) * 1000 < (now - this.tick.at) * 0.3) {
+      if (!this.tick || ct > this.tick.ct + 0.02) {
+        this.tick = { at: now, ct };
+      } else if (now - this.tick.at > 1200 && (ct - this.tick.ct) * 1000 < (now - this.tick.at) * 0.25) {
         this._note(`ctx stalled: ${((ct - this.tick.ct) * 1000).toFixed(0)} ms of ${(now - this.tick.at).toFixed(0)} ms`);
         this._drop();
-        return this._ensure();
+        return depth < 1 ? this._ensure(depth + 1) : null;
       }
-      this.tick = { at: now, ct };
+      return this.ctx;
+    }
+
+    if (!this.stuckSince) {
+      this.stuckSince = now;
+      this._note(`ctx not running: ${state}`);
+    }
+    if (now - this.stuckSince > 1500) {
+      this._drop();
+      return depth < 1 ? this._ensure(depth + 1) : null;
+    }
+    if (!this.lastResumeAt || now - this.lastResumeAt >= 250) {
+      this.lastResumeAt = now;
+      try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* повторим при следующем звуке */ }
     }
     return this.ctx;
   }
@@ -128,14 +174,32 @@ export class TypeSounds {
   /** Забыть звуковой контекст: следующий звук создаст новый (буферы записей от контекста не зависят). */
   _drop() {
     const old = this.ctx;
-    this._note(`ctx recreated, was ${old ? old.state : "none"}`);
-    this.ctx = null; this.master = null; this.noise = null; this.stuck = 0; this.wasRunning = false; this.tick = null;
+    this._note(`ctx recreated, was ${old ? old.state : 'none'}`);
+    this.ctx = null; this.master = null; this.noise = null;
+    this.wasRunning = false; this.tick = null; this.stuckSince = 0; this.lastResumeAt = 0;
+    for (const fn of this._resetListeners) {
+      try { fn(); } catch { /* ignore */ }
+    }
     if (old) { try { const r = old.close(); if (r && r.catch) r.catch(() => {}); } catch { /* уже закрыт */ } }
   }
 
-  /** Окно снова на виду: контекст мог «умереть» в фоне — пересоздаём, если он не работает. */
+  /** Подготовить звуковой контекст на жесте пользователя, не дожидаясь первого удара клавиши. */
+  warmUp(force = false) {
+    if (!force && !this.enabled) return null;
+    if (!this.ctx || this.ctx.state !== 'running') return this._ensure();
+    return this.ctx;
+  }
+
+  /** Окно снова на виду: контекст мог «умереть» в фоне — пересоздаём при долгом простое или сбое. */
   revive() {
-    if (this.ctx && this.ctx.state !== 'running' && this.wasRunning) this._drop();
+    const awayMs = this.awayAt ? Date.now() - this.awayAt : 0;
+    this.awayAt = 0;
+    if (!this.ctx) return;
+    if (this.ctx.state === 'closed' || this.ctx.state === 'interrupted' || awayMs > 10000) {
+      this._drop();
+    } else if (this.ctx.state !== 'running') {
+      try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* разбудит следующий жест */ }
+    }
   }
 
   play(kind) {
@@ -146,19 +210,23 @@ export class TypeSounds {
     const ctx = this._ensure();
     if (!ctx) return;
 
-    const list = this.keyBuf[kind];
-    const sel = this.keySel[kind];
-    if (list && list.length && sel !== 'default') {
-      const pick = sel === '*' ? list[Math.floor(Math.random() * list.length)] : list.find((x) => x.file === sel);
-      if (pick) {
-        this._sample(pick.buffer);
-        return;
+    try {
+      const list = this.keyBuf[kind];
+      const sel = this.keySel[kind];
+      if (list && list.length && sel !== 'default') {
+        const pick = sel === '*' ? list[Math.floor(Math.random() * list.length)] : list.find((x) => x.file === sel);
+        if (pick) {
+          this._sample(pick.buffer);
+          return;
+        }
       }
+      const t = ctx.currentTime + 0.002;
+      const name = Object.hasOwn(PROFILES, this.profile) ? this.profile : 'typewriter';
+      const fn = this[`_${kind}_${name}`] || this[`_${kind}_typewriter`] || this._key_typewriter;
+      fn.call(this, t);
+    } catch {
+      this._drop();
     }
-    const t = ctx.currentTime + 0.002;
-    const name = Object.hasOwn(PROFILES, this.profile) ? this.profile : 'typewriter';
-    const fn = this[`_${kind}_${name}`] || this[`_${kind}_typewriter`] || this._key_typewriter;
-    fn.call(this, t);
   }
 
   /**
@@ -169,9 +237,13 @@ export class TypeSounds {
     if (this.volume <= 0) return;
     const ctx = this._ensure();
     if (!ctx) return;
-    const t = ctx.currentTime + 0.01;
-    this._ding(t, 659.25, 0.55, 0.12);        // ми
-    this._ding(t + 0.12, 880.0, 0.95, 0.1);   // ля
+    try {
+      const t = ctx.currentTime + 0.01;
+      this._ding(t, 659.25, 0.55, 0.12);        // ми
+      this._ding(t + 0.12, 880.0, 0.95, 0.1);   // ля
+    } catch {
+      this._drop();
+    }
   }
 
   // ---------- готовые записи ----------

@@ -510,6 +510,121 @@ fn is_mid_sentence_proper(para: &str, byte_start: usize, token: &str) -> bool {
     !matches!(before.chars().last(), Some('.' | '!' | '?' | '…' | ':'))
 }
 
+fn is_known_abbreviation(lower: &str) -> bool {
+    matches!(
+        lower,
+        "dr" | "mr" | "mrs" | "ms" | "prof" | "st" | "vs" | "etc" | "eg" | "ie" | "jr" | "sr"
+            | "inc" | "ltd" | "corp" | "fig" | "no" | "vol" | "ch" | "pp" | "ed" | "eds" | "al"
+            | "jan" | "feb" | "mar" | "apr" | "jun" | "jul" | "aug" | "sep" | "sept" | "oct"
+            | "nov" | "dec" | "др" | "пр" | "см" | "ср" | "напр" | "стр" | "ст" | "рис" | "табл"
+            | "гл" | "разд" | "им" | "ул" | "пер" | "пр-т" | "просп" | "пл" | "наб" | "бул"
+            | "обл" | "р-н" | "пос" | "дер" | "гор" | "тыс" | "млн" | "млрд" | "руб" | "коп"
+            | "долл" | "экз" | "шт" | "кг" | "гг" | "вв" | "нэ" | "доц" | "проф" | "акад"
+            | "инж" | "тов" | "гр" | "тел" | "факс" | "кв" | "корп" | "эт" | "оф" | "мин"
+            | "сек" | "час" | "суб" | "вс" | "пн" | "вт" | "чт" | "пт" | "сб" | "янв" | "фев"
+            | "мар" | "апр" | "июн" | "июл" | "авг" | "сен" | "сент" | "окт" | "ноя" | "дек"
+            | "изд" | "ред" | "сост" | "прим" | "лат" | "греч" | "англ" | "нем" | "фр" | "рус"
+            | "устар" | "разг" | "книжн" | "перен"
+    )
+}
+
+fn ends_with_sentence_punct(s: &str) -> bool {
+    let trimmed = s.trim_end_matches(|c: char| matches!(c, '»' | '”' | '’' | '"' | '\''));
+    if matches!(trimmed.chars().last(), Some(')' | ']')) {
+        return false;
+    }
+    if trimmed.ends_with('…') || trimmed.ends_with("..") {
+        return false;
+    }
+    let Some(last) = trimmed.chars().last() else {
+        return false;
+    };
+    if matches!(last, '!' | '?') {
+        return true;
+    }
+    if last != '.' {
+        return false;
+    }
+    let before_dot = &trimmed[..trimmed.len() - '.'.len_utf8()];
+    if matches!(before_dot.chars().last(), Some(c) if c.is_ascii_digit()) {
+        return false;
+    }
+    let word: String = before_dot
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic() || *c == '-')
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let count = word.chars().count();
+    if count <= 1 {
+        return false;
+    }
+    !is_known_abbreviation(&word.to_lowercase())
+}
+
+fn is_sentence_start(para: &str, byte_start: usize) -> bool {
+    let raw = &para[..byte_start];
+    let after_open = raw.trim_end_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '«' | '„' | '“' | '‘' | '"' | '\'' | '(' | '[')
+    });
+    if after_open.ends_with('…') || after_open.ends_with("..") {
+        return false;
+    }
+
+    // Если в начале абзаца только пробелы, открывающие кавычки/скобки и маркеры списка или тире.
+    let head_check = after_open.trim_end_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '—' | '–' | '-' | '•' | '*')
+    });
+    if head_check.is_empty() {
+        return !para.trim_end().ends_with(';');
+    }
+
+    // Внутри абзаца граница предложения всегда отделена пробелом до открывающих кавычек/тире.
+    let had_dash_before_tok = {
+        let trimmed = after_open.trim_end_matches(|c: char| matches!(c, '—' | '–'));
+        trimmed.len() < after_open.len() && trimmed.chars().last().map(|c| c.is_whitespace()).unwrap_or(false)
+    };
+    if !raw.chars().last().map(|c| c.is_whitespace() || matches!(c, '«' | '„' | '“' | '‘' | '"' | '\'' | '(' | '[' | '—' | '–' | '-')).unwrap_or(false) {
+        return false;
+    }
+
+    if had_dash_before_tok {
+        let before_dash = after_open.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '—' | '–'));
+        let before_dash_clean = before_dash.trim_end_matches(|c: char| matches!(c, '»' | '”' | '’' | '"' | '\''));
+        if matches!(before_dash_clean.chars().last(), Some('!' | '?' | '…')) || before_dash_clean.ends_with("..") {
+            return false;
+        }
+        return ends_with_sentence_punct(before_dash);
+    }
+
+    let had_ws_before_open = raw[after_open.len()..].chars().any(|c| c.is_whitespace())
+        || after_open.len() == raw.len();
+    let _ = had_ws_before_open;
+    if raw[after_open.len()..].chars().next().map(|c| !c.is_whitespace() && matches!(c, '«' | '„' | '“' | '‘' | '"' | '\'' | '(' | '[')).unwrap_or(false)
+        && !after_open.chars().last().map(|c| c.is_whitespace()).unwrap_or(false)
+    {
+        return false;
+    }
+    if !raw[after_open.len()..].chars().any(|c| c.is_whitespace())
+        && !after_open.chars().last().map(|c| c.is_whitespace()).unwrap_or(false)
+    {
+        return false;
+    }
+    ends_with_sentence_punct(after_open)
+}
+
+fn capitalize_first(word: &str) -> String {
+    let mut chars = word.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out: String = first.to_uppercase().collect();
+    out.push_str(chars.as_str());
+    out
+}
+
 fn check_single_word(dict: &Dictionary, lang: DictLang, word: &str, custom: &HashSet<String>) -> bool {
     let norm_apos: String = word.chars().map(|c| if c == '\u{2019}' { '\'' } else { c }).collect();
     let lower = norm_apos.to_lowercase();
@@ -811,76 +926,103 @@ impl OfflineSpell {
                 continue;
             }
             for tok in tokenize_paragraph(para) {
-                if tok.text.chars().count() < 2
-                    || tok.text.chars().any(|c| c.is_ascii_digit())
-                    || is_roman_numeral(tok.text)
-                    || is_short_all_caps(tok.text)
-                {
-                    continue;
-                }
                 let Some(tlang) = token_lang(tok.text, lang) else {
                     continue;
                 };
-                let dict = match tlang {
-                    DictLang::Ru => match loaded.ru.as_ref() {
-                        Some(d) => d,
-                        None => continue,
-                    },
-                    DictLang::En => match loaded.en.as_ref() {
-                        Some(d) => d,
-                        None => continue,
-                    },
-                };
+                let mut chars = tok.text.chars();
+                let first_lower = chars.next().map(|c| c.is_lowercase()).unwrap_or(false);
+                let has_later_upper = chars.any(|c| c.is_uppercase());
+                let lower_sentence_start = first_lower
+                    && !has_later_upper
+                    && !tok.text.chars().any(|c| c.is_ascii_digit())
+                    && is_sentence_start(para, tok.byte_start);
 
-                let cache_key = (tlang, tok.text.to_string());
-                let ok = if let Some(&v) = word_cache.get(&cache_key) {
-                    v
-                } else {
-                    let v = check_token(dict, tlang, tok.text, &custom);
-                    word_cache.insert(cache_key.clone(), v);
-                    v
-                };
-                if ok {
-                    continue;
-                }
+                let short_or_num = tok.text.chars().count() < 2
+                    || tok.text.chars().any(|c| c.is_ascii_digit())
+                    || is_roman_numeral(tok.text)
+                    || is_short_all_caps(tok.text);
 
-                let replacements = if let Some(s) = sugg_cache.get(&cache_key) {
-                    s.clone()
-                } else if sugg_cache.len() < MAX_UNIQUE_SUGGEST_WORDS {
-                    let mut clean = fast_suggest(dict, tlang, tok.text);
-                    if clean.is_empty()
-                        && !is_mid_sentence_proper(para, tok.byte_start, tok.text)
-                        && slow_suggest_count < MAX_SLOW_SUGGEST_WORDS
-                    {
-                        slow_suggest_count += 1;
-                        let mut raw = Vec::new();
-                        dict.suggest(tok.text, &mut raw);
-                        for cand in raw {
-                            if cand != tok.text && !clean.contains(&cand) {
-                                clean.push(cand);
-                                if clean.len() >= MAX_SUGGESTIONS {
-                                    break;
+                let mut spell_bad = false;
+                if !short_or_num {
+                    let dict = match tlang {
+                        DictLang::Ru => loaded.ru.as_ref(),
+                        DictLang::En => loaded.en.as_ref(),
+                    };
+                    if let Some(dict) = dict {
+                        let cache_key = (tlang, tok.text.to_string());
+                        let ok = if let Some(&v) = word_cache.get(&cache_key) {
+                            v
+                        } else {
+                            let v = check_token(dict, tlang, tok.text, &custom);
+                            word_cache.insert(cache_key.clone(), v);
+                            v
+                        };
+                        if !ok {
+                            spell_bad = true;
+                            let mut replacements = if let Some(s) = sugg_cache.get(&cache_key) {
+                                s.clone()
+                            } else if sugg_cache.len() < MAX_UNIQUE_SUGGEST_WORDS {
+                                let mut clean = fast_suggest(dict, tlang, tok.text);
+                                if clean.is_empty()
+                                    && !is_mid_sentence_proper(para, tok.byte_start, tok.text)
+                                    && slow_suggest_count < MAX_SLOW_SUGGEST_WORDS
+                                {
+                                    slow_suggest_count += 1;
+                                    let mut raw = Vec::new();
+                                    dict.suggest(tok.text, &mut raw);
+                                    for cand in raw {
+                                        if cand != tok.text && !clean.contains(&cand) {
+                                            clean.push(cand);
+                                            if clean.len() >= MAX_SUGGESTIONS {
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
+                                sugg_cache.insert(cache_key, clean.clone());
+                                clean
+                            } else {
+                                Vec::new()
+                            };
+                            if lower_sentence_start {
+                                let mut cap_repls = Vec::with_capacity(replacements.len());
+                                for r in replacements {
+                                    let c = capitalize_first(&r);
+                                    if !cap_repls.contains(&c) {
+                                        cap_repls.push(c);
+                                    }
+                                }
+                                replacements = cap_repls;
                             }
+
+                            out.push(json!({
+                                "para": para_idx,
+                                "offset": tok.u16_start,
+                                "length": tok.u16_len,
+                                "text": tok.text,
+                                "message": "Возможная орфографическая ошибка.",
+                                "short": "Орфография",
+                                "ruleId": "OFFLINE_SPELL",
+                                "kind": "spelling",
+                                "replacements": replacements,
+                            }));
                         }
                     }
-                    sugg_cache.insert(cache_key, clean.clone());
-                    clean
-                } else {
-                    Vec::new()
-                };
+                }
 
-                out.push(json!({
-                    "para": para_idx,
-                    "offset": tok.u16_start,
-                    "length": tok.u16_len,
-                    "text": tok.text,
-                    "message": "Возможная орфографическая ошибка.",
-                    "short": "Орфография",
-                    "ruleId": "OFFLINE_SPELL",
-                    "kind": "spelling",
-                    "replacements": replacements,
-                }));
+                if !spell_bad && lower_sentence_start {
+                    out.push(json!({
+                        "para": para_idx,
+                        "offset": tok.u16_start,
+                        "length": tok.u16_len,
+                        "text": tok.text,
+                        "message": "Предложение начинается со строчной буквы.",
+                        "short": "Заглавная буква",
+                        "ruleId": "OFFLINE_UPPERCASE_SENTENCE_START",
+                        "kind": "typography",
+                        "replacements": [capitalize_first(tok.text)],
+                    }));
+                }
             }
         }
 
@@ -991,5 +1133,68 @@ mod tests {
         assert!(!sugg.is_empty() || svc.suggest_word("Првиет", "ru").unwrap().iter().any(|w| w == "Привет"));
         assert!(svc.suggest_word("Првиет", "ru").unwrap().iter().any(|w| w == "Привет"));
         assert!(svc.suggest_word("", "ru").unwrap().is_empty());
+    }
+
+    #[test]
+    fn offline_spell_flags_lowercase_sentence_start_without_false_positives() {
+        let tmp = tmpdir("offline-spell-caps");
+        write_mini_ru_dict(&tmp);
+        std::fs::write(
+            tmp.join("ru.dic"),
+            "16\nпривет\nмир/A\nзеленый\nчёрный\nкто-то\nдом/A\nмашина\nон\nона\nушел\nсказал\nкак\nдела\nи\nпункт\nпервый\n",
+        )
+        .unwrap();
+        let svc = OfflineSpell::new(tmp);
+        let cancel = AtomicBool::new(false);
+
+        let paras = vec![
+            "случайно встретил. а он ушел!".to_string(),
+            "привет! как дела? он ушел. она сказала.".to_string(),
+            "— Привет! — сказал он. — как дела?".to_string(),
+            "«Привет?» — сказал он. Он (о чудо!) ушел… и не вернулся.".to_string(),
+            "А. С. он т. е. мир см. дом 1. первый пункт;".to_string(),
+            "…и он ушел.".to_string(),
+            "iPhone работает.".to_string(),
+            "первый пункт;".to_string(),
+            "првиет мир.".to_string(),
+        ];
+        // Используем простой словарь с кастомным набором известных слов, чтобы сосредоточиться на регистре
+        let custom: Vec<String> = [
+            "случайно", "встретил", "он", "ушел", "привет", "как", "дела", "она", "сказала",
+            "сказал", "чудо", "вернулся", "не", "мир", "см", "дом", "первый", "пункт",
+            "работает", "о", "и", "а", "iPhone",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let issues = svc.check_paragraphs(&paras, "ru", &custom, &cancel, &|_, _| {}).unwrap();
+        let caps: Vec<(usize, &str, &str)> = issues
+            .iter()
+            .filter(|x| x["ruleId"] == json!("OFFLINE_UPPERCASE_SENTENCE_START"))
+            .map(|x| (
+                x["para"].as_u64().unwrap() as usize,
+                x["text"].as_str().unwrap(),
+                x["replacements"][0].as_str().unwrap(),
+            ))
+            .collect();
+        assert_eq!(
+            caps,
+            vec![
+                (0, "случайно", "Случайно"),
+                (0, "а", "А"),
+                (1, "привет", "Привет"),
+                (1, "как", "Как"),
+                (1, "он", "Он"),
+                (1, "она", "Она"),
+                (2, "как", "Как"),
+            ],
+            "unexpected caps issues: {:?}",
+            issues
+        );
+        // Для опечатки в начале предложения замена сразу начинается с заглавной, без дубля правила регистра
+        let spell: Vec<&Value> = issues.iter().filter(|x| x["ruleId"] == json!("OFFLINE_SPELL")).collect();
+        assert_eq!(spell.len(), 1);
+        assert_eq!(spell[0]["text"], json!("првиет"));
+        assert!(spell[0]["replacements"].as_array().unwrap().iter().any(|v| v == "Привет"));
     }
 }

@@ -32,4 +32,7 @@ module.exports = {
   'Варианты: {0}': 'Suggestions: {0}',
   'Переместить выше': 'Move up',
   'Переместить ниже': 'Move down',
+  'Сохранить сейчас (⌘S)': 'Save now (⌘S)',
+  'Заглавная буква': 'Capitalization',
+  'Предложение начинается со строчной буквы.': 'Sentence does not start with an uppercase letter.',
 };

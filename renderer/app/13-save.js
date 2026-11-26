@@ -145,6 +145,45 @@ window.addEventListener('beforeunload', () => {
 });
 window.addEventListener('blur', () => { flush(); });
 
+let savingNow = false;
+let saveFlashTimer = null;
+async function saveNow() {
+  if (!project || savingNow) return;
+  savingNow = true;
+  const btn = $('#btnSave');
+  if (btn) btn.classList.add('saving');
+  let ok = false;
+  try {
+    ok = await flush();
+  } finally {
+    savingNow = false;
+    if (btn) btn.classList.remove('saving');
+  }
+  if (ok) {
+    SAVE.lastWriteAt = Date.now();
+    refreshSaveState();
+    if (btn) {
+      btn.classList.remove('saved');
+      void btn.offsetWidth;
+      btn.classList.add('saved');
+      clearTimeout(saveFlashTimer);
+      saveFlashTimer = setTimeout(() => btn.classList.remove('saved'), 800);
+    }
+    if (document.body.classList.contains('focus-mode') || document.body.classList.contains('mob')) {
+      setStatus('ok', t('Сохранено'));
+    }
+  }
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.code === 'KeyS' && project) {
+      e.preventDefault();
+      saveNow();
+    }
+  }, true);
+}
+
 
 if (window.__TAURI__) {
   api.prepareClose = async () => {
