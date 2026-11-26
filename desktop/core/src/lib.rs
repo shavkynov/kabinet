@@ -29,3 +29,4 @@ pub mod yandexoauth;
 
 #[cfg(test)]
 pub mod testutil;
+pub mod updates;

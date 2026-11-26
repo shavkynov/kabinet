@@ -608,9 +608,19 @@ function init() {
   api.onOpenProject(openProjectFromDialog);
   api.onCloseProject(() => { if (project) leaveProject(); });
   api.onToggleTypewriter(() => { if (project) toggleTypewriter(); });
+  if (api.onToggleParaFocus) api.onToggleParaFocus(() => {
+    settings.paraFocus = !settings.paraFocus;
+    applySettings();
+    saveSettings();
+    setStatus('ok', settings.paraFocus ? t('Фокус на абзаце включён') : t('Фокус на абзаце выключен'));
+  });
   api.onToggleMarks(() => { settings.marks = !settings.marks; applySettings(); saveSettings(); });
   api.onToggleFocus(() => toggleFocusMode());
   api.onOpenSettings(() => { if (project) toggleSettings(); });
+  if (api.onSaveNow) api.onSaveNow(() => { if (project) saveNow(); });
+  if (api.onOpenBoard) api.onOpenBoard(() => { if (project) openBoard(); });
+  if (api.onOpenStyle) api.onOpenStyle(() => { if (project) openPanel('style'); });
+  if (api.onCheckUpdates) api.onCheckUpdates(() => openUpdateCheck());
   api.onToggleSound(() => toggleSound());
   api.onToggleAmbient(() => toggleAmbient());
   api.onOpenSearch(openSearch);

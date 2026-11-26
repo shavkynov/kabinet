@@ -86,7 +86,16 @@ body.mob .panel input[type="checkbox"] { width: 20px; height: 20px; }
 body.mob .panel select, body.mob .panel input.text, body.mob .panel input.num { min-height: 34px; font-size: 15px; }
 body.mob .panel button { min-height: 36px; }
 body.mob #goalPop, body.mob #search { max-width: calc(100vw - 24px); }
-body.mob #search { top: calc(48px + env(safe-area-inset-top)); }
+body.mob #search {
+  top: calc(48px + env(safe-area-inset-top));
+  left: 12px; right: 12px; width: auto; transform: none;
+}
+body.mob .sr-tabs button, body.mob .sr-opt, body.mob .sr-nav { min-height: 36px; min-width: 34px; }
+body.mob #searchInput, body.mob #replaceInput { font-size: 16px; }
+body.mob #replaceRow { flex-wrap: wrap; }
+body.mob #replaceInput { flex: 1 1 180px; }
+body.mob.m-narrow #board .board-inner { padding: 14px; }
+body.mob.m-narrow #boardGrid { grid-template-columns: 1fr; }
 body.mob dialog { max-width: calc(100vw - 24px); }
 body.mob dialog input { font-size: 16px; }
 

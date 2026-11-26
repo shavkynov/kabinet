@@ -175,6 +175,7 @@ async function leaveProject() {
     showError(err.message);
   }
   project = null;
+  if (typeof closeSearch === 'function') closeSearch(false);
   renderSkip();
   currentId = null;
   currentKind = null;

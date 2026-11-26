@@ -833,7 +833,7 @@ body.focus-mode #status { bottom: 12px; }
 @container (max-width: 560px) { .bar-btns [data-act="typewriter"], .bar-btns [data-act="sound"] { display: none; } }
 @container (max-width: 400px) { .bar-btns [data-act="split"], .bar-btns [data-act="notes"] { display: none; } }
 
-/* ---------- поиск по проекту ---------- */
+/* ---------- поиск в главе и по проекту ---------- */
 
 #search {
   position: fixed; top: 46px; left: 50%; transform: translateX(-50%);
@@ -842,6 +842,28 @@ body.focus-mode #status { bottom: 12px; }
   box-shadow: 0 6px 16px rgba(0, 0, 0, .1), 0 18px 44px rgba(0, 0, 0, .24); padding: 12px;
   -webkit-app-region: no-drag; animation: uiFade .13s ease-out;
 }
+.sr-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.sr-tabs { display: inline-flex; gap: 4px; background: color-mix(in srgb, var(--sel) 45%, transparent); padding: 2px; border-radius: 8px; }
+.sr-tabs button {
+  background: transparent; border: none; color: var(--muted); font: inherit; font-size: 12.5px;
+  padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: background-color .13s, color .13s;
+}
+.sr-tabs button:hover:not(:disabled) { color: var(--text); }
+.sr-tabs button.active { background: var(--paper); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.sr-tabs button:disabled { opacity: .45; cursor: default; }
+.sr-tools { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.sr-opt, .sr-nav {
+  background: transparent; border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); color: var(--muted);
+  font: inherit; font-size: 12px; padding: 3px 7px; border-radius: 6px; cursor: pointer; min-width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center; transition: background-color .13s, color .13s, border-color .13s;
+}
+.sr-nav { font-size: 15px; line-height: 1; padding: 0 6px; }
+.sr-opt:hover, .sr-nav:hover { color: var(--text); background: var(--sel); }
+.sr-opt.active { color: var(--text); background: var(--sel); border-color: var(--accent); font-weight: 600; }
+.sr-tools .sr-count { margin-left: 4px; margin-right: 2px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.sr-tools [hidden], #replaceRow [hidden] { display: none; }
+.ProseMirror .sr-hit { background: color-mix(in srgb, var(--accent) 24%, transparent); border-radius: 2px; }
+.ProseMirror .sr-cur { background: color-mix(in srgb, var(--accent) 52%, transparent); outline: 1px solid var(--accent); border-radius: 2px; }
 #searchInput {
   display: block; width: 100%; font: inherit; font-size: 15.5px; color: var(--text);
   background: var(--bg); border: 1px solid color-mix(in srgb, var(--line) 90%, transparent); border-radius: 8px; padding: 9px 12px; outline: none;
@@ -1637,3 +1659,19 @@ button.linkish:disabled { color: var(--muted); opacity: .45; cursor: default; ba
 .an-pop-acts #anPopSkip { margin-left: auto; }
 .cmt-link[data-act="del"] { color: var(--muted); }
 .cmt-link[data-act="del"]:hover { color: var(--danger); }
+
+/* ---------- фокус на абзаце ---------- */
+body.para-focus #editor .ProseMirror > * { opacity: .32; transition: opacity .18s ease; }
+body.para-focus #editor .ProseMirror > .pm-active,
+body.para-focus #editor .ProseMirror > *:hover { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  body.para-focus #editor .ProseMirror > * { transition: none; }
+}
+
+/* ---------- диалог проверки обновлений ---------- */
+#updStatus { margin: 4px 0 10px; font-size: 14px; line-height: 1.45; }
+#updNotes {
+  margin: 0 0 12px; padding: 10px 12px; max-height: 220px; overflow-y: auto;
+  font-family: inherit; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+}

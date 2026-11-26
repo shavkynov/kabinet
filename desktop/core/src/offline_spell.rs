@@ -690,6 +690,7 @@ fn build_custom_set(custom_words: &[String]) -> HashSet<String> {
 struct TokenSpan<'a> {
     text: &'a str,
     byte_start: usize,
+    byte_end: usize,
     u16_start: usize,
     u16_len: usize,
 }
@@ -740,6 +741,7 @@ fn tokenize_paragraph(para: &str) -> Vec<TokenSpan<'_>> {
             out.push(TokenSpan {
                 text: word,
                 byte_start: start_byte,
+                byte_end: end_byte,
                 u16_start: start_u16,
                 u16_len: end_u16 - start_u16,
             });
@@ -747,6 +749,111 @@ fn tokenize_paragraph(para: &str) -> Vec<TokenSpan<'_>> {
         i = j;
     }
     out
+}
+
+fn is_allowed_repeat(lower: &str) -> bool {
+    matches!(
+        lower,
+        "ха" | "хи" | "хе" | "хо" | "ах" | "ох" | "эх" | "ух" | "ой" | "ай"
+            | "ну" | "да" | "нет" | "так" | "вот" | "тук" | "тик" | "топ" | "кап"
+            | "бум" | "бам" | "дзинь" | "мяу" | "гав" | "ку" | "чу" | "тсс" | "ля"
+            | "бом" | "динь" | "дон" | "чик" | "пых" | "хлоп" | "стук" | "кря" | "ква"
+            | "угу" | "ага" | "ha" | "he" | "hi" | "ho" | "la" | "na" | "oh" | "ah"
+            | "uh" | "no" | "yes" | "blah" | "bla" | "had" | "that"
+    )
+}
+
+fn push_unpaired(out: &mut Vec<Value>, para: usize, offset: usize, text: &str, short: &str, message: &str) {
+    out.push(json!({
+        "para": para,
+        "offset": offset,
+        "length": text.encode_utf16().count(),
+        "text": text,
+        "message": message,
+        "short": short,
+        "ruleId": "OFFLINE_UNPAIRED_PUNCT",
+        "kind": "punctuation",
+        "replacements": [],
+    }));
+}
+
+fn check_paragraph_punctuation(
+    para_idx: usize,
+    para: &str,
+    lang: &str,
+    open_guillemet: &mut Option<(usize, usize)>,
+    out: &mut Vec<Value>,
+) {
+    let mut paren_stack: Vec<usize> = Vec::new();
+    let mut g_stack: Vec<usize> = Vec::new();
+    let mut nested_stack: Vec<usize> = Vec::new();
+    let check_nested = lang != "en" && para.contains('„');
+    let mut u16_pos = 0usize;
+    let mut prev_ch: Option<char> = None;
+    let lead_g_byte = open_guillemet
+        .is_some()
+        .then(|| {
+            let trimmed = para.trim_start();
+            trimmed.starts_with('«').then_some(para.len() - trimmed.len())
+        })
+        .flatten();
+
+    for (byte_i, ch) in para.char_indices() {
+        let prefix = &para[..byte_i];
+        let is_emoticon = matches!(prev_ch, Some(':' | ';' | '='))
+            || (prev_ch == Some('-')
+                && matches!(prefix[..prefix.len().saturating_sub(1)].chars().last(), Some(':' | ';')));
+
+        match ch {
+            '(' if !is_emoticon => paren_stack.push(u16_pos),
+            ')' if !is_emoticon => {
+                let trim_pref = prefix.trim_start();
+                let list_marker = paren_stack.is_empty()
+                    && (1..=2).contains(&trim_pref.chars().count())
+                    && (trim_pref.chars().all(|c| c.is_ascii_digit())
+                        || (trim_pref.chars().count() == 1 && trim_pref.chars().all(|c| c.is_alphabetic())));
+                if !list_marker && paren_stack.pop().is_none() {
+                    push_unpaired(out, para_idx, u16_pos, ")", "Непарная скобка", "Лишняя закрывающая скобка.");
+                }
+            }
+            '«' => {
+                if Some(byte_i) != lead_g_byte {
+                    g_stack.push(u16_pos);
+                }
+            }
+            '»' => {
+                if g_stack.pop().is_none() && open_guillemet.take().is_none() {
+                    push_unpaired(out, para_idx, u16_pos, "»", "Непарная кавычка", "Лишняя закрывающая кавычка.");
+                }
+            }
+            '„' if check_nested => nested_stack.push(u16_pos),
+            '“' if check_nested => {
+                let _ = nested_stack.pop();
+            }
+            _ => {}
+        }
+
+        prev_ch = Some(ch);
+        u16_pos += ch.len_utf16();
+    }
+
+    for pos in paren_stack {
+        push_unpaired(out, para_idx, pos, "(", "Непарная скобка", "Незакрытая скобка.");
+    }
+    for pos in nested_stack {
+        push_unpaired(out, para_idx, pos, "„", "Непарная кавычка", "Незакрытая кавычка.");
+    }
+
+    if g_stack.len() >= 2 {
+        for &pos in &g_stack[..g_stack.len() - 1] {
+            push_unpaired(out, para_idx, pos, "«", "Непарная кавычка", "Незакрытая кавычка.");
+        }
+    }
+    if let Some(last_pos) = g_stack.pop() {
+        if let Some((old_p, old_pos)) = open_guillemet.replace((para_idx, last_pos)) {
+            push_unpaired(out, old_p, old_pos, "«", "Непарная кавычка", "Незакрытая кавычка.");
+        }
+    }
 }
 
 fn token_lang(word: &str, mode: &str) -> Option<DictLang> {
@@ -914,6 +1021,7 @@ impl OfflineSpell {
         let mut slow_suggest_count = 0usize;
         let mut out: Vec<Value> = Vec::new();
         let total = paragraphs.len();
+        let mut open_guillemet: Option<(usize, usize)> = None;
 
         for (para_idx, para) in paragraphs.iter().enumerate() {
             if cancel.load(Ordering::SeqCst) {
@@ -923,9 +1031,42 @@ impl OfflineSpell {
                 progress(para_idx, total);
             }
             if para.trim().is_empty() {
+                if let Some((old_p, old_pos)) = open_guillemet.take() {
+                    push_unpaired(&mut out, old_p, old_pos, "«", "Непарная кавычка", "Незакрытая кавычка.");
+                }
                 continue;
             }
-            for tok in tokenize_paragraph(para) {
+            check_paragraph_punctuation(para_idx, para, lang, &mut open_guillemet, &mut out);
+
+            let toks = tokenize_paragraph(para);
+            for w in 1..toks.len() {
+                let prev = &toks[w - 1];
+                let curr = &toks[w];
+                let between = &para[prev.byte_end..curr.byte_start];
+                if between.is_empty() || !between.chars().all(|c| c.is_whitespace()) {
+                    continue;
+                }
+                if prev.text.chars().any(|c| c.is_ascii_digit()) || curr.text.chars().any(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+                let curr_low = curr.text.to_lowercase();
+                if prev.text.to_lowercase() == curr_low && !is_allowed_repeat(&curr_low) {
+                    let end_u16 = curr.u16_start + curr.u16_len;
+                    out.push(json!({
+                        "para": para_idx,
+                        "offset": prev.u16_start,
+                        "length": end_u16 - prev.u16_start,
+                        "text": &para[prev.byte_start..curr.byte_end],
+                        "message": "Повтор слова подряд.",
+                        "short": "Повтор слова",
+                        "ruleId": "OFFLINE_REPEATED_WORD",
+                        "kind": "typography",
+                        "replacements": [prev.text],
+                    }));
+                }
+            }
+
+            for tok in toks {
                 let Some(tlang) = token_lang(tok.text, lang) else {
                     continue;
                 };
@@ -1025,6 +1166,11 @@ impl OfflineSpell {
                 }
             }
         }
+
+        if let Some((old_p, old_pos)) = open_guillemet {
+            push_unpaired(&mut out, old_p, old_pos, "«", "Непарная кавычка", "Незакрытая кавычка.");
+        }
+        out.sort_by_key(|v| (v["para"].as_u64().unwrap_or(0), v["offset"].as_u64().unwrap_or(0)));
 
         loaded.last_used = Instant::now();
         progress(total, total);
@@ -1196,5 +1342,74 @@ mod tests {
         assert_eq!(spell.len(), 1);
         assert_eq!(spell[0]["text"], json!("првиет"));
         assert!(spell[0]["replacements"].as_array().unwrap().iter().any(|v| v == "Привет"));
+    }
+
+    #[test]
+    fn offline_spell_flags_repeated_words_and_unpaired_punctuation() {
+        let tmp = tmpdir("offline-spell-repeats-punct");
+        write_mini_ru_dict(&tmp);
+        let svc = OfflineSpell::new(tmp);
+        let cancel = AtomicBool::new(false);
+
+        let custom: Vec<String> = [
+            "Он", "он", "пошел", "в", "дом", "ха", "да", "тук",
+            "Первый", "абзац", "Второй", "привет", "пункт", "лишняя", "текст",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let paras = vec![
+            "Он он пошел в\u{00a0}в дом, но ха ха и тук тук, да, да.".to_string(),
+            "Первый (незакрытая скобка.".to_string(),
+            "Закрывающая лишняя) и смайл :) ок.".to_string(),
+            "«Первый абзац цитаты.".to_string(),
+            "Второй абзац» и «норм».".to_string(),
+            "1) пункт.".to_string(),
+            "«Многоабзацная 1.".to_string(),
+            "«Многоабзацная 2».".to_string(),
+            "«Незакрытая перед пустым.".to_string(),
+            "".to_string(),
+            "Лишняя» кавычка.".to_string(),
+        ];
+
+        let issues = svc.check_paragraphs(&paras, "ru", &custom, &cancel, &|_, _| {}).unwrap();
+
+        let repeats: Vec<(usize, &str, &str)> = issues
+            .iter()
+            .filter(|x| x["ruleId"] == json!("OFFLINE_REPEATED_WORD"))
+            .map(|x| (
+                x["para"].as_u64().unwrap() as usize,
+                x["text"].as_str().unwrap(),
+                x["replacements"][0].as_str().unwrap(),
+            ))
+            .collect();
+        assert_eq!(
+            repeats,
+            vec![(0, "Он он", "Он"), (0, "в\u{00a0}в", "в")],
+            "unexpected repeats: {:?}",
+            repeats
+        );
+
+        let punct: Vec<(usize, &str, &str)> = issues
+            .iter()
+            .filter(|x| x["ruleId"] == json!("OFFLINE_UNPAIRED_PUNCT"))
+            .map(|x| (
+                x["para"].as_u64().unwrap() as usize,
+                x["text"].as_str().unwrap(),
+                x["message"].as_str().unwrap(),
+            ))
+            .collect();
+        assert_eq!(
+            punct,
+            vec![
+                (1, "(", "Незакрытая скобка."),
+                (2, ")", "Лишняя закрывающая скобка."),
+                (8, "«", "Незакрытая кавычка."),
+                (10, "»", "Лишняя закрывающая кавычка."),
+            ],
+            "unexpected punct issues: {:?}",
+            punct
+        );
     }
 }

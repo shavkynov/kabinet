@@ -1,27 +1,223 @@
-// ---------- поиск по проекту и экспорт ----------
+// ---------- поиск (в главе и по проекту) и экспорт ----------
 
 const KIND_NAME = { chapter: 'Глава', character: 'Персонаж', place: 'Место', item: 'Предмет', note: 'Заметка' };
 let searchTimer = null;
 let searchToken = 0;
 let searchQuery = '';
+let searchScope = 'chapter'; // 'chapter' | 'project'
+let searchCase = false;
+let searchWord = false;
+
+function canSearchChapter() {
+  return !!(editor && currentId && isTextKind(currentKind));
+}
+
+function setSearchScope(scope) {
+  const next = scope === 'chapter' && canSearchChapter() ? 'chapter' : 'project';
+  searchScope = next;
+  const isChap = next === 'chapter';
+
+  const tabChap = $('#srScopeChapter');
+  const tabProj = $('#srScopeProject');
+  if (tabChap) {
+    tabChap.disabled = !canSearchChapter();
+    tabChap.classList.toggle('active', isChap);
+    tabChap.setAttribute('aria-selected', isChap ? 'true' : 'false');
+  }
+  if (tabProj) {
+    tabProj.classList.toggle('active', !isChap);
+    tabProj.setAttribute('aria-selected', !isChap ? 'true' : 'false');
+  }
+
+  for (const sel of ['#srCase', '#srWord', '#srCount', '#srPrev', '#srNext', '#btnReplaceOne']) {
+    const el = $(sel);
+    if (el) el.hidden = !isChap;
+  }
+
+  const input = $('#searchInput');
+  if (input) {
+    input.placeholder = isChap
+      ? t('Найти в главе (можно один символ, например [)')
+      : t('Поиск по главам, карточкам и заметкам');
+  }
+  const repAll = $('#btnReplaceAll');
+  if (repAll) repAll.textContent = isChap ? t('Заменить всё') : t('Заменить всё…');
+
+  if (isChap) {
+    $('#searchResults').textContent = '';
+    searchToken += 1;
+    runChapterSearch(false);
+  } else {
+    clearSearchHighlight(editor);
+    runSearch();
+  }
+}
+
+function syncChapterSearchUi() {
+  if ($('#search').hidden || searchScope !== 'chapter') return;
+  const st = getSearchHighlightState(editor);
+  const count = $('#srCount');
+  if (!count) return;
+  if (!st.query) count.textContent = '';
+  else if (!st.matches.length) count.textContent = '0';
+  else count.textContent = `${st.index + 1} / ${st.matches.length}`;
+}
+
+function revealChapterMatch(focusEditor = false) {
+  const st = getSearchHighlightState(editor);
+  if (!st.matches.length || st.index < 0) return;
+  const m = st.matches[st.index];
+  if (!m) return;
+  if (focusEditor && editor && editor.isEditable) {
+    const max = editor.state.doc.content.size;
+    const from = Math.max(0, Math.min(m.from, max));
+    const to = Math.max(from, Math.min(m.to, max));
+    followCaret = true;
+    editor.chain().focus().setTextSelection({ from, to }).run();
+    revealPos(from);
+    if (settings.typewriter) recenterNow();
+    return;
+  }
+  requestAnimationFrame(() => {
+    try {
+      const curEl = editor.view.dom.querySelector('.sr-cur');
+      if (curEl) {
+        curEl.scrollIntoView({ block: 'center' });
+        return;
+      }
+    } catch { /* ниже запасной путь */ }
+    revealPos(m.from);
+  });
+}
+
+function runChapterSearch(preserveIndex = false) {
+  if ($('#search').hidden || searchScope !== 'chapter' || !canSearchChapter()) return;
+  const q = $('#searchInput').value;
+  if (!q) {
+    clearSearchHighlight(editor);
+    syncChapterSearchUi();
+    return;
+  }
+  const prev = getSearchHighlightState(editor);
+  const cursor = editor.state.selection.from;
+  setSearchHighlight(editor, {
+    query: q,
+    matchCase: searchCase,
+    wholeWord: searchWord,
+    index: preserveIndex ? prev.index : -1,
+  });
+  const st = getSearchHighlightState(editor);
+  if (st.matches.length && !preserveIndex) {
+    const idx = st.matches.findIndex((m) => m.from >= cursor);
+    const chosen = idx >= 0 ? idx : 0;
+    if (chosen !== st.index) setSearchHighlight(editor, { index: chosen });
+  }
+  syncChapterSearchUi();
+  revealChapterMatch(false);
+}
+
+function stepChapterMatch(delta) {
+  if (searchScope !== 'chapter' || !canSearchChapter()) return;
+  const st = getSearchHighlightState(editor);
+  if (!st.matches.length) {
+    runChapterSearch(false);
+    return;
+  }
+  const next = (st.index + delta + st.matches.length) % st.matches.length;
+  setSearchHighlight(editor, { index: next });
+  syncChapterSearchUi();
+  revealChapterMatch(false);
+}
+
+function replaceOneChapter() {
+  if (searchScope !== 'chapter' || !canSearchChapter() || !editor.isEditable) return;
+  const st = getSearchHighlightState(editor);
+  if (!st.matches.length || st.index < 0) return;
+  const m = st.matches[st.index];
+  const rep = $('#replaceInput').value;
+  const tr = editor.state.tr.insertText(rep, m.from, m.to);
+  editor.view.dispatch(tr);
+  const nextSt = getSearchHighlightState(editor);
+  if (nextSt.matches.length) {
+    const idx = nextSt.matches.findIndex((hit) => hit.from >= m.from + rep.length);
+    setSearchHighlight(editor, { index: idx >= 0 ? idx : 0 });
+  }
+  syncChapterSearchUi();
+  revealChapterMatch(false);
+}
+
+function replaceAllChapter() {
+  if (searchScope !== 'chapter' || !canSearchChapter() || !editor.isEditable) return;
+  const st = getSearchHighlightState(editor);
+  if (!st.matches.length) {
+    setStatus('ok', t('Нечего заменять'));
+    return;
+  }
+  const rep = $('#replaceInput').value;
+  const tr = editor.state.tr;
+  for (let i = st.matches.length - 1; i >= 0; i -= 1) {
+    tr.insertText(rep, st.matches[i].from, st.matches[i].to);
+  }
+  const total = st.matches.length;
+  editor.view.dispatch(tr);
+  setStatus('ok', t('Заменено: {0}', total));
+  syncChapterSearchUi();
+}
+
+function refreshChapterSearchOnDoc() {
+  if ($('#search').hidden) return;
+  if (!canSearchChapter() && searchScope === 'chapter') {
+    setSearchScope('project');
+    return;
+  }
+  const tabChap = $('#srScopeChapter');
+  if (tabChap) tabChap.disabled = !canSearchChapter();
+  if (searchScope === 'chapter') runChapterSearch(false);
+}
 
 function openSearch() {
   if (!project) return;
   closeSettings();
   $('#search').hidden = false;
   const input = $('#searchInput');
+  if (canSearchChapter() && editor) {
+    const { from, to } = editor.state.selection;
+    if (to > from && to - from <= 80) {
+      const selected = editor.state.doc.textBetween(from, to, '\n', '');
+      if (selected && !selected.includes('\n')) input.value = selected;
+    }
+  }
+  setSearchScope(canSearchChapter() ? 'chapter' : 'project');
   input.focus();
   input.select();
-  if (input.value.trim().length >= 2) runSearch();
 }
 
-function closeSearch() {
+function closeSearch(focusMatch = false) {
+  if ($('#search').hidden) return;
+  const wasChapter = searchScope === 'chapter';
+  const active = wasChapter ? getSearchHighlightState(editor) : null;
+  const curMatch = active && active.index >= 0 ? active.matches[active.index] : null;
   $('#search').hidden = true;
   clearTimeout(searchTimer);
   searchToken += 1;
+  clearSearchHighlight(editor);
+  if (focusMatch && wasChapter && editor && editor.isEditable && canSearchChapter()) {
+    if (curMatch) {
+      const max = editor.state.doc.content.size;
+      const from = Math.max(0, Math.min(curMatch.from, max));
+      const to = Math.max(from, Math.min(curMatch.to, max));
+      editor.chain().focus().setTextSelection({ from, to }).run();
+    } else {
+      editor.commands.focus();
+    }
+  }
 }
 
 async function runSearch() {
+  if (searchScope === 'chapter') {
+    runChapterSearch(false);
+    return;
+  }
   const q = $('#searchInput').value.trim();
   const box = $('#searchResults');
   const token = ++searchToken;
@@ -69,7 +265,7 @@ async function runSearch() {
     for (const sn of hit.snippets) {
       const row = document.createElement('div');
       row.className = 'sr-snip';
-    row.setAttribute('translate', 'no');
+      row.setAttribute('translate', 'no');
       const mark = document.createElement('mark');
       mark.textContent = sn.match;
       row.append(`…${sn.before}`, mark, `${sn.after}…`);
@@ -163,27 +359,61 @@ function wireSearch() {
   const input = $('#searchInput');
   input.addEventListener('input', () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(runSearch, 220);
+    if (searchScope === 'chapter') searchTimer = setTimeout(() => runChapterSearch(false), 40);
+    else searchTimer = setTimeout(runSearch, 220);
   });
   input.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
-      const first = $('#searchResults .sr-snip, #searchResults .sr-head');
-      if (first) first.click();
-      else runSearch();
+      if (searchScope === 'chapter') {
+        stepChapterMatch(e.shiftKey ? -1 : 1);
+      } else {
+        const first = $('#searchResults .sr-snip, #searchResults .sr-head');
+        if (first) first.click();
+        else runSearch();
+      }
     }
   });
   const rep = $('#replaceInput');
   rep.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') e.stopPropagation();
-    if (e.key === 'Enter') { e.preventDefault(); replaceAll(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searchScope === 'chapter') replaceOneChapter();
+      else replaceAll();
+    }
   });
-  $('#btnReplaceAll').addEventListener('click', replaceAll);
+
+  $('#srScopeChapter').addEventListener('click', () => { if (canSearchChapter()) setSearchScope('chapter'); });
+  $('#srScopeProject').addEventListener('click', () => setSearchScope('project'));
+  $('#srCase').addEventListener('click', () => {
+    searchCase = !searchCase;
+    const btn = $('#srCase');
+    btn.classList.toggle('active', searchCase);
+    btn.setAttribute('aria-pressed', searchCase ? 'true' : 'false');
+    runChapterSearch(false);
+  });
+  $('#srWord').addEventListener('click', () => {
+    searchWord = !searchWord;
+    const btn = $('#srWord');
+    btn.classList.toggle('active', searchWord);
+    btn.setAttribute('aria-pressed', searchWord ? 'true' : 'false');
+    runChapterSearch(false);
+  });
+  $('#srPrev').addEventListener('click', () => stepChapterMatch(-1));
+  $('#srNext').addEventListener('click', () => stepChapterMatch(1));
+  $('#srClose').addEventListener('click', () => closeSearch(true));
+  $('#btnReplaceOne').addEventListener('click', replaceOneChapter);
+  $('#btnReplaceAll').addEventListener('click', () => {
+    if (searchScope === 'chapter') replaceAllChapter();
+    else replaceAll();
+  });
   document.addEventListener('mousedown', (e) => {
     if ($('#search').hidden) return;
     if (e.target.closest('#search')) return;
-    closeSearch();
+    if (searchScope === 'chapter' && e.target.closest('#paper-area, #toolbar')) return;
+    closeSearch(false);
   });
 }
 

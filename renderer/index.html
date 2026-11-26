@@ -391,6 +391,10 @@
           <option value="indent">Красная строка</option>
         </select>
       </div>
+      <div class="row">
+        <label for="setParaFocus" title="Приглушает остальные абзацы, оставляя ярким текущий.">Фокус на абзаце</label>
+        <input id="setParaFocus" type="checkbox">
+      </div>
       <details class="more">
         <summary><span>Свой шрифт</span></summary>
         <div class="row">
@@ -568,6 +572,10 @@
       <div class="row">
         <label class="wrap" for="setTypo">«Ёлочки», тире, многоточие</label>
         <input id="setTypo" type="checkbox">
+      </div>
+      <div class="row">
+        <label class="wrap" for="setAutoCap">Заглавная буква в начале предложения</label>
+        <input id="setAutoCap" type="checkbox">
       </div>
       <div class="row">
         <label class="wrap" for="setTypoNbsp">Неразрывный пробел после коротких слов</label>
@@ -1046,11 +1054,38 @@
     </div>
   </div>
 
+  <dialog id="updateDialog">
+    <form method="dialog">
+      <h2>Проверка обновлений</h2>
+      <p id="updStatus"></p>
+      <pre id="updNotes" hidden></pre>
+      <div class="dialog-actions">
+        <button type="button" id="updClose" class="secondary">Закрыть</button>
+        <button type="button" id="updOpen" hidden>Открыть страницу загрузки</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="search" hidden>
-    <input id="searchInput" type="text" placeholder="Поиск по главам, карточкам и заметкам" autocomplete="off" spellcheck="false">
+    <div class="sr-top">
+      <div class="sr-tabs" role="tablist">
+        <button id="srScopeChapter" type="button" role="tab" aria-selected="true">В главе</button>
+        <button id="srScopeProject" type="button" role="tab" aria-selected="false">По проекту</button>
+      </div>
+      <div class="sr-tools">
+        <button id="srCase" type="button" class="sr-opt" aria-pressed="false" title="Учитывать регистр">Аа</button>
+        <button id="srWord" type="button" class="sr-opt" aria-pressed="false" title="Слово целиком">Слово</button>
+        <span id="srCount" class="sr-count" aria-live="polite"></span>
+        <button id="srPrev" type="button" class="sr-nav" title="Предыдущее совпадение (⇧Enter)" aria-label="Предыдущее совпадение">‹</button>
+        <button id="srNext" type="button" class="sr-nav" title="Следующее совпадение (Enter)" aria-label="Следующее совпадение">›</button>
+        <button id="srClose" type="button" class="sr-nav" title="Закрыть (Esc)" aria-label="Закрыть поиск">×</button>
+      </div>
+    </div>
+    <input id="searchInput" type="text" placeholder="Найти в главе (можно один символ, например [)" autocomplete="off" spellcheck="false">
     <div id="replaceRow">
       <input id="replaceInput" type="text" placeholder="Заменить на…" autocomplete="off" spellcheck="false">
-      <button id="btnReplaceAll" type="button" class="secondary small">Заменить всё…</button>
+      <button id="btnReplaceOne" type="button" class="secondary small">Заменить</button>
+      <button id="btnReplaceAll" type="button" class="secondary small">Заменить всё</button>
     </div>
     <div id="searchResults"></div>
   </div>

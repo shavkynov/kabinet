@@ -156,3 +156,15 @@ test('пустые строки: N вне 0-3 и мусор приводятся
   assert.deepEqual(drop([P, E, E, P], -5), [1, 2]);
   assert.deepEqual(drop([P, E, E, P], 'x'), [1, 2]);
 });
+
+// ---------- заглавная буква в начале предложения при наборе ----------
+test('autoCap: заглавная в начале абзаца, после точки и в диалогах без ложных срабатываний', () => {
+  const on = { autoCap: true, nbsp: false };
+  assert.equal(type('привет. как дела? отлично!', on), 'Привет. Как дела? Отлично!');
+  assert.equal(type('"привет"', on), '«Привет»');
+  assert.equal(type('- привет! - сказал он. - как дела?', on), '— Привет! — сказал он. — Как дела?');
+  assert.equal(type('…и он ушёл.', on), '…и он ушёл.');
+  assert.equal(type('А. С. он т. е. мир см. дом 1. первый пункт.', on), 'А. С. он т. е. мир см. дом 1. первый пункт.');
+  assert.equal(type('привет', { autoCap: false }), 'привет');
+  assert.equal(type('hello. world? Mr. smith.', { ...on, lang: 'en' }), 'Hello. World? Mr. smith.');
+});

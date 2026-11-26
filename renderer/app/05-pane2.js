@@ -7,8 +7,9 @@ function initEditor2() {
   editor2 = new Editor({
     element: $('#editor2'),
     extensions: [
-      StarterKit.configure({ paragraph: false }),
+      StarterKit.configure({ paragraph: false, horizontalRule: false }),
       AlignParagraph,
+      KabinetRule,
       NameLinks,
       Markdown.configure({ html: false, tightLists: true, breaks: false, transformPastedText: true }),
     ],

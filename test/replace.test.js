@@ -9,6 +9,7 @@ const path = require('path');
 const project = require('../src/project');
 const { replaceInText, replaceProject } = require('../src/replace');
 const { searchProject } = require('../src/search');
+const { findInText } = require('../src/chapter-search');
 
 test('replaceInText: без учёта регистра, неразрывный пробел, спецсимволы и $ в замене', () => {
   const r = replaceInText('Иван Петров и иван\u00a0петров. Цена (1+1) $&', 'иван петров', 'Пётр $1');
@@ -76,4 +77,19 @@ test('searchProject находит слово из карточки предме
   assert.equal(hits[0].kind, 'item');
   assert.equal(hits[0].id, id);
   assert.equal(searchProject(dir, 'несуществующееслово').length, 0);
+});
+
+test('findInText (поиск в главе): одиночный символ [, регистр и слово целиком', () => {
+  assert.deepEqual(findInText('Текст [правка] и [ещё].', '['), [
+    { start: 6, end: 7 },
+    { start: 17, end: 18 },
+  ]);
+  assert.deepEqual(findInText('Текст [правка]', '[', { wholeWord: true }), [{ start: 6, end: 7 }]);
+  assert.deepEqual(findInText('Кот и котик и КОТ', 'кот', { matchCase: false, wholeWord: true }), [
+    { start: 0, end: 3 },
+    { start: 14, end: 17 },
+  ]);
+  assert.deepEqual(findInText('Кот и КОТ', 'Кот', { matchCase: true, wholeWord: true }), [{ start: 0, end: 3 }]);
+  assert.deepEqual(findInText('Иван\u00a0Петров', 'иван петров'), [{ start: 0, end: 11 }]);
+  assert.deepEqual(findInText('Текст', ''), []);
 });

@@ -14,6 +14,63 @@ const SHORT = new Set([
 
 const OPEN_CONTEXT = /^$|[\s (\[{—–\-«„]$/;
 
+const KNOWN_ABBR = new Set([
+  'dr', 'mr', 'mrs', 'ms', 'prof', 'st', 'vs', 'etc', 'eg', 'ie', 'jr', 'sr',
+  'inc', 'ltd', 'corp', 'fig', 'no', 'vol', 'ch', 'pp', 'ed', 'eds', 'al',
+  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec',
+  'др', 'пр', 'см', 'ср', 'напр', 'стр', 'ст', 'рис', 'табл',
+  'гл', 'разд', 'им', 'ул', 'пер', 'пр-т', 'просп', 'пл', 'наб', 'бул',
+  'обл', 'р-н', 'пос', 'дер', 'гор', 'тыс', 'млн', 'млрд', 'руб', 'коп',
+  'долл', 'экз', 'шт', 'кг', 'гг', 'вв', 'нэ', 'доц', 'проф', 'акад',
+  'инж', 'тов', 'гр', 'тел', 'факс', 'кв', 'корп', 'эт', 'оф', 'мин',
+  'сек', 'час', 'суб', 'вс', 'пн', 'вт', 'чт', 'пт', 'сб', 'янв', 'фев',
+  'мар', 'апр', 'июн', 'июл', 'авг', 'сен', 'сент', 'окт', 'ноя', 'дек',
+  'изд', 'ред', 'сост', 'прим', 'лат', 'греч', 'англ', 'нем', 'фр', 'рус',
+  'устар', 'разг', 'книжн', 'перен',
+]);
+
+function endsWithSentencePunct(s) {
+  const trimmed = s.replace(/[»”’"']+$/u, '');
+  if (!trimmed || /[)\]]$/.test(trimmed)) return false;
+  if (trimmed.endsWith('…') || trimmed.endsWith('..')) return false;
+  const last = trimmed[trimmed.length - 1];
+  if (last === '!' || last === '?') return true;
+  if (last !== '.') return false;
+  const beforeDot = trimmed.slice(0, -1);
+  if (/\d$/.test(beforeDot)) return false;
+  const m = /([\p{L}-]+)$/u.exec(beforeDot);
+  if (!m || m[1].length <= 1) return false;
+  return !KNOWN_ABBR.has(m[1].toLowerCase());
+}
+
+/**
+ * Стоит ли курсор (текст до него = before) в начале нового предложения, где строчную букву надо сделать заглавной.
+ * Повторяет логику офлайн-проверки (desktop/core/src/offline_spell.rs): не трогает многоточия, «1. пункт», «т. е.», «— сказал он».
+ */
+function isSentenceStartForTyping(before) {
+  const afterOpen = before.replace(/[\s\u00a0«„“‘"'(\[]+$/u, '');
+  if (afterOpen.endsWith('…') || afterOpen.endsWith('..')) return false;
+
+  const trailing = before.slice(afterOpen.length);
+  const headCheck = afterOpen.replace(/[\s\u00a0—–\-•*]+$/u, '');
+  if (!headCheck) {
+    return !afterOpen || /[\s\u00a0]/u.test(trailing);
+  }
+
+  const beforeDash = afterOpen.replace(/[—–]+$/u, '');
+  const hadDash = beforeDash.length < afterOpen.length && /[\s\u00a0]$/u.test(beforeDash);
+  if (hadDash) {
+    if (!/[\s\u00a0]/u.test(trailing)) return false;
+    const prev = beforeDash.replace(/[\s\u00a0]+$/u, '');
+    const clean = prev.replace(/[»”’"']+$/u, '');
+    if (clean.endsWith('!') || clean.endsWith('?') || clean.endsWith('…') || clean.endsWith('..')) return false;
+    return endsWithSentencePunct(prev);
+  }
+
+  if (!/[\s\u00a0]/u.test(trailing)) return false;
+  return endsWithSentencePunct(afterOpen);
+}
+
 function quoteDepth(before) {
   let d = 0;
   for (const c of before) {
@@ -26,10 +83,17 @@ function quoteDepth(before) {
 /**
  * before: текст абзаца до курсора, ch: набранный символ.
  * Возвращает null (оставить как набрано) или { del, ins }: удалить del символов перед курсором
- * и вставить ins вместо набранного символа. opts: { quotes, dashes, nbsp } (по умолчанию всё включено).
+ * и вставить ins вместо набранного символа. opts: { quotes, dashes, nbsp, autoCap } (autoCap по умолчанию выключен).
  */
 function typeChar(before, ch, opts = {}) {
-  const o = { quotes: true, dashes: true, nbsp: true, ...opts };
+  const o = { quotes: true, dashes: true, nbsp: true, autoCap: false, ...opts };
+
+  const maybeCap = () => {
+    if (!o.autoCap || ch.length !== 1 || !/^\p{Ll}$/u.test(ch)) return null;
+    if (!isSentenceStartForTyping(before)) return null;
+    const up = ch.toUpperCase();
+    return up !== ch ? { del: 0, ins: up } : null;
+  };
 
   if (o.lang === 'en') { // английский: “двойные” и ‘одинарные’ кавычки, тире без пробелов, апостроф ’
     if ((ch === '"' || ch === "'") && o.quotes) {
@@ -42,7 +106,7 @@ function typeChar(before, ch, opts = {}) {
     }
     if (ch === '-' && o.dashes && before.endsWith('-')) return { del: 1, ins: '—' };
     if (ch === '.' && o.dashes && before.endsWith('..')) return { del: 2, ins: '…' };
-    return null;
+    return maybeCap();
   }
 
   const sp = o.nbsp ? NB : ' '; // без неразрывных пробелов текст чище в Word и в онлайн-редакторах
@@ -70,7 +134,7 @@ function typeChar(before, ch, opts = {}) {
       if (m && SHORT.has(m[2].toLowerCase())) return { del: 0, ins: NB };
     }
   }
-  return null;
+  return maybeCap();
 }
 
 const WS = /[  \t    　]/; // всё, что выглядит пробелом
@@ -209,4 +273,4 @@ function emptyToDrop(flags, keep = 0) {
 }
 
 module.exports = {
-  emptyToDrop, NB, SHORT, typeChar, fixText, applyEdits };
+  emptyToDrop, NB, SHORT, isSentenceStartForTyping, typeChar, fixText, applyEdits };

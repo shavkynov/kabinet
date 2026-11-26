@@ -15,12 +15,18 @@ export const Typography = Extension.create({
       props: {
         handleTextInput(view, from, to, text) {
           const o = opts.getOptions();
-          if (!o.enabled || text.length !== 1 || from !== to || view.composing) return false;
+          if ((!o.enabled && !o.autoCap) || text.length !== 1 || from !== to || view.composing) return false;
           const $from = view.state.doc.resolve(from);
           const parent = $from.parent;
           if (!parent.isTextblock || parent.type.name === 'codeBlock') return false;
           const before = parent.textBetween(0, $from.parentOffset, '', '￼');
-          const r = typeChar(before, text, o);
+          const r = typeChar(before, text, {
+            quotes: !!o.enabled,
+            dashes: !!o.enabled,
+            nbsp: !!o.enabled && !!o.nbsp,
+            autoCap: !!o.autoCap,
+            lang: o.lang,
+          });
           if (!r) return false;
           view.dispatch(view.state.tr.insertText(r.ins, from - r.del, to));
           return true;

@@ -854,6 +854,67 @@ function createBackend(host, { session } = {}) {
     return true;
   });
   handle('app:version', () => host.version);
+  handle('app:checkUpdates', async () => {
+    const parseSemver = (s) => {
+      const clean = String(s || '').trim().replace(/^[vV]/, '').split(/[-+]/)[0];
+      const parts = clean.split('.');
+      if (parts.length === 0 || !/^\d+$/.test(parts[0])) return null;
+      const major = Number(parts[0]);
+      const minor = parts[1] !== undefined ? Number(parts[1]) : 0;
+      const patch = parts[2] !== undefined ? Number(parts[2]) : 0;
+      return Number.isInteger(minor) && Number.isInteger(patch) ? [major, minor, patch] : null;
+    };
+    const isNewer = (cur, lat) => {
+      const a = parseSemver(cur);
+      const b = parseSemver(lat);
+      if (!a || !b) return false;
+      for (let i = 0; i < 3; i += 1) {
+        if (b[i] !== a[i]) return b[i] > a[i];
+      }
+      return false;
+    };
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15000);
+    let resp;
+    try {
+      resp = await fetch('https://api.github.com/repos/shavkynov/kabinet/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: ctl.signal,
+      });
+    } catch (e) {
+      throw new Error(`Не удалось связаться с GitHub: ${(e && e.message) || e}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (resp.status === 403 || resp.status === 429) {
+      throw new Error('GitHub временно ограничил число запросов. Попробуйте чуть позже или откройте страницу релизов.');
+    }
+    if (resp.status === 404) throw new Error('На GitHub пока нет опубликованных релизов.');
+    if (!resp.ok) throw new Error(`GitHub вернул ошибку HTTP ${resp.status}.`);
+    const body = await resp.json();
+    const tag = String((body && body.tag_name) || '').trim();
+    if (!tag) throw new Error('В ответе GitHub не указана версия релиза.');
+    const latest = tag.replace(/^[vV]/, '');
+    const rawUrl = String((body && body.html_url) || '').trim();
+    const url = rawUrl.startsWith('https://github.com/shavkynov/kabinet/')
+      ? rawUrl
+      : 'https://github.com/shavkynov/kabinet/releases';
+    const notes = String((body && body.body) || '').trim().slice(0, 1800);
+    return {
+      current: String(host.version || ''),
+      latest,
+      hasUpdate: isNewer(host.version, latest),
+      url,
+      notes,
+      publishedAt: String((body && body.published_at) || ''),
+    };
+  });
+  handle('app:openReleaseUrl', (url) => {
+    const u = String(url || '').trim();
+    if (!u.startsWith('https://github.com/shavkynov/kabinet/')) return false;
+    host.openUrl(u);
+    return true;
+  });
   handle('project:current', () => (currentDir ? project.openProject(currentDir) : null));
   handle('app:popupMenu', (x, y) => { if (host.popupMenu) host.popupMenu(x, y); return true; });
 
@@ -1071,6 +1132,8 @@ function createBackend(host, { session } = {}) {
     backupNow: () => call('backup:now'),
     openBackupFolder: () => call('backup:openFolder'),
     appVersion: () => call('app:version'),
+    checkUpdates: () => call('app:checkUpdates'),
+    openReleaseUrl: (url) => call('app:openReleaseUrl', url),
     setProjectGoal: (goal) => call('project:setProjectGoal', goal),
     setAnalysisSkip: (skip) => call('project:setAnalysisSkip', skip),
     styleParse: null,
@@ -1094,10 +1157,15 @@ function createBackend(host, { session } = {}) {
     onOpenProject: on('ui:openProject'),
     onCloseProject: on('ui:closeProject'),
     onToggleTypewriter: on('ui:toggleTypewriter'),
+    onToggleParaFocus: on('ui:toggleParaFocus'),
     onToggleMarks: on('ui:toggleMarks'),
     onToggleFocus: on('ui:toggleFocus'),
     onOpenSettings: on('ui:openSettings'),
     onOpenSearch: on('ui:openSearch'),
+    onSaveNow: on('ui:saveNow'),
+    onOpenBoard: on('ui:openBoard'),
+    onOpenStyle: on('ui:openStyle'),
+    onCheckUpdates: on('ui:checkUpdates'),
     onExport: on('ui:export'),
     onImportFiles: on('ui:importFiles'),
     onMenuBar: on('ui:menuBar'),

@@ -14,6 +14,7 @@ import { createBackend } from './backend.js';
 import { createSafAdapter, chooseFolder, forgetFolder, safAvailable } from './saf.js';
 import { createDavAdapter, chooseDavFolder, forgetDav, isDavUri } from './dav.js';
 import i18n from '../src/i18n.js';
+import { clipboardPlain } from '../src/clip.js';
 
 const VERSION = __APP_VERSION__;
 const native = Capacitor.isNativePlatform();
@@ -176,6 +177,7 @@ function buildMenu(be, hw) {
     { head: t('Файл') },
     { label: t('Новый проект…'), run: go('ui:newProject') },
     { label: t('Открыть проект…'), run: go('ui:openProject') },
+    { label: t('Сохранить сейчас'), run: go('ui:saveNow'), disabled: !has },
     { label: t('Импорт глав…'), run: go('ui:importFiles'), disabled: !has },
     { label: t('Экспорт проекта…'), run: go('ui:export'), disabled: !has },
     { label: t('Сохранить проект в ZIP'), run: () => be.exportZip().catch((e) => toast(e.message)), disabled: !has },
@@ -199,7 +201,22 @@ function buildMenu(be, hw) {
     }), disabled: !has },
     { label: t('Поделиться текстом главы…'), run: run(async () => {
       const el = document.querySelector('#editor .ProseMirror');
-      const text = el ? el.innerText.trim() : '';
+      let text = '';
+      if (el) {
+        const blocks = [];
+        for (const child of el.children) {
+          const tag = child.tagName;
+          if (tag === 'HR') blocks.push({ kind: 'rule' });
+          else if (/^H[1-6]$/.test(tag)) blocks.push({ kind: 'heading', text: child.innerText });
+          else if (tag === 'BLOCKQUOTE') blocks.push({ kind: 'quote', text: child.innerText });
+          else if (tag === 'UL' || tag === 'OL') {
+            for (const li of child.querySelectorAll(':scope > li')) blocks.push({ kind: 'paragraph', text: `— ${li.innerText}` });
+          } else {
+            blocks.push({ kind: 'paragraph', text: child.innerText });
+          }
+        }
+        text = clipboardPlain(blocks, { indent: document.documentElement.dataset.para === 'indent' }).trim();
+      }
       if (!text) { toast(t('Откройте главу с текстом.')); return; }
       if (native) {
         try { await Share.share({ text, dialogTitle: t('Поделиться текстом') }); } catch (e) { if (!/cancel/i.test(String((e && e.message) || e))) throw e; }
@@ -209,11 +226,14 @@ function buildMenu(be, hw) {
     ...folderMenu(),
     { sep: true },
     { head: t('Вид') },
-    { label: t('Поиск по проекту…'), run: go('ui:openSearch'), disabled: !has },
+    { label: t('Поиск и замена…'), run: go('ui:openSearch'), disabled: !has },
+    { label: t('Доска глав…'), run: go('ui:openBoard'), disabled: !has },
     { label: t('Показать / скрыть панель глав'), run: go('ui:toggleSidebar'), disabled: !has },
     { label: t('Только лист'), run: go('ui:toggleFocus'), disabled: !has },
     { label: t('Режим «печатная машинка»'), run: go('ui:toggleTypewriter'), disabled: !has },
+    { label: t('Фокус на абзаце'), run: go('ui:toggleParaFocus'), disabled: !has },
     { label: t('Скрытые символы'), run: go('ui:toggleMarks'), disabled: !has },
+    { label: t('Звук и эмбиент…'), run: () => document.querySelector('#btnSound').click(), disabled: !has },
     { label: t('Фоновый эмбиент вкл / выкл'), run: go('ui:toggleAmbient'), disabled: !has },
     ...(hw.connected() ? [{ label: t('Звуки клавиш вкл / выкл'), run: go('ui:toggleSound'), disabled: !has }] : []),
     { label: t('Текст и оформление…'), run: go('ui:openSettings'), disabled: !has },
@@ -224,6 +244,7 @@ function buildMenu(be, hw) {
       if (q('#goal').hidden && q('#barStats')) q('#barStats').click();
       setTimeout(() => { if (!q('#goal').hidden) q('#goalBtn').click(); }, 60);
     }, disabled: !has },
+    { label: t('Стиль текста…'), run: go('ui:openStyle'), disabled: !has },
     { label: t('Привести типографику главы в порядок'), run: () => document.querySelector('#btnFixTypo').click(), disabled: !has },
     { label: t('При наборе…'), run: () => document.querySelector('#btnTyping').click(), disabled: !has },
     { label: t('Проверить текст главы…'), run: go('ui:openCheck'), disabled: !has },
@@ -234,6 +255,7 @@ function buildMenu(be, hw) {
     { label: 'English', run: () => be.emit('ui:setLang', 'en') },
     { sep: true },
     { label: t('О программе «Кабинет»'), run: () => be.call('app:about') },
+    { label: t('Проверить обновления…'), run: go('ui:checkUpdates') },
     { label: t('Где взять новые версии…'), run: () => host.openUrl(GITHUB) },
   ];
 }

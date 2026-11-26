@@ -137,6 +137,7 @@ function wireChrome() {
   bindSetting('#setLinks', 'links', (el) => el.checked);
   bindSetting('#setSpell', 'spellOn', (el) => el.checked);
   bindSetting('#setTypo', 'typo', (el) => el.checked);
+  bindSetting('#setAutoCap', 'autoCap', (el) => el.checked);
   bindSetting('#setTypoNbsp', 'typoNbsp', (el) => el.checked);
   bindSetting('#setTypoLayout', 'typoLayout', (el) => el.checked);
   bindSetting('#setTypoKeep', 'typoKeep', (el) => Number(el.value));
@@ -159,6 +160,7 @@ function wireChrome() {
   bindSetting('#setFont', 'font', (el) => el.value);
   bindSetting('#setFontName', 'fontName', (el) => cleanFontName(el.value));
   bindSetting('#setPara', 'para', (el) => el.value);
+  bindSetting('#setParaFocus', 'paraFocus', (el) => el.checked);
   bindSetting('#setExportNumbers', 'exportNumbers', (el) => el.checked);
   bindSetting('#setSoundOn', 'soundOn', (el) => el.checked);
   bindSetting('#setAmbientOn', 'ambientOn', (el) => el.checked);
@@ -199,7 +201,7 @@ function wireChrome() {
     } else if (!$('#projPop').hidden) {
       closeProjPop();
     } else if (!$('#search').hidden) {
-      closeSearch();
+      closeSearch(true);
     } else if (!$('#goalPop').hidden) {
       closeGoalPop();
     } else if (anyPanelOpen()) {

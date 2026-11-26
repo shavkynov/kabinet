@@ -3,7 +3,7 @@
 // он вызывает единственную команду `call(channel, args)`, как раньше ipcRenderer.invoke(channel, ...args).
 use kabinet_core::davapi::DavApi;
 use kabinet_core::davlink::{DavLink, Event, Secret};
-use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searchreplace, store};
+use kabinet_core::{applog, backup, export, exporttarget, import, mentions, searchreplace, store, updates};
 use kabinet_core::style_parser::StyleParser;
 use kabinet_core::offline_spell::{resolve_dict_dir, OfflineSpell};
 use kabinet_core::check::CheckApi;
@@ -179,11 +179,13 @@ fn mt(ru: &str) -> String {
         "Открыть проект…" => "Open project…",
         "Отменить" => "Undo",
         "Повторить" => "Redo",
+        "Поиск и замена…" => "Find and replace…",
         "Поиск по проекту…" => "Search project…",
         "Показать / скрыть панель глав" => "Show / hide chapter panel",
         "Показать все" => "Show All",
         "Полный экран" => "Full screen",
         "Правка" => "Edit",
+        "Проверить обновления…" => "Check for updates…",
         "Проверить текст главы…" => "Check chapter text…",
         "Режим «печатная машинка»" => "Typewriter mode",
         "Резервные копии" => "Backups",
@@ -200,6 +202,7 @@ fn mt(ru: &str) -> String {
         "Текст и оформление…" => "Text and appearance…",
         "Только лист" => "Page only",
         "Файл" => "File",
+        "Фокус на абзаце" => "Paragraph focus",
         "Фоновый эмбиент вкл / выкл" => "Background ambient on / off",
         "Шаблоны карточек…" => "Card templates…",
         "Экспорт проекта…" => "Export project…",
@@ -258,11 +261,12 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .build()?;
 
     let view = SubmenuBuilder::new(app, &mt("Вид"))
-        .item(&it("ui:openSearch", "Поиск по проекту…", Some("CmdOrCtrl+F"))?)
+        .item(&it("ui:openSearch", "Поиск и замена…", Some("CmdOrCtrl+F"))?)
         .separator()
         .item(&it("ui:toggleSidebar", "Показать / скрыть панель глав", Some("CmdOrCtrl+\\"))?)
         .item(&it("ui:toggleFocus", "Только лист", Some("CmdOrCtrl+Shift+F"))?)
         .item(&it("ui:toggleTypewriter", "Режим «печатная машинка»", Some("CmdOrCtrl+Shift+T"))?)
+        .item(&it("ui:toggleParaFocus", "Фокус на абзаце", None)?)
         .item(&it("ui:toggleMarks", "Скрытые символы", Some("CmdOrCtrl+Shift+8"))?)
         .item(&it("ui:toggleSound", "Звуки клавиш вкл / выкл", Some("CmdOrCtrl+Shift+M"))?)
         .item(&it("ui:toggleAmbient", "Фоновый эмбиент вкл / выкл", Some("CmdOrCtrl+Shift+A"))?)
@@ -275,6 +279,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .item(&it("ui:feedback", "Сообщить об ошибке или идее…", None)?)
         .item(&it("log:folder", "Открыть папку журнала", None)?)
         .separator()
+        .item(&it("ui:checkUpdates", "Проверить обновления…", None)?)
         .item(&it("app:updates", "Где взять новые версии…", None)?)
         .build()?;
     let window = SubmenuBuilder::new(app, &mt("Окно")).minimize_with_text(&mt("Свернуть")).build()?;
@@ -486,6 +491,20 @@ async fn dispatch(app: tauri::AppHandle, state: State<'_, AppState>, dav: State<
                 .await.map_err(|e| format!("Поток проверки модели завершился: {}", e))
         }
         "app:version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
+        "app:checkUpdates" => {
+            tauri::async_runtime::spawn_blocking(|| updates::check_latest(&UreqHttp::with_timeout(15), env!("CARGO_PKG_VERSION")))
+                .await
+                .map_err(|e| format!("Поток проверки обновлений завершился: {}", e))?
+        }
+        "app:openReleaseUrl" => {
+            let u = arg_str(a, 0)?;
+            if u.starts_with(updates::RELEASES_PREFIX) {
+                open_url(&u);
+                Ok(json!(true))
+            } else {
+                Ok(json!(false))
+            }
+        }
         "log:write" => {
             let level = a.first().and_then(|v| v.as_str()).unwrap_or("info");
             let msg = a.get(1).and_then(|v| v.as_str()).unwrap_or("");

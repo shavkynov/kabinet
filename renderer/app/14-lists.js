@@ -117,6 +117,7 @@ async function openDoc(kind, id, keepView) {
     if (kind === 'chapter') loadChapMeta(id);
     else clearChapMeta();
     updateAllSelections();
+    if (typeof refreshChapterSearchOnDoc === 'function') refreshChapterSearchOnDoc();
     return true;
   } catch (err) {
     showError(err.message);

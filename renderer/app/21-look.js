@@ -4,6 +4,8 @@ const DEFAULT_SETTINGS = {
   an: {},          // какие виды слов подсвечены (анализ текста)
   anLongMin: 30,   // с скольких слов предложение считается длинным
   typo: true,
+  autoCap: true,    // заглавная буква в начале нового предложения при наборе
+  paraFocus: false, // приглушать соседние абзацы, оставляя ярким текущий
   marks: false,       // показ скрытых символов (¶, неразрывные пробелы, табуляции)
   marksSpaces: false, // ...и обычных пробелов
   customIcons: [], // свои смайлы для карточек (дополняют набор из menu.js)
@@ -71,6 +73,7 @@ let followCaret = false; // true, пока пользователь печата
 let twTarget = 0;
 let twRaf = 0;
 let lastTheme = null;
+let lastParaFocus = null;
 const customFonts = new Map(); // ключ 'custom:<файл>' -> имя семейства
 
 function clampNum(v, min, max, fallback) {
@@ -92,6 +95,8 @@ function loadSettings() {
     if (Array.isArray(raw.fillers)) s.fillers = cleanFillerList(raw.fillers);
     if (typeof raw.spellOn === 'boolean') s.spellOn = raw.spellOn;
     if (typeof raw.typo === 'boolean') s.typo = raw.typo;
+    if (typeof raw.autoCap === 'boolean') s.autoCap = raw.autoCap;
+    if (typeof raw.paraFocus === 'boolean') s.paraFocus = raw.paraFocus;
     if (typeof raw.typeAnim === 'boolean') s.typeAnim = raw.typeAnim;
     if (typeof raw.chromeFade === 'boolean') s.chromeFade = raw.chromeFade;
     if (isEngine(raw.searchEngine)) s.searchEngine = raw.searchEngine;
@@ -190,6 +195,13 @@ function applySettings() {
   $('#setSpell').checked = settings.spellOn;
   applyAnalysisSettings();
   $('#setTypo').checked = settings.typo;
+  if ($('#setAutoCap')) $('#setAutoCap').checked = settings.autoCap;
+  if ($('#setParaFocus')) $('#setParaFocus').checked = settings.paraFocus;
+  document.body.classList.toggle('para-focus', !!settings.paraFocus);
+  if (editor && settings.paraFocus !== lastParaFocus) {
+    lastParaFocus = settings.paraFocus;
+    if (typeof refreshParaFocus === 'function') refreshParaFocus(editor);
+  }
   $('#setTypoNbsp').checked = settings.typoNbsp;
   $('#setTypoLayout').checked = settings.typoLayout;
   $('#setTypoKeep').value = String(settings.typoKeep);

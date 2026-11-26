@@ -1,6 +1,10 @@
-// Выравнивание и пустые абзацы. Пустые абзацы верхнего уровня хранятся обычными переводами строк.
+// Выравнивание, пустые абзацы и перенос разделителя сцен «***» в буфер обмена.
+// Пустые абзацы верхнего уровня хранятся обычными переводами строк.
 
 import { Node, mergeAttributes } from '@tiptap/core';
+import HorizontalRule from '@tiptap/extension-horizontal-rule';
+import { Plugin } from '@tiptap/pm/state';
+import { DOMSerializer } from '@tiptap/pm/model';
 
 function preserveEmptyParagraphs(md) {
   if (md.__kabinetEmptyParagraphs) return;
@@ -96,3 +100,32 @@ export function toggleAlign(editor, chain, align) {
   const cur = editor.getAttributes('paragraph').textAlign || null;
   return chain.updateAttributes('paragraph', { textAlign: cur === align ? null : align });
 }
+
+export function createClipboardSerializer(schema) {
+  const base = DOMSerializer.fromSchema(schema);
+  return new DOMSerializer(
+    {
+      ...base.nodes,
+      horizontalRule: () => ['p', { 'data-kabinet-rule': '1', style: 'text-align: center;' }, '***'],
+    },
+    base.marks,
+  );
+}
+
+export const KabinetRule = HorizontalRule.extend({
+  parseHTML() {
+    return [
+      { tag: 'hr' },
+      { tag: 'p[data-kabinet-rule]', priority: 1100 },
+    ];
+  },
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          clipboardSerializer: createClipboardSerializer(this.type.schema),
+        },
+      }),
+    ];
+  },
+});

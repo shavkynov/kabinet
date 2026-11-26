@@ -32,3 +32,24 @@ test('экспорт в текст: красная строка и раздел�
   assert.equal(mdToText(md), 'Первый\n\nВторой\n\n***\n\nТретий\n\nЧасть\n\nПосле заголовка\n\n— пункт');
   assert.equal(mdToText(md, { indent: true }), [`${INDENT}Первый`, `${INDENT}Второй`, '***', `${INDENT}Третий`, 'Часть', 'После заголовка', '— пункт'].join('\n\n'));
 });
+
+test('буфер HTML: разделитель *** сериализуется в центрированный абзац и распознаётся обратно', async () => {
+  const { Schema } = require('@tiptap/pm/model');
+  const { createClipboardSerializer, KabinetRule } = await import('../renderer/align.js');
+  const schema = new Schema({
+    nodes: {
+      doc: { content: 'block+' },
+      paragraph: { group: 'block', content: 'text*' },
+      horizontalRule: { group: 'block' },
+      text: { group: 'inline' },
+    },
+  });
+  const serializer = createClipboardSerializer(schema);
+  assert.deepEqual(serializer.nodes.horizontalRule(), [
+    'p',
+    { 'data-kabinet-rule': '1', style: 'text-align: center;' },
+    '***',
+  ]);
+  const rules = KabinetRule.config.parseHTML();
+  assert.ok(rules.some((r) => r.tag === 'p[data-kabinet-rule]' && r.priority > 1000));
+});

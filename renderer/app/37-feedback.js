@@ -42,3 +42,45 @@ function openFeedback() {
   dlg.showModal();
   text.focus();
 }
+
+let updateCheckToken = 0;
+
+async function openUpdateCheck() {
+  const dlg = $('#updateDialog');
+  const status = $('#updStatus');
+  const notes = $('#updNotes');
+  const openBtn = $('#updOpen');
+  const closeBtn = $('#updClose');
+  if (!dlg || !status) return;
+
+  const token = ++updateCheckToken;
+  status.textContent = t('Проверяю обновления…');
+  if (notes) { notes.hidden = true; notes.textContent = ''; }
+  if (openBtn) { openBtn.hidden = true; openBtn.onclick = null; }
+  if (closeBtn) closeBtn.onclick = () => dlg.close();
+  if (!dlg.open) dlg.showModal();
+
+  try {
+    const res = await api.checkUpdates();
+    if (token !== updateCheckToken) return;
+    if (res && res.hasUpdate) {
+      status.textContent = t('Доступна новая версия {0} (у вас {1}).', res.latest, res.current);
+      if (notes && res.notes) {
+        notes.textContent = res.notes;
+        notes.hidden = false;
+      }
+      if (openBtn) {
+        openBtn.hidden = false;
+        openBtn.onclick = () => {
+          api.openReleaseUrl(res.url).catch((err) => showError(err.message));
+          dlg.close();
+        };
+      }
+    } else {
+      status.textContent = t('Установлена последняя версия ({0}).', (res && res.current) || '');
+    }
+  } catch (err) {
+    if (token !== updateCheckToken) return;
+    status.textContent = tdom((err && err.message) || 'Не удалось проверить обновления.');
+  }
+}
