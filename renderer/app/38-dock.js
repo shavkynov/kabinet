@@ -87,10 +87,6 @@ function wireDock() {
   }
   // Меню окна строит оболочка: при запуске на английском сообщаем язык (раньше это происходило только при переключении).
   if (LANG === 'en') api.setLang('en').catch(() => {});
-  // Звук клавиш после долгого сворачивания: проверяем звуковой контекст, когда окно снова на виду.
-  const reviveSound = () => { if (!document.hidden) sounds.revive(); };
-  document.addEventListener('visibilitychange', reviveSound);
-  window.addEventListener('focus', reviveSound);
   $('#cloudStop').addEventListener('click', async () => {
     const b = $('#cloudStop');
     b.disabled = true;

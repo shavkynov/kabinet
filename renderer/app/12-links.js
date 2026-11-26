@@ -122,7 +122,7 @@ function onNativeContext(p) {
     const d = checker.issueAtPoint(p.x, p.y);
     if (d) {
       const sp = d.spec;
-      const g = [{ label: sp.short || sp.message, disabled: true, raw: true }];
+      const g = [{ label: tdom(sp.short || sp.message), disabled: true, raw: true }];
       for (const r of sp.replacements.slice(0, 5)) g.push({ label: r === '' ? t('(удалить)') : r, raw: true, onClick: () => checker.applyIssue(sp.id, r) });
       if (!sp.replacements.length && sp.kind === 'spelling' && sp.ruleId === 'OFFLINE_SPELL' && !sp.suggested && api.suggestCheckWord && checker.suggestIssue) {
         g.push({ label: t('Подобрать варианты'), onClick: () => checker.suggestIssue(sp.id) });

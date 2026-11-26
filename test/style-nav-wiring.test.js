@@ -216,7 +216,7 @@ test('TypeSounds и Ambient восстанавливаются после про
     assert.equal(contexts.length, 2, 'застывшие часы должны пересоздавать контекст даже при частом наборе');
     assert.equal(contexts[0].closed, true);
 
-    // 3. Эмбиент переподключается к новому контексту после долгого сворачивания (>10 с)
+    // 3. Обычный blur/focus или сворачивание, пока часы currentTime идут (эмбиент играет), не сбрасывают контекст
     contexts[1].state = 'running';
     contexts[1].currentTime = 1;
     amb.play('rain');
@@ -227,6 +227,17 @@ test('TypeSounds и Ambient восстанавливаются после про
     docHandlers.visibilitychange.forEach((fn) => fn());
     globalThis.document.hidden = false;
     clockNow = 15000;
+    contexts[1].currentTime = 14; // часы шли всё это время
+    docHandlers.visibilitychange.forEach((fn) => fn());
+    assert.equal(contexts[1].closed, false, 'живой контекст с тикающими часами не должен сбрасываться');
+    assert.equal(amb.bus.context, contexts[1]);
+
+    // 4. Эмбиент переподключается к новому контексту после долгого сворачивания с замершими часами (>10 с)
+    globalThis.document.hidden = true;
+    clockNow = 16000;
+    docHandlers.visibilitychange.forEach((fn) => fn());
+    globalThis.document.hidden = false;
+    clockNow = 30000; // прошло 14 с, но currentTime остался 14
     docHandlers.visibilitychange.forEach((fn) => fn());
     assert.equal(contexts[1].closed, true);
     assert.equal(amb.bus, null);

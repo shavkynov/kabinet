@@ -29,23 +29,24 @@ export class TypeSounds {
     this.last = 0;
     this.noteIdx = 2;
     this.wasRunning = false; // контекст хотя бы раз работал: если он перестал, это сбой, а не «ещё не разрешили звук»
-    this.awayAt = 0;
+    this.away = null;
     this.stuckSince = 0;
     this.lastResumeAt = 0;
     this.tick = null;
     this._resetListeners = new Set();
 
     // После долгого сворачивания или смены звукового устройства WKWebView/WebView2 может оставить контекст
-    // в «живом» состоянии без реального вывода звука — при возвращении пересоздаём его.
-    const markAway = () => { if (!this.awayAt) this.awayAt = Date.now(); };
+    // в «живом» состоянии без реального вывода звука — при возвращении проверяем, шли ли аудиочасы.
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('visibilitychange', () => {
-        if (document.hidden) markAway();
-        else this.revive();
+        if (document.hidden) {
+          if (!this.away) this.away = { wall: Date.now(), ct: this.ctx ? this.ctx.currentTime : 0 };
+        } else {
+          this.revive();
+        }
       });
     }
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('blur', markAway);
       window.addEventListener('focus', () => {
         if (typeof document === 'undefined' || !document.hidden) this.revive();
       });
@@ -190,14 +191,24 @@ export class TypeSounds {
     return this.ctx;
   }
 
-  /** Окно снова на виду: контекст мог «умереть» в фоне — пересоздаём при долгом простое или сбое. */
+  /** Окно снова на виду: пересоздаём контекст, только если он закрылся или его часы стояли во время сворачивания. */
   revive() {
-    const awayMs = this.awayAt ? Date.now() - this.awayAt : 0;
-    this.awayAt = 0;
+    const away = this.away;
+    this.away = null;
     if (!this.ctx) return;
-    if (this.ctx.state === 'closed' || this.ctx.state === 'interrupted' || awayMs > 10000) {
+    if (this.ctx.state === 'closed' || this.ctx.state === 'interrupted') {
       this._drop();
-    } else if (this.ctx.state !== 'running') {
+      return;
+    }
+    const awayMs = away ? Date.now() - away.wall : 0;
+    if (this.ctx.state === 'running') {
+      if (away && awayMs > 10000) {
+        const ctDeltaMs = (this.ctx.currentTime - away.ct) * 1000;
+        if (ctDeltaMs < awayMs * 0.25) this._drop();
+      }
+    } else if (awayMs > 10000) {
+      this._drop();
+    } else {
       try { const r = this.ctx.resume(); if (r && r.catch) r.catch(() => {}); } catch { /* разбудит следующий жест */ }
     }
   }

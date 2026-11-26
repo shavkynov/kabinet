@@ -193,7 +193,7 @@ function wireChrome() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
     if (!$('#sheetMenu').hidden) {
       closeSheetMenu();
     } else if (!$('#board').hidden) {

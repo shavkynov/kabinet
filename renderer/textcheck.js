@@ -5,7 +5,7 @@
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { t } from './i18n.js';
+import { t, tdom } from './i18n.js';
 import { expandWords, wordKey } from '../src/dict.js';
 
 export const issuesKey = new PluginKey('langIssues');
@@ -146,7 +146,7 @@ export function initTextCheck(ctx) {
       tag.textContent = t(KIND_LABEL[s.kind] || 'Другое');
       const msg = document.createElement('span');
       msg.className = 'chk-msg';
-      msg.textContent = s.short || s.message;
+      msg.textContent = tdom(s.short || s.message);
       head.append(tag, msg);
 
       const ctxLine = document.createElement('div');

@@ -7,9 +7,16 @@ function handleOfficePaste(view, event) {
   const paragraphs = officeTextToParagraphs(cd.getData('text/plain'));
   if (!paragraphs.length) return false;
   const { schema } = view.state;
-  const nodes = paragraphs.map((p) => schema.nodes.paragraph.create(null, schema.text(p)));
+  const nodes = paragraphs.map((p) => {
+    if (schema.nodes.horizontalRule && /^(?:\*\*\*|\*\s+\*\s+\*|---)$/.test(p.trim())) {
+      return schema.nodes.horizontalRule.create();
+    }
+    return schema.nodes.paragraph.create(null, schema.text(p));
+  });
   event.preventDefault();
-  view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 1, 1)).scrollIntoView().setMeta('paste', true).setMeta('uiEvent', 'paste'));
+  const openStart = nodes[0].isTextblock ? 1 : 0;
+  const openEnd = nodes[nodes.length - 1].isTextblock ? 1 : 0;
+  view.dispatch(view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), openStart, openEnd)).scrollIntoView().setMeta('paste', true).setMeta('uiEvent', 'paste'));
   return true;
 }
 

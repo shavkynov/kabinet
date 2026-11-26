@@ -178,16 +178,24 @@ function refreshChapterSearchOnDoc() {
 function openSearch() {
   if (!project) return;
   closeSettings();
+  if (typeof closeBoard === 'function') closeBoard();
+  const wasOpen = !$('#search').hidden;
   $('#search').hidden = false;
   const input = $('#searchInput');
+  let picked = '';
   if (canSearchChapter() && editor) {
     const { from, to } = editor.state.selection;
     if (to > from && to - from <= 80) {
       const selected = editor.state.doc.textBetween(from, to, '\n', '');
-      if (selected && !selected.includes('\n')) input.value = selected;
+      if (selected && !selected.includes('\n')) picked = selected;
     }
   }
-  setSearchScope(canSearchChapter() ? 'chapter' : 'project');
+  if (picked) {
+    input.value = picked;
+    setSearchScope('chapter');
+  } else if (!wasOpen) {
+    setSearchScope(canSearchChapter() ? 'chapter' : 'project');
+  }
   input.focus();
   input.select();
 }
@@ -223,7 +231,14 @@ async function runSearch() {
   const token = ++searchToken;
   searchQuery = q;
   box.textContent = '';
-  if (q.length < 2) return;
+  if (!q) return;
+  if (q.length < 2) {
+    const hint = document.createElement('div');
+    hint.className = 'sr-empty';
+    hint.textContent = t('Для поиска по всему проекту введите от 2 символов (в главе ищет от 1).');
+    box.append(hint);
+    return;
+  }
   await flush(); // ищем по тому, что уже записано, включая только что набранное
   if (token !== searchToken) return;
   let hits = [];

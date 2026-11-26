@@ -100,6 +100,7 @@ function startBoardDrag(e, el, card, cards, grid) {
 async function openBoard() {
   if (!project) return;
   closePanels();
+  if (typeof closeSearch === 'function') closeSearch(false);
   await flush();
   $('#board').hidden = false;
   await renderBoard();
