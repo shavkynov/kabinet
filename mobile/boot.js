@@ -230,6 +230,7 @@ function buildMenu(be, hw) {
     { label: t('Доска глав…'), run: go('ui:openBoard'), disabled: !has },
     { label: t('Показать / скрыть панель глав'), run: go('ui:toggleSidebar'), disabled: !has },
     { label: t('Только лист'), run: go('ui:toggleFocus'), disabled: !has },
+    { label: t('Режим вызова…'), run: go('ui:openChallenge'), disabled: !has },
     { label: t('Режим «печатная машинка»'), run: go('ui:toggleTypewriter'), disabled: !has },
     { label: t('Фокус на абзаце'), run: go('ui:toggleParaFocus'), disabled: !has },
     { label: t('Скрытые символы'), run: go('ui:toggleMarks'), disabled: !has },

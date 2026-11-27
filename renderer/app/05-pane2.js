@@ -159,7 +159,7 @@ function resetPane2() {
 
 // «Рядом» сразу включает и «Только лист»: экран делится между двумя листами, а выбор глав живёт в меню вверху.
 function toggleSplit() {
-  if (!project) return;
+  if (!project || (typeof isChallengeActive === 'function' && isChallengeActive())) return;
   if (p2.id) {
     if (document.body.classList.contains('focus-mode')) toggleFocusMode(false); // выход из «Только лист» закрывает и второй лист
     else closePane2();

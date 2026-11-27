@@ -74,7 +74,21 @@ function initEditor() {
       scheduleCount();
     },
     onSelectionUpdate: () => { scheduleCenter(); updateSelectionInfo(); updateCommentButton(); },
-    onTransaction: () => { updateToolbar(); },
+    onTransaction: ({ transaction: tr }) => {
+      updateToolbar();
+      if (!tr || !tr.docChanged || loading || !currentId || !isTextKind(currentKind)) return;
+      const nonTyped = !!(tr.getMeta('paste') || tr.getMeta('uiEvent') === 'paste' || tr.getMeta('uiEvent') === 'drop' || tr.getMeta('history$') || tr.getMeta('kabinetNonTyped'));
+      if (nonTyped) return;
+      const delta = countDocWords(tr.doc) - countDocWords(tr.before);
+      let inserted = false;
+      for (const step of tr.steps || []) {
+        if (step.slice && step.slice.content && step.slice.content.size > 0) {
+          inserted = true;
+          break;
+        }
+      }
+      if (typeof onManualEditorInput === 'function') onManualEditorInput({ delta, inserted });
+    },
   });
 
   // Строка держится по центру только пока пользователь печатает или двигает курсор клавишами.

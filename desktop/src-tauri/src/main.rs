@@ -187,6 +187,7 @@ fn mt(ru: &str) -> String {
         "Правка" => "Edit",
         "Проверить обновления…" => "Check for updates…",
         "Проверить текст главы…" => "Check chapter text…",
+        "Режим вызова…" => "Challenge mode…",
         "Режим «печатная машинка»" => "Typewriter mode",
         "Резервные копии" => "Backups",
         "Русский" => "Russian",
@@ -265,6 +266,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
         .separator()
         .item(&it("ui:toggleSidebar", "Показать / скрыть панель глав", Some("CmdOrCtrl+\\"))?)
         .item(&it("ui:toggleFocus", "Только лист", Some("CmdOrCtrl+Shift+F"))?)
+        .item(&it("ui:openChallenge", "Режим вызова…", None)?)
         .item(&it("ui:toggleTypewriter", "Режим «печатная машинка»", Some("CmdOrCtrl+Shift+T"))?)
         .item(&it("ui:toggleParaFocus", "Фокус на абзаце", None)?)
         .item(&it("ui:toggleMarks", "Скрытые символы", Some("CmdOrCtrl+Shift+8"))?)

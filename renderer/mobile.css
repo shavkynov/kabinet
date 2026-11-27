@@ -154,6 +154,36 @@ body.mob .start-actions button { min-height: 48px; }
 }
 
 /* ---------- точка синхронизации ---------- */
+body.mob.challenge-mode #challengeHud {
+  position: fixed; top: 0; left: 0; right: 0;
+  padding: calc(6px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+body.mob.challenge-mode #challengeHud .ch-rail {
+  background: none; border: none; box-shadow: none; padding: 0; border-radius: 0;
+  flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+body.mob.challenge-mode #chRailRight { margin-left: auto; }
+body.mob.challenge-mode .ch-timer { font-size: 17px; }
+body.mob.challenge-mode .ch-metric { font-size: 14px; }
+body.mob.challenge-mode .ch-prog { width: 52px; }
+body.mob.challenge-mode .ch-wait { display: none; }
+body.mob.challenge-mode .ch-controls button { min-height: 34px; padding: 4px 9px; }
+body.mob.challenge-mode #paper-area { top: calc(56px + env(safe-area-inset-top)); }
+
+body.mob.m-narrow #streakPop {
+  top: auto; left: 0; right: 0; bottom: 0;
+  width: auto; max-width: none; max-height: 80vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0; border-width: 1px 0 0;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 46;
+}
+body.mob.m-narrow #streakPop .st-wd,
+body.mob.m-narrow #streakPop button { min-height: 36px; }
+body.mob #barStreak { min-height: 32px; padding: 4px 8px; }
+
 #syncDot {
   position: fixed; z-index: 30; left: 50%; transform: translateX(-50%);
   top: calc(env(safe-area-inset-top, 0px) + 12px);

@@ -8,6 +8,8 @@ function showScreen(name) {
 }
 
 async function showStart() {
+  if (typeof exitChallengeQuiet === 'function') exitChallengeQuiet();
+  if (typeof closeStreakPop === 'function') closeStreakPop();
   document.body.classList.remove('focus-mode');
   closeSettings();
   applyAmbient();
@@ -169,6 +171,8 @@ async function createProjectFromName(name, mode) {
 
 async function leaveProject() {
   if (!(await flush())) { setStatus('error', 'Не удалось сохранить главу. Проект не закрыт, текст остался на экране'); return; }
+  if (typeof exitChallengeQuiet === 'function') exitChallengeQuiet();
+  if (typeof closeStreakPop === 'function') closeStreakPop();
   try {
     await api.closeProject();
   } catch (err) {
@@ -205,6 +209,8 @@ function enterProject(proj) {
   projReached = false;
   closeBoard();
   closeProjPop();
+  if (typeof closeStreakPop === 'function') closeStreakPop();
+  if (typeof refreshStreakBadge === 'function') refreshStreakBadge();
   cardIdx = [];
   refreshIndex();
   refreshTotals();

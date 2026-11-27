@@ -135,7 +135,7 @@ function replaceOneChapter() {
   if (!st.matches.length || st.index < 0) return;
   const m = st.matches[st.index];
   const rep = $('#replaceInput').value;
-  const tr = editor.state.tr.insertText(rep, m.from, m.to);
+  const tr = editor.state.tr.insertText(rep, m.from, m.to).setMeta('kabinetNonTyped', true);
   editor.view.dispatch(tr);
   const nextSt = getSearchHighlightState(editor);
   if (nextSt.matches.length) {
@@ -154,7 +154,7 @@ function replaceAllChapter() {
     return;
   }
   const rep = $('#replaceInput').value;
-  const tr = editor.state.tr;
+  const tr = editor.state.tr.setMeta('kabinetNonTyped', true);
   for (let i = st.matches.length - 1; i >= 0; i -= 1) {
     tr.insertText(rep, st.matches[i].from, st.matches[i].to);
   }
@@ -176,7 +176,7 @@ function refreshChapterSearchOnDoc() {
 }
 
 function openSearch() {
-  if (!project) return;
+  if (!project || (typeof isChallengeActive === 'function' && isChallengeActive())) return;
   closeSettings();
   if (typeof closeBoard === 'function') closeBoard();
   const wasOpen = !$('#search').hidden;

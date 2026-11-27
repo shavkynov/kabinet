@@ -24,6 +24,17 @@ function nodeStats(node) {
   return cached;
 }
 
+function countDocWords(doc) {
+  if (!doc) return 0;
+  let words = 0;
+  doc.descendants((node) => {
+    if (!node.isTextblock) return true;
+    words += nodeStats(node).words;
+    return false;
+  });
+  return words;
+}
+
 function computeStats() {
   const doc = typeof editor !== 'undefined' && editor && editor.state && editor.state.doc;
   if (!doc) return { words: 0, chars: 0, charsNoSpace: 0 };
@@ -72,7 +83,6 @@ function updateCounts(fromUser) {
     return;
   }
   stats = computeStats();
-  if (fromUser && lastWords !== null && stats.words > lastWords) addToday(stats.words - lastWords);
   lastWords = stats.words;
   chapterWords.set(currentId, stats.words);
   chapterChars.set(currentId, stats.chars);

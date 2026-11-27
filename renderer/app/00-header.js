@@ -27,6 +27,8 @@ import { isTheme } from '../src/themes.js';
 import { isEngine } from '../src/searchengines.js';
 import { authorSheets } from '../src/terms.js';
 import { DEFAULT_FILLERS, cleanFiller, cleanFillerList, skipKey } from '../src/editing.js';
+import { writingDay, loadStreak, recordTypedWords, setDailyGoal, toggleRestDay, computeStreak, MIN_GOAL, MAX_GOAL } from '../src/streak.js';
+import { CHALLENGES, CHALLENGE_ORDER, getPreset, formatClock, createSession, onInput as challengeOnInput, togglePause as challengeTogglePause, skipBreak as challengeSkipBreak, tick as challengeTick, exitSession as challengeExitSession, snapshot as challengeSnapshot } from '../src/challenge.js';
 
 const api = window.kabinet;
 const sounds = new TypeSounds();

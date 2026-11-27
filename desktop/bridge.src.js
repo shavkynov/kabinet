@@ -162,7 +162,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
   for (const name of [
     'onSetLang', 'onOpenCheck', 'onToggleSpell', 'onCheckProgress', 'onContextMenu', 'onToggleSidebar', 'onNewProject',
     'onOpenProject', 'onCloseProject', 'onRenameProject', 'onToggleTypewriter', 'onToggleParaFocus', 'onToggleMarks', 'onToggleFocus', 'onOpenSettings',
-    'onOpenSearch', 'onSaveNow', 'onOpenBoard', 'onOpenStyle', 'onCheckUpdates', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
+    'onOpenSearch', 'onSaveNow', 'onOpenBoard', 'onOpenStyle', 'onOpenChallenge', 'onCheckUpdates', 'onExport', 'onImportFiles', 'onMenuBar', 'onExternalChange', 'onOpenTemplates', 'onBackupNow',
     'onOpenBackups', 'onOpenFeedback', 'onOpenSync', 'onSyncNow', 'onDavEvent', 'onToggleSound', 'onToggleAmbient',
   ]) window.kabinet[name] = none;
   // Правая кнопка: системное меню окна (английское, без карточек и поиска) заменено меню приложения из renderer
@@ -241,7 +241,7 @@ const { createCloseCoordinator } = require('./close-coordinator');
   const MENU = {
     onOpenCheck: 'ui:openCheck', onToggleSpell: 'ui:toggleSpell', onToggleSidebar: 'ui:toggleSidebar', onNewProject: 'ui:newProject',
     onOpenProject: 'ui:openProject', onCloseProject: 'ui:closeProject', onRenameProject: 'ui:renameProject', onToggleTypewriter: 'ui:toggleTypewriter', onToggleParaFocus: 'ui:toggleParaFocus', onToggleMarks: 'ui:toggleMarks',
-    onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onSaveNow: 'ui:saveNow', onOpenBoard: 'ui:openBoard', onOpenStyle: 'ui:openStyle', onCheckUpdates: 'ui:checkUpdates', onExport: 'ui:export',
+    onToggleFocus: 'ui:toggleFocus', onOpenSettings: 'ui:openSettings', onOpenSearch: 'ui:openSearch', onSaveNow: 'ui:saveNow', onOpenBoard: 'ui:openBoard', onOpenStyle: 'ui:openStyle', onOpenChallenge: 'ui:openChallenge', onCheckUpdates: 'ui:checkUpdates', onExport: 'ui:export',
     onImportFiles: 'ui:importFiles', onOpenTemplates: 'ui:openTemplates', onBackupNow: 'ui:backupNow', onRestoreBackup: 'ui:restoreBackup', onOpenBackups: 'ui:openBackups', onOpenFeedback: 'ui:feedback',
     onOpenSync: 'ui:openSync', onSyncNow: 'ui:syncNow', onToggleSound: 'ui:toggleSound', onToggleAmbient: 'ui:toggleAmbient',
   };

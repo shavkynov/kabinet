@@ -98,7 +98,7 @@ function startBoardDrag(e, el, card, cards, grid) {
 }
 
 async function openBoard() {
-  if (!project) return;
+  if (!project || (typeof isChallengeActive === 'function' && isChallengeActive())) return;
   closePanels();
   if (typeof closeSearch === 'function') closeSearch(false);
   await flush();

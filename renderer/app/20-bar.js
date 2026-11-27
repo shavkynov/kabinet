@@ -3,7 +3,7 @@
 let lastWords = null; // слов в главе на прошлом пересчёте (для счёта «сегодня»)
 
 function todayStamp() {
-  return new Date().toLocaleDateString('sv');
+  return writingDay();
 }
 
 function readToday() {
@@ -96,5 +96,6 @@ function refreshBar() {
   document.querySelectorAll('#toolbar button[data-act]').forEach((b) => {
     b.classList.toggle('active', !!on[b.dataset.act]);
   });
+  if (typeof refreshStreakBadge === 'function') refreshStreakBadge();
 }
 

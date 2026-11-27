@@ -68,7 +68,7 @@ export function fixDocTypography(editor, o) {
     return false;
   });
   if (!edits.length) return { fixed: 0, removed: 0 };
-  const tr = state.tr;
+  const tr = state.tr.setMeta('kabinetNonTyped', true);
   for (const e of edits.reverse()) {
     if (e.text) tr.insertText(e.text, e.from, e.to);
     else tr.delete(e.from, e.to);

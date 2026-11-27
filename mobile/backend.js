@@ -1165,6 +1165,7 @@ function createBackend(host, { session } = {}) {
     onSaveNow: on('ui:saveNow'),
     onOpenBoard: on('ui:openBoard'),
     onOpenStyle: on('ui:openStyle'),
+    onOpenChallenge: on('ui:openChallenge'),
     onCheckUpdates: on('ui:checkUpdates'),
     onExport: on('ui:export'),
     onImportFiles: on('ui:importFiles'),

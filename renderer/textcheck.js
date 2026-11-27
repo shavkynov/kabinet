@@ -248,7 +248,7 @@ export function initTextCheck(ctx) {
     const d = byId(id);
     const ed = editor();
     if (!d || !ed) return;
-    ed.view.dispatch(ed.state.tr.insertText(text, d.from, d.to).scrollIntoView());
+    ed.view.dispatch(ed.state.tr.insertText(text, d.from, d.to).scrollIntoView().setMeta('kabinetNonTyped', true));
     ctx.afterEdit && ctx.afterEdit();
   }
 

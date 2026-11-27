@@ -573,6 +573,7 @@ function init() {
   wireChrome();
   wireAnalysis();
   wireGoal();
+  wireStreakChallenge();
   applySettings();
   wireSidebar();
   wireMobile();
@@ -620,6 +621,7 @@ function init() {
   if (api.onSaveNow) api.onSaveNow(() => { if (project) saveNow(); });
   if (api.onOpenBoard) api.onOpenBoard(() => { if (project) openBoard(); });
   if (api.onOpenStyle) api.onOpenStyle(() => { if (project) openPanel('style'); });
+  if (api.onOpenChallenge) api.onOpenChallenge(() => { if (project) openChallengeDialog(); });
   if (api.onCheckUpdates) api.onCheckUpdates(() => openUpdateCheck());
   api.onToggleSound(() => toggleSound());
   api.onToggleAmbient(() => toggleAmbient());

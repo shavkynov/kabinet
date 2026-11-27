@@ -106,6 +106,7 @@ function wireChips() {
 }
 
 function toggleFocusMode(force) {
+  if (typeof isChallengeActive === 'function' && isChallengeActive()) return;
   const on = typeof force === 'boolean' ? force : !document.body.classList.contains('focus-mode');
   if (on && !project) return;
   document.body.classList.toggle('focus-mode', on);
@@ -194,12 +195,16 @@ function wireChrome() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
-    if (!$('#sheetMenu').hidden) {
+    if (typeof isChallengeActive === 'function' && isChallengeActive()) {
+      requestChallengeExit();
+    } else if (!$('#sheetMenu').hidden) {
       closeSheetMenu();
     } else if (!$('#board').hidden) {
       closeBoard();
     } else if (!$('#projPop').hidden) {
       closeProjPop();
+    } else if ($('#streakPop') && !$('#streakPop').hidden) {
+      closeStreakPop();
     } else if (!$('#search').hidden) {
       closeSearch(true);
     } else if (!$('#goalPop').hidden) {
