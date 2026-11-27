@@ -71,6 +71,7 @@ function wireSidebar() {
 }
 
 function toggleSidebar() {
+  if (typeof isChallengeActive === 'function' && isChallengeActive()) return;
   const hidden = sidebarShown();
   applySidebarHidden(hidden);
   if (hidden && currentId && isTextKind(currentKind)) editor.commands.focus();

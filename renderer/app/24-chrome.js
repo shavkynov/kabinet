@@ -23,7 +23,7 @@ function closePanels() {
 }
 
 function openPanel(name) {
-  if (!project) return;
+  if (!project || (typeof isChallengeActive === 'function' && isChallengeActive())) return;
   closePanels();
   const [panel, btn] = PANELS[name];
   $(panel).hidden = false;

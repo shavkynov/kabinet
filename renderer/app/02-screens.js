@@ -108,6 +108,7 @@ async function openRecent(it) {
 }
 
 async function openProjectFromDialog() {
+  if (typeof confirmAbortChallengeIfActive === 'function' && !(await confirmAbortChallengeIfActive())) return;
   if (!(await flush())) return;
   try {
     const proj = await api.openProjectDialog();
@@ -170,6 +171,7 @@ async function createProjectFromName(name, mode) {
 }
 
 async function leaveProject() {
+  if (typeof confirmAbortChallengeIfActive === 'function' && !(await confirmAbortChallengeIfActive())) return;
   if (!(await flush())) { setStatus('error', 'Не удалось сохранить главу. Проект не закрыт, текст остался на экране'); return; }
   if (typeof exitChallengeQuiet === 'function') exitChallengeQuiet();
   if (typeof closeStreakPop === 'function') closeStreakPop();

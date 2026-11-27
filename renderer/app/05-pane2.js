@@ -22,6 +22,20 @@ function initEditor2() {
       clearTimeout(p2.timer);
       p2.timer = setTimeout(flushPane2, SAVE_DELAY_MS);
     },
+    onTransaction: ({ transaction: tr }) => {
+      if (!tr || !tr.docChanged || p2.loading || !p2.id) return;
+      const nonTyped = !!(tr.getMeta('paste') || tr.getMeta('uiEvent') === 'paste' || tr.getMeta('uiEvent') === 'drop' || tr.getMeta('history$') || tr.getMeta('kabinetNonTyped'));
+      if (nonTyped) return;
+      const delta = countDocWords(tr.doc) - countDocWords(tr.before);
+      let inserted = false;
+      for (const step of tr.steps || []) {
+        if (step.slice && step.slice.content && step.slice.content.size > 0) {
+          inserted = true;
+          break;
+        }
+      }
+      if (typeof onManualEditorInput === 'function') onManualEditorInput({ delta, inserted, fromPane2: true });
+    },
   });
   editor2.view.dom.addEventListener('keydown', (e) => playKeySound(e, true));
   wireLinkHover({

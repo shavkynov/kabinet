@@ -66,6 +66,15 @@ function formatClock(ms) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function formatElapsed(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 function createSession(kind, presetIdOrOverrides) {
   const cfg = CHALLENGES[kind] || CHALLENGES.sprint;
   const presetId = typeof presetIdOrOverrides === 'string'
@@ -142,6 +151,7 @@ function evaluateClock(session, now, events) {
   if (session.kind === 'sprint') {
     const elapsed = session.phaseElapsedBeforeMs + Math.max(0, now - session.phaseStartedAt);
     if (session.words >= session.targetWords) {
+      session.phaseElapsedBeforeMs = Math.min(session.durationMs, elapsed);
       session.totalWorkMs = elapsed;
       finishAt(session, 'won', now);
       events.push('won');
@@ -149,6 +159,7 @@ function evaluateClock(session, now, events) {
     }
     if (elapsed >= session.durationMs) {
       const endAt = session.phaseStartedAt + Math.max(0, session.durationMs - session.phaseElapsedBeforeMs);
+      session.phaseElapsedBeforeMs = session.durationMs;
       session.totalWorkMs = session.durationMs;
       finishAt(session, 'failed', endAt, 'timeout');
       events.push('failed');
@@ -164,12 +175,15 @@ function evaluateClock(session, now, events) {
     session.maxIdleMsSeen = Math.max(session.maxIdleMsSeen, Math.max(0, cappedNow - session.lastInputAt));
 
     if (now >= failAt && failAt <= goalAt) {
-      session.totalWorkMs = session.phaseElapsedBeforeMs + Math.max(0, failAt - session.phaseStartedAt);
+      const elapsed = session.phaseElapsedBeforeMs + Math.max(0, failAt - session.phaseStartedAt);
+      session.phaseElapsedBeforeMs = elapsed;
+      session.totalWorkMs = elapsed;
       finishAt(session, 'failed', failAt, 'idle');
       events.push('failed');
       return;
     }
     if (now >= goalAt) {
+      session.phaseElapsedBeforeMs = session.durationMs;
       session.totalWorkMs = session.durationMs;
       finishAt(session, 'won', goalAt);
       events.push('won');
@@ -187,6 +201,7 @@ function evaluateClock(session, now, events) {
     if (session.status === 'running') {
       session.totalWorkMs += session.workMs;
       if (session.round >= session.rounds) {
+        session.phaseElapsedBeforeMs = session.workMs;
         finishAt(session, 'won', phaseEndAt);
         events.push('won');
         break;
@@ -248,6 +263,7 @@ function onInput(session, input = {}, now = Date.now()) {
 
   if (session.kind === 'sprint' && session.words >= session.targetWords) {
     const elapsed = session.phaseElapsedBeforeMs + Math.max(0, now - session.phaseStartedAt);
+    session.phaseElapsedBeforeMs = Math.min(session.durationMs, elapsed);
     session.totalWorkMs = elapsed;
     finishAt(session, 'won', now);
     events.push('won');
@@ -304,6 +320,7 @@ function exitSession(session, now = Date.now()) {
 
   if (session.status === 'running') {
     const elapsed = session.phaseElapsedBeforeMs + Math.max(0, now - session.phaseStartedAt);
+    session.phaseElapsedBeforeMs = elapsed;
     session.totalWorkMs += elapsed;
   } else if (session.status === 'paused') {
     const used = Math.max(0, now - session.pauseStartedAt);
@@ -399,6 +416,7 @@ module.exports = {
   CHALLENGE_ORDER,
   getPreset,
   formatClock,
+  formatElapsed,
   createSession,
   onInput,
   togglePause,

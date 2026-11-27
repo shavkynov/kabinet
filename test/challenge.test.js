@@ -11,6 +11,7 @@ const {
   exitSession,
   snapshot,
   formatClock,
+  formatElapsed,
 } = require('../src/challenge');
 
 describe('challenge engine: общие свойства и форматирование', () => {
@@ -18,6 +19,8 @@ describe('challenge engine: общие свойства и форматиров�
     assert.equal(formatClock(0), '00:00');
     assert.equal(formatClock(149_200), '02:30');
     assert.equal(formatClock(3600_000), '1:00:00');
+    assert.equal(formatElapsed(900), '00:00');
+    assert.equal(formatElapsed(65_900), '01:05');
   });
 
   it('ждёт первого набранного символа до запуска таймера', () => {
@@ -56,6 +59,7 @@ describe('challenge engine: Спринт и шахматная пауза', () =
     assert.deepEqual(ev, ['failed']);
     assert.equal(s.status, 'failed');
     assert.equal(s.failReason, 'timeout');
+    assert.equal(snapshot(s, 12_000).remainingMs, 0);
   });
 
   it('даёт пропорциональный банк паузы (10 мин/час) и отгрызает его как шахматные часы', () => {

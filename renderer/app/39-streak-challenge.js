@@ -164,8 +164,8 @@ function commitStreakGoalInput() {
   refreshStreakBadge();
 }
 
-function onManualEditorInput({ delta, inserted }) {
-  if (delta > 0 && project && currentKind === 'chapter') {
+function onManualEditorInput({ delta, inserted, fromPane2 = false }) {
+  if (delta > 0 && project && (currentKind === 'chapter' || fromPane2)) {
     addToday(delta);
     refreshBar();
   }
@@ -282,11 +282,29 @@ function handleChallengeEvents(events) {
   }
 }
 
+function layoutChallengeHud() {
+  const hud = $('#challengeHud');
+  if (!hud || hud.hidden) {
+    document.body.classList.remove('ch-top');
+    return;
+  }
+  const mob = document.body.classList.contains('mob');
+  const paper = $('#paper');
+  const paperW = paper && paper.offsetWidth ? paper.offsetWidth : (settings ? settings.width : 720);
+  const sideMargin = (window.innerWidth - paperW) / 2;
+  // Для боковых рельсов нужно: 168px рельс + 22px от края + 18px зазор до текста = 208px с каждой стороны
+  const topBar = mob || sideMargin < 208;
+  const changed = document.body.classList.contains('ch-top') !== topBar;
+  document.body.classList.toggle('ch-top', topBar);
+  if (changed && challengeSession) renderChallengeHud();
+}
+
 function renderChallengeHud() {
   if (!challengeSession) return;
   const snap = challengeSnapshot(challengeSession, Date.now());
   const hud = $('#challengeHud');
   const cfg = CHALLENGES[snap.kind];
+  const isTopBar = document.body.classList.contains('ch-top');
 
   let phase = t(cfg.name);
   if (snap.status === 'waiting') phase = `${t(cfg.name)} · ${t('готовность')}`;
@@ -297,10 +315,15 @@ function renderChallengeHud() {
       : t('Письмо · раунд {0}/{1}', snap.round, snap.rounds);
   }
   $('#chPhase').textContent = phase;
-  $('#chTimer').textContent = formatClock(snap.remainingMs);
+  // В «Марафонце» слева идёт секундомер вверх, в остальных режимах — обратный отсчёт.
+  $('#chTimer').textContent = snap.kind === 'marathon'
+    ? formatElapsed(snap.elapsedWorkMs)
+    : formatClock(snap.remainingMs);
 
   let subTime = '';
-  if (snap.kind === 'marathon') {
+  if (snap.status === 'waiting' && isTopBar) {
+    subTime = t('Начните печатать — таймер пойдёт сам');
+  } else if (snap.kind === 'marathon') {
     subTime = snap.status === 'waiting'
       ? t('Без паузы · лимит 60 с')
       : t('Простой до сброса: {0} с', Math.ceil(snap.idleRemainingMs / 1000));
@@ -314,15 +337,15 @@ function renderChallengeHud() {
     $('#chMetric').textContent = `${n(snap.words)} / ${n(snap.targetWords)}`;
     $('#chSubMetric').textContent = t('{0}% цели', Math.round(snap.progress * 100));
   } else if (snap.kind === 'marathon') {
-    $('#chMetric').textContent = `${n(snap.words)} ${wordsForm(snap.words)}`;
-    $('#chSubMetric').textContent = t('{0}% времени', Math.round(snap.progress * 100));
+    $('#chMetric').textContent = t('Цель: {0}', formatClock(snap.durationMs));
+    $('#chSubMetric').textContent = `${n(snap.words)} ${wordsForm(snap.words)} · ${Math.round(snap.progress * 100)}%`;
   } else {
     $('#chMetric').textContent = `${n(snap.words)} ${wordsForm(snap.words)}`;
     $('#chSubMetric').textContent = t('Раунд {0} из {1}', snap.round, snap.rounds);
   }
   $('#chProgFill').style.width = `${Math.round(snap.progress * 100)}%`;
 
-  $('#chWaitHint').hidden = snap.status !== 'waiting';
+  $('#chWaitHint').hidden = snap.status !== 'waiting' || isTopBar;
   const pauseBtn = $('#chPauseBtn');
   pauseBtn.hidden = !snap.allowPause || snap.status === 'waiting' || snap.status === 'break';
   pauseBtn.disabled = !snap.canPause;
@@ -376,24 +399,41 @@ async function startSelectedChallenge() {
 
   document.body.classList.add('challenge-mode');
   $('#challengeHud').hidden = false;
+  layoutChallengeHud();
   renderChallengeHud();
   clearInterval(challengeTimer);
   challengeTimer = setInterval(tickChallenge, 250);
   editor.commands.focus();
-  setTimeout(() => { updateTwPad(); if (settings.typewriter) recenterNow(); }, 0);
+  setTimeout(() => { layoutChallengeHud(); updateTwPad(); if (settings.typewriter) recenterNow(); }, 0);
 }
 
 function teardownChallengeShell() {
   clearInterval(challengeTimer);
   challengeTimer = null;
   challengeSession = null;
-  document.body.classList.remove('challenge-mode');
+  document.body.classList.remove('challenge-mode', 'ch-top');
   const hud = $('#challengeHud');
   if (hud) {
     hud.hidden = true;
     hud.classList.remove('is-waiting', 'is-paused', 'is-break', 'idle-warn', 'idle-danger');
   }
   document.body.classList.toggle('focus-mode', !!challengePrevFocus);
+}
+
+async function confirmAbortChallengeIfActive() {
+  if (!challengeSession || challengeFinishing) return true;
+  if (challengeSession.status === 'waiting') {
+    exitChallengeQuiet();
+    return true;
+  }
+  const ok = await askConfirm(
+    t('Прервать вызов и выйти? Написанный текст и слова дня сохранятся.'),
+    t('Выйти'),
+    t('Выйти из вызова?'),
+  );
+  if (!ok) return false;
+  exitChallengeQuiet();
+  return true;
 }
 
 function exitChallengeQuiet() {
@@ -573,4 +613,8 @@ function wireStreakChallenge() {
 
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tickChallenge(); });
   window.addEventListener('focus', tickChallenge);
+  window.addEventListener('resize', layoutChallengeHud);
+  if (typeof ResizeObserver === 'function' && $('#paper')) {
+    new ResizeObserver(layoutChallengeHud).observe($('#paper'));
+  }
 }

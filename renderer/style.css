@@ -1806,34 +1806,30 @@ body.challenge-mode #status { bottom: 12px; }
 #challengeHud.is-paused .ch-timer { color: var(--muted); }
 #challengeHud.is-break .ch-phase { color: #3fa66a; }
 
-@media (min-width: 1060px) {
-  body:not(.mob).challenge-mode #challengeHud .ch-rail {
-    position: fixed; top: 50%; transform: translateY(-50%); width: 168px;
-  }
-  body:not(.mob).challenge-mode #chRailLeft { left: 22px; }
-  body:not(.mob).challenge-mode #chRailRight { right: 22px; }
-  body:not(.mob).challenge-mode.typing #challengeHud .ch-rail:not(:hover) { opacity: .68; }
+body.challenge-mode:not(.ch-top) #challengeHud .ch-rail {
+  position: fixed; top: 50%; transform: translateY(-50%); width: 168px;
 }
+body.challenge-mode:not(.ch-top) #chRailLeft { left: 22px; }
+body.challenge-mode:not(.ch-top) #chRailRight { right: 22px; }
+body.challenge-mode:not(.ch-top).typing #challengeHud .ch-rail:not(:hover) { opacity: .68; }
 
-@media (max-width: 1059px) {
-  body.challenge-mode #challengeHud {
-    position: fixed; top: 0; left: 0; right: 0;
-    padding: 8px 12px;
-    background: color-mix(in srgb, var(--bg) 94%, transparent);
-    border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  }
-  body.challenge-mode #challengeHud .ch-rail {
-    background: none; border: none; box-shadow: none; padding: 0; border-radius: 0;
-    flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap;
-  }
-  body.challenge-mode #chRailRight { margin-left: auto; }
-  body.challenge-mode .ch-timer { font-size: 18px; }
-  body.challenge-mode .ch-metric { font-size: 14px; }
-  body.challenge-mode .ch-prog { width: 64px; }
-  body.challenge-mode .ch-wait { display: none; }
-  body.challenge-mode #paper-area { top: 54px; }
+body.challenge-mode.ch-top #challengeHud {
+  position: fixed; top: 0; left: 0; right: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
+body.challenge-mode.ch-top #challengeHud .ch-rail {
+  background: none; border: none; box-shadow: none; padding: 0; border-radius: 0;
+  flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+body.challenge-mode.ch-top #chRailRight { margin-left: auto; }
+body.challenge-mode.ch-top .ch-timer { font-size: 18px; }
+body.challenge-mode.ch-top .ch-metric { font-size: 14px; }
+body.challenge-mode.ch-top .ch-prog { width: 64px; }
+body.challenge-mode.ch-top .ch-wait { display: none; }
+body.challenge-mode.ch-top #paper-area { top: 54px; }
 
 @media (prefers-reduced-motion: reduce) {
   .bar-streak.hit, .st-bar i, .ch-prog i { animation: none; transition: none; }

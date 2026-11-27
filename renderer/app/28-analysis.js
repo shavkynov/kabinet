@@ -603,7 +603,7 @@ function init() {
     e.preventDefault();
     showMenu(e.clientX, e.clientY, [{ label: 'Переименовать проект…', onClick: askRenameProject }]);
   });
-  if (api.onRenameProject) api.onRenameProject(() => askRenameProject());
+  if (api.onRenameProject) api.onRenameProject(() => { if (!(typeof isChallengeActive === 'function' && isChallengeActive())) askRenameProject(); });
   api.onToggleSidebar(() => { if (project) toggleSidebar(); });
   api.onNewProject(() => { if (project) leaveProject(); else showStart(); }); // «Новый проект» ведёт на стартовую страницу: там выбор «Роман» или «Рассказы»
   api.onOpenProject(openProjectFromDialog);
@@ -617,17 +617,17 @@ function init() {
   });
   api.onToggleMarks(() => { settings.marks = !settings.marks; applySettings(); saveSettings(); });
   api.onToggleFocus(() => toggleFocusMode());
-  api.onOpenSettings(() => { if (project) toggleSettings(); });
+  api.onOpenSettings(() => { if (project && !(typeof isChallengeActive === 'function' && isChallengeActive())) toggleSettings(); });
   if (api.onSaveNow) api.onSaveNow(() => { if (project) saveNow(); });
   if (api.onOpenBoard) api.onOpenBoard(() => { if (project) openBoard(); });
   if (api.onOpenStyle) api.onOpenStyle(() => { if (project) openPanel('style'); });
   if (api.onOpenChallenge) api.onOpenChallenge(() => { if (project) openChallengeDialog(); });
-  if (api.onCheckUpdates) api.onCheckUpdates(() => openUpdateCheck());
+  if (api.onCheckUpdates) api.onCheckUpdates(() => { if (!(typeof isChallengeActive === 'function' && isChallengeActive())) openUpdateCheck(); });
   api.onToggleSound(() => toggleSound());
   api.onToggleAmbient(() => toggleAmbient());
   api.onOpenSearch(openSearch);
-  api.onExport(exportProject);
-  api.onImportFiles(importFiles);
+  api.onExport(() => { if (!(typeof isChallengeActive === 'function' && isChallengeActive())) exportProject(); });
+  api.onImportFiles(() => { if (!(typeof isChallengeActive === 'function' && isChallengeActive())) importFiles(); });
   api.onExternalChange(onExternalChange);
   // Windows и Linux: строку меню можно спрятать, тогда вместо неё в окне кнопка «☰» с тем же меню.
   api.onMenuBar((visible) => { $('#btnMenu').hidden = visible !== false; });
@@ -635,14 +635,14 @@ function init() {
     const r = $('#btnMenu').getBoundingClientRect();
     api.popupMenu(r.left, r.bottom).catch((err) => showError(err.message));
   });
-  if (api.onOpenFeedback) api.onOpenFeedback(() => { closePanels(); openFeedback(); });
-  api.onOpenTemplates(() => { if (project) { closePanels(); openTemplates('character'); } });
+  if (api.onOpenFeedback) api.onOpenFeedback(() => { if (typeof isChallengeActive === 'function' && isChallengeActive()) return; closePanels(); openFeedback(); });
+  api.onOpenTemplates(() => { if (project && !(typeof isChallengeActive === 'function' && isChallengeActive())) { closePanels(); openTemplates('character'); } });
   api.onBackupNow(() => { if (project) backupNow(); });
   api.onOpenBackups(() => {
     if (project) api.openBackupFolder().catch((err) => showError(err.message));
   });
   api.onSetLang((l) => switchLang(l));
-  api.onOpenCheck(() => { if (project) { setCheckView('check'); openPanel('check'); } });
+  api.onOpenCheck(() => { if (project && !(typeof isChallengeActive === 'function' && isChallengeActive())) { setCheckView('check'); openPanel('check'); } });
   api.onToggleSpell(() => {
     settings.spellOn = !settings.spellOn;
     applySettings();
