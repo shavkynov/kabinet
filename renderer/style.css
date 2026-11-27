@@ -818,7 +818,7 @@ body.focus-mode #status { bottom: 12px; }
 .bar-info {
   flex: 1 1 0; min-width: 0; overflow: hidden; container-type: inline-size;
 }
-.bar-info > span { flex: none; }
+.bar-info > span, .bar-info > button { flex: none; }
 .bar-info.has-sel #barRead, .bar-info.has-sel #barToday, .bar-info.has-sel #barTotal { display: none; }
 .bar-btns { flex: none; }
 @container (max-width: 640px) { #barTotal { display: none; } }
@@ -1490,7 +1490,7 @@ body.typing #fmtBar #fmtGroup { pointer-events: none; }
 body:not(.mob) #toolbar {
   display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; column-gap: 14px;
 }
-body:not(.mob) #toolbar .bar-info { grid-column: 1; grid-row: 1; justify-self: start; max-width: 100%; }
+body:not(.mob) #toolbar .bar-info { grid-column: 1; grid-row: 1; justify-self: stretch; width: 100%; max-width: 100%; container-type: normal; }
 body:not(.mob) #barCenter { grid-column: 2; grid-row: 1; justify-self: center; }
 body:not(.mob) #toolbar .bar-btns { grid-column: 3; grid-row: 1; justify-self: end; max-width: 100%; overflow: hidden; }
 /* счётчик стоит строго по центру, поэтому правой группе нужна ровно половина панели: лишние кнопки уходят раньше */
@@ -1677,18 +1677,29 @@ body.para-focus #editor .ProseMirror > *:hover { opacity: 1; }
 }
 
 /* ---------- значок серии дней и всплывающее окно (#barStreak, #streakPop) ---------- */
-.bar-streak {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: none; border: none; color: var(--muted);
+#toolbar #barStreak {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  color: var(--text);
   font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
-  padding: 2px 6px; margin: -2px 0; border-radius: 6px; cursor: pointer;
-  transition: background-color .14s, color .14s;
+  padding: 2px 8px; margin: 0; min-width: 0; border-radius: 6px; cursor: pointer;
+  transition: background-color .14s, color .14s, border-color .14s;
 }
-.bar-streak:hover, .bar-streak.on { background: var(--sel); color: var(--text); }
-.bar-streak.met { color: var(--accent); font-weight: 600; }
-.bar-streak.met .ic { fill: color-mix(in srgb, var(--accent) 28%, transparent); stroke: var(--accent); }
-.bar-streak.hit { animation: stats-hit 1.1s ease-out; }
-.bar-info.has-sel .bar-streak { display: none; }
+#toolbar #barStreak:hover, #toolbar #barStreak.on {
+  background: var(--sel);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--text);
+}
+#toolbar #barStreak.met {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  font-weight: 600;
+}
+#toolbar #barStreak.met .ic { fill: color-mix(in srgb, var(--accent) 28%, transparent); stroke: var(--accent); }
+#toolbar #barStreak.hit { animation: stats-hit 1.1s ease-out; }
+#toolbar .bar-info.has-sel #barStreak { display: none; }
+@container (max-width: 700px) { #toolbar #barStreak .st-lbl { display: none; } }
 
 #streakPop {
   position: fixed; z-index: 32; width: 328px; max-width: calc(100vw - 16px);

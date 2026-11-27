@@ -102,7 +102,7 @@ export function showMenu(x, y, entries) {
   menu.style.top = `${top}px`;
 
   const onDown = (ev) => { if (!menu.contains(ev.target)) closeMenu(); };
-  const onKey = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); closeMenu(); } };
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.stopImmediatePropagation(); closeMenu(); } };
   const onOther = () => closeMenu();
   // подписываемся чуть позже, чтобы не поймать то же самое нажатие, которое открыло меню
   const timer = setTimeout(() => {

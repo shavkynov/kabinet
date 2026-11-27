@@ -256,3 +256,27 @@ test('TypeSounds и Ambient восстанавливаются после про
     if (prev.CustomEvent === undefined) delete globalThis.CustomEvent; else globalThis.CustomEvent = prev.CustomEvent;
   }
 });
+
+test('Глобальный Escape в 25-sound.js не отсекается e.defaultPrevented (ProseMirror)', () => {
+  const soundSrc = fs.readFileSync(path.join(ROOT, 'renderer', 'app', '25-sound.js'), 'utf8');
+  const m = /document\.addEventListener\('keydown',\s*\(e\)\s*=>\s*\{[\s\S]*?toggleFocusMode\(false\);\s*\}\s*\}\);/.exec(soundSrc);
+  assert.ok(m, 'обработчик Escape в 25-sound.js должен существовать');
+  const block = m[0].replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(block, /e\.defaultPrevented/, 'ProseMirror всегда ставит defaultPrevented на Escape');
+  assert.match(block, /dialog\[open\]/);
+  assert.match(block, /e\.isComposing/);
+  assert.match(block, /isChallengeActive\(\)/);
+  assert.match(block, /#streakPop/);
+  assert.match(block, /#cmtPop/);
+  assert.match(block, /focus-mode/);
+});
+
+test('Десктопный #toolbar .bar-info не схлопывает #barStreak до 0px', () => {
+  const css = fs.readFileSync(path.join(ROOT, 'renderer', 'style.css'), 'utf8');
+  assert.match(
+    css,
+    /body:not\(\.mob\) #toolbar \.bar-info\s*\{[^}]*justify-self:\s*stretch[^}]*container-type:\s*normal/,
+  );
+  assert.match(css, /#toolbar #barStreak\s*\{/);
+  assert.match(css, /#toolbar #barStreak\.met\s*\{/);
+});

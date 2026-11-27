@@ -500,6 +500,79 @@ function fakeTauri() {
     ok(await page.evaluate(() => window.__calls.some(([n, a]) => n === 'project:rename' && a[0] === 'Новое имя')), 'переименование: вызван project:rename');
   }
   await page.evaluate(() => { window.__styleDelay = 0; });
+
+  // стрики и режим вызова: кнопка в нижней панели должна иметь реальную ширину и не пропадать
+  const streakBtn = page.locator('#barStreak');
+  const streakBox = await streakBtn.boundingBox();
+  ok(await streakBtn.isVisible() && !!streakBox && streakBox.width >= 24 && streakBox.height >= 16,
+    `стрик: значок #barStreak виден в нижней панели (${streakBox ? `${Math.round(streakBox.width)}x${Math.round(streakBox.height)}` : 'нет box'})`);
+  await streakBtn.click();
+  await page.waitForSelector('#streakPop', { state: 'visible', timeout: 3000 }).catch(() => {});
+  const streakPopBox = await page.locator('#streakPop').boundingBox();
+  ok(await page.locator('#streakPop').isVisible() && !!streakPopBox && streakPopBox.width > 150 && await page.locator('#btnOpenChallenge').isVisible(),
+    'стрик: окно #streakPop и кнопка «Режим вызова…» видны');
+  await page.locator('#btnOpenChallenge').click();
+  await page.waitForSelector('#challengeDialog[open]', { timeout: 3000 }).catch(() => {});
+  ok(await page.evaluate(() => !!document.querySelector('#challengeDialog[open]')), 'вызов: диалог выбора открылся');
+  await page.locator('#chStartBtn').click();
+  await page.waitForSelector('body.challenge-mode #challengeHud', { state: 'visible', timeout: 3000 }).catch(() => {});
+  const hudGeom = await page.evaluate(() => {
+    const l = document.querySelector('#chRailLeft')?.getBoundingClientRect();
+    const r = document.querySelector('#chRailRight')?.getBoundingClientRect();
+    const p = document.querySelector('#paper')?.getBoundingClientRect();
+    return { active: document.body.classList.contains('challenge-mode'), l, r, p };
+  });
+  ok(hudGeom.active && !!hudGeom.l && !!hudGeom.r && !!hudGeom.p && hudGeom.l.right <= hudGeom.p.left && hudGeom.p.right <= hudGeom.r.left,
+    'вызов: режим включился и боковые рельсы не перекрывают лист');
+  await page.locator('.ProseMirror').first().click();
+  await page.keyboard.type('Привет ');
+  await page.waitForTimeout(200);
+  const afterType = await page.evaluate(() => ({
+    waitHidden: !!document.querySelector('#chWaitHint')?.hidden,
+    streakRaw: localStorage.getItem('kabinet.streak') || '',
+  }));
+  ok(afterType.waitHidden && afterType.streakRaw.includes('"words":1'),
+    'вызов и стрик: после первого слова таймер пошёл, слово засчитано в стрик');
+  await page.locator('#chExitBtn').click();
+  await page.waitForSelector('#confirmDialog[open]', { timeout: 3000 }).catch(() => {});
+  await page.locator('#confirmDialogOk').click();
+  await page.waitForSelector('#challengeSummaryDialog[open]', { timeout: 3000 }).catch(() => {});
+  ok(await page.evaluate(() => !!document.querySelector('#challengeSummaryDialog[open]')), 'вызов: показана итоговая сводка');
+  await page.locator('#chSumDone').click();
+  await page.waitForTimeout(150);
+  ok(await page.evaluate(() => !document.body.classList.contains('challenge-mode')) && await streakBtn.isVisible(),
+    'вызов: после выхода вернулся обычный интерфейс');
+
+  // «Только лист»: фокус внутри ProseMirror и выход по Escape (ProseMirror ставит defaultPrevented на Escape)
+  await page.locator('#btnFocus').click();
+  await page.waitForTimeout(150);
+  ok(await page.evaluate(() => document.body.classList.contains('focus-mode')), 'фокус: режим «Только лист» включился');
+  await page.locator('.ProseMirror').first().click();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  ok(await page.evaluate(() => !document.body.classList.contains('focus-mode')) && await streakBtn.isVisible(),
+    'фокус: клавиша Esc с фокусом в редакторе возвращает обычный режим');
+
+  // Escape закрывает открытый диалог и отменяет ожидающий вызов при фокусе в редакторе
+  await streakBtn.click();
+  await page.waitForSelector('#streakPop', { state: 'visible', timeout: 3000 }).catch(() => {});
+  await page.locator('#btnOpenChallenge').click();
+  await page.waitForSelector('#challengeDialog[open]', { timeout: 3000 }).catch(() => {});
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  ok(await page.evaluate(() => !document.querySelector('#challengeDialog[open]')), 'вызов: диалог закрывается по Esc');
+  await streakBtn.click();
+  await page.waitForSelector('#streakPop', { state: 'visible', timeout: 3000 }).catch(() => {});
+  await page.locator('#btnOpenChallenge').click();
+  await page.waitForSelector('#challengeDialog[open]', { timeout: 3000 }).catch(() => {});
+  await page.locator('#chStartBtn').click();
+  await page.waitForSelector('body.challenge-mode #challengeHud', { state: 'visible', timeout: 3000 }).catch(() => {});
+  await page.locator('.ProseMirror').first().click();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  ok(await page.evaluate(() => !document.body.classList.contains('challenge-mode')) && await streakBtn.isVisible(),
+    'вызов: Esc с фокусом в редакторе закрывает ожидающий вызов');
+
   await page.locator('.ProseMirror').first().click();
   await page.keyboard.press((process.platform === 'darwin' ? 'Meta' : 'Control') + '+A');
   await page.keyboard.press('Backspace');

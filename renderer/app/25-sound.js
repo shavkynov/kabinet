@@ -194,7 +194,8 @@ function wireChrome() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
+    // ProseMirror всегда вызывает preventDefault() на Escape (captureKeyDown, keyCode 27), поэтому e.defaultPrevented здесь проверять нельзя.
+    if (e.key !== 'Escape' || e.isComposing || document.querySelector('dialog[open]')) return;
     if (typeof isChallengeActive === 'function' && isChallengeActive()) {
       requestChallengeExit();
     } else if (!$('#sheetMenu').hidden) {
@@ -209,6 +210,8 @@ function wireChrome() {
       closeSearch(true);
     } else if (!$('#goalPop').hidden) {
       closeGoalPop();
+    } else if ($('#cmtPop') && !$('#cmtPop').hidden) {
+      hideCommentPop();
     } else if (anyPanelOpen()) {
       closePanels();
     } else if (document.body.classList.contains('focus-mode')) {

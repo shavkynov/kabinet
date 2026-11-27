@@ -427,7 +427,7 @@ function wireAnalysisPop() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !pop.hidden) {
-      e.stopPropagation();
+      e.stopImmediatePropagation();
       hideAnalysisPop();
     }
   }, true);

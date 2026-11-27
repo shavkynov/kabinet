@@ -60,6 +60,8 @@ body.mob .ch .num { opacity: .7; }
 /* ---------- телефон: лист и две панели ---------- */
 body.mob.m-compact #chromeRight .chrome-btn:not(#btnMenu):not(#btnNotes):not(#btnSettings) { display: none; }
 body.mob.m-compact #toolbar { padding: 4px 12px; border-top: none; justify-content: center !important; }
+body.mob.m-compact #toolbar .bar-info { flex: none; container-type: normal; overflow: visible; }
+body.mob.m-compact #toolbar #barStreak .st-lbl { display: none; }
 body.mob.m-compact #toolbar .bar-btns,
 body.mob.m-compact #pane2,
 body.mob.m-compact #barRead,

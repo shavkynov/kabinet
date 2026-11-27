@@ -158,6 +158,7 @@ export function createCardView({ root, onChange, onTitle, onAddField, onKey, onP
       e.preventDefault();
       titleInput.blur();
     } else if (e.key === 'Escape') {
+      e.stopPropagation();
       titleInput.value = savedTitle;
       titleInput.blur();
     }

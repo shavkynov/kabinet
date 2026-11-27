@@ -141,6 +141,7 @@ module.exports = {
   'Вызов завершён': 'Challenge finished',
   'Новый вызов': 'New challenge',
   'Серия дней и режим вызова': 'Daily streak and challenge mode',
+  'Серия': 'Streak',
   'Быстрая цель': 'Quick goal',
   'Своя цель слов в день': 'Custom daily word goal',
   'Длительность вызова': 'Challenge duration',
